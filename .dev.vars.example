@@ -1,0 +1,10 @@
+AUTH_COOKIE_SECRET=your-strong-random-secret
+GOOGLE_CLIENT_ID=your-google-oauth-client-id
+GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
+GITHUB_CLIENT_ID=your-github-oauth-client-id
+GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
+BIGQUERY_PROJECT_ID=replace-with-gcp-project-id
+BIGQUERY_CLIENT_EMAIL=replace-with-service-account-email
+BIGQUERY_PRIVATE_KEY=replace-with-pkcs8-service-account-private-key
+BIGQUERY_LOCATION=US
+BIGQUERY_MAX_BYTES_BILLED=10737418240

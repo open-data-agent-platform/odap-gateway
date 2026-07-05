@@ -1,0 +1,45 @@
+{
+  "name": "odap-gateway",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Reference implementation of the ODAP Five Musts: a governed gateway for AI agents querying enterprise data.",
+  "scripts": {
+    "dev": "node node_modules/next/dist/bin/next dev",
+    "build": "node node_modules/next/dist/bin/next build",
+    "start": "node node_modules/next/dist/bin/next start",
+    "lint": "node node_modules/eslint/bin/eslint.js .",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "test": "node node_modules/vitest/vitest.mjs run --environment node",
+    "ci": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "worker:dry-run": "npx wrangler deploy --config wrangler.example.jsonc --dry-run",
+    "worker:deploy": "npx wrangler deploy --config wrangler.example.jsonc --keep-vars"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.468.0",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^15.0.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.9",
+    "wrangler": "^4.106.0"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.10"
+    }
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  }
+}
