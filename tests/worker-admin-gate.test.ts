@@ -11,7 +11,7 @@ const secret = "test-secret-that-is-long-enough-for-hmac";
 describe("worker admin gate", () => {
   it("keeps public health response free of deployment internals", async () => {
     const response = await worker.fetch(
-      new Request("https://odap-gateway.example/api/health"),
+      new Request("https://odap-gateway.local/api/health"),
       {
         AUTH_COOKIE_SECRET: secret,
         ASSETS: {
@@ -32,7 +32,7 @@ describe("worker admin gate", () => {
 
   it("requires admin auth for detailed health metadata", async () => {
     const response = await worker.fetch(
-      new Request("https://odap-gateway.example/api/admin/health"),
+      new Request("https://odap-gateway.local/api/admin/health"),
       {
         AUTH_COOKIE_SECRET: secret,
         ASSETS: {
@@ -51,7 +51,7 @@ describe("worker admin gate", () => {
     "redirects unauthenticated admin asset requests for %s",
     async (pathname) => {
       const response = await worker.fetch(
-        new Request(`https://odap-gateway.example${pathname}`),
+        new Request(`https://odap-gateway.local${pathname}`),
         {
           AUTH_COOKIE_SECRET: secret,
           ASSETS: {
@@ -81,14 +81,14 @@ describe("worker admin gate", () => {
       expiresAt: Date.now() + 60_000
     });
     const response = await worker.fetch(
-      new Request("https://odap-gateway.example/api/admin/schema-import", {
+      new Request("https://odap-gateway.local/api/admin/schema-import", {
         method: "POST",
         headers: {
           Cookie: cookie
         },
         body: JSON.stringify({
-          workspace: "analytics",
-          dataset: "analytics"
+          workspace: "demo",
+          dataset: "demo_dataset"
         })
       }),
       {

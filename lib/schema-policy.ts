@@ -503,7 +503,7 @@ function stripExtractExpressions(sql: string) {
 }
 
 function normalizeWorkspace(value: string) {
-  return value.trim().toLowerCase() || "analytics";
+  return value.trim().toLowerCase() || "demo";
 }
 
 function normalizeTableName(value: string) {

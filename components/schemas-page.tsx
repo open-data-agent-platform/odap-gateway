@@ -14,7 +14,7 @@ import {
   TableProperties
 } from "lucide-react";
 import type { AdminState, BigQueryConfigState } from "@/lib/admin-store";
-import { schemaTables } from "@/lib/content";
+import { schemaTables } from "@/lib/demo-data";
 import { cn } from "@/lib/utils";
 
 type SchemaCatalogTable = AdminState["schemaCatalog"][number];
@@ -69,7 +69,7 @@ type SchemaImportResponse = {
   loginUrl?: string;
 };
 
-const piiPattern = /\b(email|phone|address|ssn|ip|user_id|customer_id|session_id)\b/i;
+const piiPattern = /\b(email|phone|address|ssn|ip|actor_ref|customer_id|session_ref)\b/i;
 const seedCatalog = createSeedCatalog();
 
 export function SchemasPage() {
@@ -81,8 +81,8 @@ export function SchemasPage() {
     seedCatalog[0]?.id ?? null
   );
   const [importDraft, setImportDraft] = useState<ImportDraft>({
-    workspace: "analytics",
-    dataset: "analytics",
+    workspace: "demo",
+    dataset: "demo_dataset",
     projectId: "",
     tablePrefix: "",
     tableLimit: "50"
@@ -438,7 +438,7 @@ function SchemaImportPanel({
               })
             }
             className="focus-ring h-10 rounded-lg border border-white/[0.08] bg-black/[0.22] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600"
-            placeholder="analytics"
+            placeholder="demo"
           />
         </label>
         <label className="grid gap-1.5 text-xs font-semibold text-slate-400">
@@ -451,7 +451,7 @@ function SchemaImportPanel({
               })
             }
             className="focus-ring h-10 rounded-lg border border-white/[0.08] bg-black/[0.22] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600"
-            placeholder="analytics"
+            placeholder="demo"
           />
         </label>
         <label className="grid gap-1.5 text-xs font-semibold text-slate-400">
@@ -698,7 +698,7 @@ function createSeedCatalog(): SchemaCatalogTable[] {
   const now = "2026-06-22T00:00:00.000Z";
 
   return schemaTables.map((table) => {
-    const workspace = table.name.split(".")[0] ?? "analytics";
+    const workspace = table.name.split(".")[0] ?? "demo";
 
     return {
       id: `seed-${table.name.replace(/\W+/g, "-")}`,

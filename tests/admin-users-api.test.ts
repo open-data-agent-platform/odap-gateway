@@ -11,7 +11,7 @@ const secret = "test-secret-that-is-long-enough-for-hmac";
 describe("admin users API", () => {
   it("requires an admin session for user role updates", async () => {
     const response = await onRequestPatch({
-      request: new Request("https://odap-gateway.example/api/admin/users/google%3A123", {
+      request: new Request("https://odap-gateway.local/api/admin/users/google%3A123", {
         method: "PATCH",
         body: JSON.stringify({
           role: "admin"
@@ -79,7 +79,7 @@ async function createAdminRequest(id: string, body: Record<string, unknown>) {
   });
 
   return new Request(
-    `https://odap-gateway.example/api/admin/users/${encodeURIComponent(id)}`,
+    `https://odap-gateway.local/api/admin/users/${encodeURIComponent(id)}`,
     {
       method: "PATCH",
       headers: {

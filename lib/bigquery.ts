@@ -1,4 +1,4 @@
-import { validateGoogleSql, type SafetyCheck } from "./copilot-engine";
+import { validateBigQuerySql, type SafetyCheck } from "./copilot-engine";
 import {
   estimateDryRun,
   getGateLabel,
@@ -150,7 +150,7 @@ export async function runBigQueryDryRun(
 
     const job = (await response.json()) as BigQueryJobResponse;
     const scannedBytes = getProcessedBytes(job);
-    const checks = withLiveCostCheck(validateGoogleSql(sql), scannedBytes, env);
+    const checks = withLiveCostCheck(validateBigQuerySql(sql), scannedBytes, env);
     const status = getDryRunStatus(checks);
 
     return {
@@ -271,7 +271,7 @@ function createFailedLiveDryRun(
   error: { code: string; message: string }
 ): BigQueryDryRunResult {
   const preview = estimateDryRun(sql);
-  const checks = validateGoogleSql(sql);
+  const checks = validateBigQuerySql(sql);
 
   return {
     ...preview,

@@ -1,27 +1,16 @@
 # Contributing
 
-ODAP Gateway accepts contributions that improve governed agent data access:
-policy checks, schema controls, auditability, dry-run cost controls, and
-deployment hardening.
+Thanks for helping improve ODAP Gateway.
 
-## Process
+Please keep contributions focused on governed agent access to enterprise data:
+schema controls, dry-run cost checks, approval flows, auditability, deployment
+hardening, and clause mapping accuracy.
 
-1. Open an issue describing the change.
-2. Keep changes scoped and testable.
-3. Add or update tests for behavior changes.
-4. Run:
+Before opening a PR:
 
-```bash
-npm run lint
-npm run typecheck
-npm run test
-npm run build
-```
-
-## Boundaries
-
-Do not submit production secrets, customer data, production D1 IDs, OAuth client
-IDs, OAuth client secrets, private keys, or administrator email allowlists.
-
-Billing, checkout, paid-plan management, hosted commercial services, and product
-website content are outside this repository.
+- Run `npm run typecheck` and `npm run test`.
+- Use demo data only in screenshots, fixtures, and recordings.
+- Do not commit `.env`, `.dev.vars`, credentials, private project IDs, or real
+  customer/user data.
+- If you change behavior that maps to the ODAP Rubric, update
+  `ODAP_CLAUSE_MAPPING.md`.

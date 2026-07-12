@@ -11,11 +11,11 @@ const secret = "test-secret-that-is-long-enough-for-hmac";
 describe("admin schema import API", () => {
   it("requires an admin session", async () => {
     const response = await onRequestPost({
-      request: new Request("https://odap-gateway.example/api/admin/schema-import", {
+      request: new Request("https://odap-gateway.local/api/admin/schema-import", {
         method: "POST",
         body: JSON.stringify({
-          workspace: "analytics",
-          dataset: "analytics"
+          workspace: "demo",
+          dataset: "demo_dataset"
         })
       }),
       env: {
@@ -30,8 +30,8 @@ describe("admin schema import API", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const response = await onRequestPost({
       request: await createAdminRequest({
-        workspace: "analytics",
-        dataset: "analytics"
+        workspace: "demo",
+        dataset: "demo_dataset"
       }),
       env: {
         AUTH_COOKIE_SECRET: secret,
@@ -60,7 +60,7 @@ async function createAdminRequest(body: Record<string, unknown>) {
     expiresAt: Date.now() + 60_000
   });
 
-  return new Request("https://odap-gateway.example/api/admin/schema-import", {
+  return new Request("https://odap-gateway.local/api/admin/schema-import", {
     method: "POST",
     headers: {
       Cookie: cookie

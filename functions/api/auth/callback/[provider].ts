@@ -185,7 +185,7 @@ async function fetchGithubProfile(
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     Accept: "application/vnd.github+json",
-    "User-Agent": "ODAP Gateway"
+    "User-Agent": "odap-gateway"
   };
   const profile = await fetchJson("https://api.github.com/user", { headers });
   const login = getString(profile, "login");
@@ -214,7 +214,7 @@ async function fetchGithubPrimaryEmail(accessToken: string) {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       Accept: "application/vnd.github+json",
-      "User-Agent": "ODAP Gateway"
+      "User-Agent": "odap-gateway"
     }
   });
 

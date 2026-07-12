@@ -14,7 +14,7 @@ const secret = "test-secret-that-is-long-enough-for-hmac";
 describe("admin run review API", () => {
   it("requires an admin session for updates", async () => {
     const response = await onRequestPatch({
-      request: new Request("https://odap-gateway.example/api/admin/run-reviews/run-1", {
+      request: new Request("https://odap-gateway.local/api/admin/run-reviews/run-1", {
         method: "PATCH",
         body: JSON.stringify({ status: "approved" })
       }),
@@ -31,7 +31,7 @@ describe("admin run review API", () => {
 
   it("requires an admin session for detail reads", async () => {
     const response = await onRequestGet({
-      request: new Request("https://odap-gateway.example/api/admin/run-reviews/run-1"),
+      request: new Request("https://odap-gateway.local/api/admin/run-reviews/run-1"),
       env: {
         AUTH_COOKIE_SECRET: secret
       },
@@ -108,7 +108,7 @@ async function createAdminRequest(
     expiresAt: Date.now() + 60_000
   });
 
-  return new Request("https://odap-gateway.example/api/admin/run-reviews/run-1", {
+  return new Request("https://odap-gateway.local/api/admin/run-reviews/run-1", {
     method,
     headers: {
       Cookie: cookie

@@ -22,7 +22,7 @@ describe("phase 2 release controls", () => {
   });
 
   it("blocks destructive SQL before execution", () => {
-    const preview = estimateDryRun("DROP TABLE `analytics.orders`;");
+    const preview = estimateDryRun("DROP TABLE `demo.orders`;");
 
     expect(preview.status).toBe("blocked");
     expect(preview.scannedBytes).toBe(0);
@@ -30,7 +30,7 @@ describe("phase 2 release controls", () => {
   });
 
   it("requires approval for unbounded read queries", () => {
-    const preview = estimateDryRun("SELECT order_id FROM `analytics.orders`;");
+    const preview = estimateDryRun("SELECT order_id FROM `demo.orders`;");
 
     expect(preview.status).toBe("needs_approval");
     expect(preview.scannedBytes).toBeGreaterThan(1024 * 1024 * 1024);
@@ -38,12 +38,12 @@ describe("phase 2 release controls", () => {
 
   it("approves bounded read queries for canary dry-run", () => {
     const preview = estimateDryRun(
-      "SELECT order_id FROM analytics.orders WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY);"
+      "SELECT order_id FROM demo.orders WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY);"
     );
 
     expect(preview.status).toBe("approved");
     expect(preview.estimatedCostUsd).toBeGreaterThanOrEqual(0);
-    expect(preview.referencedTables).toEqual(["analytics.orders"]);
+    expect(preview.referencedTables).toEqual(["demo.orders"]);
   });
 
   it("exposes the deployment model in health data", () => {

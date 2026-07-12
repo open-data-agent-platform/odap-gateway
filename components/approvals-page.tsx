@@ -103,12 +103,12 @@ export function ApprovalsPage() {
                 <code>{`-- requested by editor@acme.test
 SELECT
   campaign_id,
-  session_id,
-  user_id,
+  session_ref,
+  actor_ref,
   COUNT(*) AS sessions
-FROM \`marketing.sessions\`
+FROM \`demo.events\`
 WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
-GROUP BY campaign_id, session_id, user_id
+GROUP BY campaign_id, session_ref, actor_ref
 ORDER BY sessions DESC;`}</code>
               </pre>
             </section>

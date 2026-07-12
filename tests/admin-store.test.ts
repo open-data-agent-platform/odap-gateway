@@ -24,15 +24,15 @@ describe("phase 3 admin store", () => {
     expect(state.users).toEqual([]);
     expect(state.featureFlags.some((flag) => flag.id === "bigquery-run-gate"))
       .toBe(true);
-    expect(state.schemaCatalog.some((table) => table.name === "analytics.orders"))
+    expect(state.schemaCatalog.some((table) => table.name === "demo.orders"))
       .toBe(true);
   });
 
   it("exposes configured auth state", async () => {
     const state = await getAdminState({
-      AUTH_COOKIE_SECRET: "test-secret",
+      AUTH_COOKIE_SECRET: "test-cookie-signing-value",
       GOOGLE_CLIENT_ID: "google-client",
-      GOOGLE_CLIENT_SECRET: "google-secret",
+      GOOGLE_CLIENT_SECRET: "google-oauth-placeholder",
       ADMIN_EMAILS: "owner@example.com, ops@example.com"
     });
 
@@ -47,9 +47,9 @@ describe("phase 3 admin store", () => {
 
   it("exposes live BigQuery dry-run configuration when credentials exist", async () => {
     const state = await getAdminState({
-      BIGQUERY_PROJECT_ID: "analytics-prod",
+      BIGQUERY_PROJECT_ID: "demo-project",
       BIGQUERY_CLIENT_EMAIL: "service@example.iam.gserviceaccount.com",
-      BIGQUERY_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----",
+      BIGQUERY_PRIVATE_KEY: "test-pkcs8-placeholder",
       BIGQUERY_LOCATION: "US",
       BIGQUERY_MAX_BYTES_BILLED: "1048576"
     });
@@ -57,7 +57,7 @@ describe("phase 3 admin store", () => {
     expect(state.bigQuery).toMatchObject({
       configured: true,
       mode: "live",
-      projectId: "analytics-prod",
+      projectId: "demo-project",
       location: "US",
       maxBytesBilled: 1048576
     });
@@ -100,10 +100,10 @@ describe("phase 3 admin store", () => {
     const result = await recordQueryDryRun(
       {},
       {
-        workspace: "analytics",
+        workspace: "demo",
         queryType: "Revenue rollup",
-        sql: "SELECT order_id FROM `analytics.orders`;",
-        preview: estimateDryRun("SELECT order_id FROM `analytics.orders`;")
+        sql: "SELECT order_id FROM `demo.orders`;",
+        preview: estimateDryRun("SELECT order_id FROM `demo.orders`;")
       }
     );
 
@@ -129,7 +129,7 @@ describe("phase 3 admin store", () => {
   it("rejects schema policy mutations without D1 persistence", async () => {
     const result = await updateSchemaFieldPolicy(
       {},
-      "table-analytics-orders-customer-id",
+      "table-demo-orders-customer-id",
       {
         queryable: true
       },

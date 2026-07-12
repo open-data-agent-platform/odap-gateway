@@ -1,4 +1,4 @@
-import { schemaTables } from "./content";
+import { schemaTables } from "./demo-data";
 
 export type CopilotResult = {
   sql?: string;
@@ -45,7 +45,7 @@ const ignoredIdentifiers = new Set([
 const piiFieldPattern =
   /(^|_)(email|phone|ssn|social_security|address|ip_address|birthdate|dob|first_name|last_name|full_name)($|_)/i;
 
-export function generateGoogleSql(question: string): CopilotResult {
+export function generateBigQuerySql(question: string): CopilotResult {
   const normalized = question.toLowerCase();
 
   if (normalized.includes("customer") || normalized.includes("retention")) {
@@ -54,7 +54,7 @@ export function generateGoogleSql(question: string): CopilotResult {
   DATE_TRUNC(created_at, MONTH) AS cohort_month,
   plan,
   COUNT(DISTINCT customer_id) AS customers
-FROM \`analytics.customers\`
+FROM \`demo.customers\`
 WHERE created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)
 GROUP BY cohort_month, plan
 ORDER BY cohort_month DESC, customers DESC;`,
@@ -72,8 +72,8 @@ ORDER BY cohort_month DESC, customers DESC;`,
   DATE(event_time) AS event_date,
   event_name,
   COUNT(*) AS events,
-  COUNT(DISTINCT session_id) AS sessions
-FROM \`analytics.events\`
+  COUNT(DISTINCT session_ref) AS sessions
+FROM \`demo.events\`
 WHERE event_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
 GROUP BY event_date, event_name
 ORDER BY event_date DESC, events DESC;`,
@@ -87,7 +87,7 @@ ORDER BY event_date DESC, events DESC;`,
 
   return {
     sql: `SELECT DATE_TRUNC(order_date, WEEK) AS week_start, acquisition_channel, SUM(revenue) AS weekly_revenue,
-COUNT(*) AS order_count FROM \`analytics.orders\` WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 8
+COUNT(*) AS order_count FROM \`demo.orders\` WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 8
 WEEK) AND order_date < CURRENT_DATE() AND status = 'completed' GROUP BY DATE_TRUNC(order_date, WEEK),
 acquisition_channel ORDER BY week_start DESC, weekly_revenue DESC;`,
     notes: [
@@ -98,7 +98,7 @@ acquisition_channel ORDER BY week_start DESC, weekly_revenue DESC;`,
   };
 }
 
-export function explainGoogleSql(sql: string): CopilotResult {
+export function explainBigQuerySql(sql: string): CopilotResult {
   const tableMatch = sql.match(/FROM\s+`?([\w.-]+)`?/i);
   const tableName = tableMatch?.[1] ?? "the selected table";
 
@@ -113,7 +113,7 @@ export function explainGoogleSql(sql: string): CopilotResult {
   };
 }
 
-export function optimizeGoogleSql(sql: string): CopilotResult {
+export function optimizeBigQuerySql(sql: string): CopilotResult {
   const hasSelectStar = /SELECT\s+\*/i.test(sql);
   const hasWhere = /\bWHERE\b/i.test(sql);
   const optimizedSql = sql
@@ -136,7 +136,7 @@ export function optimizeGoogleSql(sql: string): CopilotResult {
   };
 }
 
-export function validateGoogleSql(sql: string): SafetyCheck[] {
+export function validateBigQuerySql(sql: string): SafetyCheck[] {
   const upperSql = sql.toUpperCase();
   const blocked = blockedKeywords.filter((keyword) =>
     new RegExp(`\\b${keyword}\\b`).test(upperSql)

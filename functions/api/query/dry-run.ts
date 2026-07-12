@@ -144,11 +144,11 @@ function inferWorkspace(sql: string) {
   );
   const tableName = match?.[1];
   if (!tableName) {
-    return "analytics";
+    return "demo";
   }
 
   const parts = tableName.split(".");
-  return (parts.length > 1 ? parts.at(-2) : parts[0])?.toLowerCase() ?? "analytics";
+  return (parts.length > 1 ? parts.at(-2) : parts[0])?.toLowerCase() ?? "demo";
 }
 
 function stripExtractExpressions(sql: string) {

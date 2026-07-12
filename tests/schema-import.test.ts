@@ -8,13 +8,13 @@ describe("schema import mapping", () => {
   it("builds a bounded INFORMATION_SCHEMA query", () => {
     const sql = buildInformationSchemaQuery({
       projectId: "demo-project",
-      dataset: "analytics",
+      dataset: "demo_dataset",
       tablePrefix: "order_",
       tableLimit: 25
     });
 
-    expect(sql).toContain("`demo-project.analytics.INFORMATION_SCHEMA.TABLES`");
-    expect(sql).toContain("`demo-project.analytics.INFORMATION_SCHEMA.COLUMNS`");
+    expect(sql).toContain("`demo-project.demo_dataset.INFORMATION_SCHEMA.TABLES`");
+    expect(sql).toContain("`demo-project.demo_dataset.INFORMATION_SCHEMA.COLUMNS`");
     expect(sql).toContain("STARTS_WITH(table_name, 'order_')");
     expect(sql).toContain("LIMIT 25");
   });
@@ -24,7 +24,7 @@ describe("schema import mapping", () => {
       [
         {
           table_catalog: "demo-project",
-          table_schema: "analytics",
+          table_schema: "demo",
           table_name: "orders",
           table_type: "BASE TABLE",
           column_name: "order_id",
@@ -35,7 +35,7 @@ describe("schema import mapping", () => {
         },
         {
           table_catalog: "demo-project",
-          table_schema: "analytics",
+          table_schema: "demo",
           table_name: "orders",
           table_type: "BASE TABLE",
           column_name: "customer_email",
@@ -45,13 +45,13 @@ describe("schema import mapping", () => {
           policy_tags: "projects/demo/locations/us/taxonomies/1/policyTags/2"
         }
       ],
-      "analytics"
+      "demo"
     );
 
     expect(catalog).toHaveLength(1);
     expect(catalog[0]).toMatchObject({
-      workspace: "analytics",
-      name: "analytics.orders"
+      workspace: "demo",
+      name: "demo.orders"
     });
     expect(catalog[0].fields[0]).toMatchObject({
       name: "order_id",

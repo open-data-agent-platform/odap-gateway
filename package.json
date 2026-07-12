@@ -2,7 +2,7 @@
   "name": "odap-gateway",
   "version": "0.1.0",
   "private": false,
-  "description": "Reference implementation of the ODAP Five Musts: a governed gateway for AI agents querying enterprise data.",
+  "description": "Reference implementation of the ODAP Five Musts: a governed gateway for AI agents querying enterprise data, starting with BigQuery.",
   "scripts": {
     "dev": "node node_modules/next/dist/bin/next dev",
     "build": "node node_modules/next/dist/bin/next build",
@@ -12,7 +12,7 @@
     "test": "node node_modules/vitest/vitest.mjs run --environment node",
     "ci": "npm run lint && npm run typecheck && npm run test && npm run build",
     "worker:dry-run": "npx wrangler deploy --config wrangler.example.jsonc --dry-run",
-    "worker:deploy": "npx wrangler deploy --config wrangler.example.jsonc --keep-vars"
+    "worker:deploy": "npx wrangler deploy --config wrangler.example.jsonc"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -31,15 +31,11 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
-    "vitest": "^4.1.9",
+    "vitest": "^2.1.8",
     "wrangler": "^4.106.0"
-  },
-  "overrides": {
-    "next": {
-      "postcss": "8.5.10"
-    }
   },
   "engines": {
     "node": ">=20.11.0"
-  }
+  },
+  "license": "Apache-2.0"
 }

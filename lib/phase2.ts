@@ -1,4 +1,4 @@
-import { validateGoogleSql, type SafetyCheck } from "./copilot-engine";
+import { validateBigQuerySql, type SafetyCheck } from "./copilot-engine";
 
 export type ReleaseEnvironment = "dev" | "staging" | "canary" | "production";
 export type ReleaseStatus = "healthy" | "watching" | "paused";
@@ -149,7 +149,7 @@ export const phase2FeatureFlags: Phase2FeatureFlag[] = [
 
 export const workspaceAllowlist: WorkspaceAccess[] = [
   {
-    workspace: "analytics",
+    workspace: "demo",
     owner: "Data Team",
     plan: "Team",
     runAccess: "allowlisted"
@@ -171,7 +171,7 @@ export const workspaceAllowlist: WorkspaceAccess[] = [
 export const reviewQueue: ReviewQueueItem[] = [
   {
     id: "run-1027",
-    workspace: "analytics",
+    workspace: "demo",
     queryType: "Revenue rollup",
     status: "approved",
     estimatedCostUsd: 0.02,
@@ -199,7 +199,7 @@ export const reviewQueue: ReviewQueueItem[] = [
 ];
 
 export function estimateDryRun(sql: string): QueryRunPreview {
-  const checks = validateGoogleSql(sql);
+  const checks = validateBigQuerySql(sql);
   const destructiveCheck = checks.find(
     (check) => check.label === "No destructive operations"
   );

@@ -8,7 +8,7 @@ import {
   schemaTables,
   type SchemaField,
   type SchemaTable
-} from "./content";
+} from "./demo-data";
 import type { D1Database } from "./d1";
 import {
   estimateDryRun,
@@ -29,6 +29,7 @@ export type AdminStorageEnv = {
   ODAP_GATEWAY_DB?: D1Database;
   DB?: D1Database;
 };
+
 
 export type AdminRuntimeEnv = AdminStorageEnv &
   BigQueryEnv &
@@ -73,6 +74,7 @@ export type AuthConfigState = {
   cookieSecretConfigured: boolean;
   message: string;
 };
+
 
 export type BigQueryConfigState = {
   configured: boolean;
@@ -273,7 +275,7 @@ type SchemaFieldRow = {
 const fallbackAuditEvents: AuditEvent[] = [
   {
     id: "seed-phase4",
-    actorEmail: "system@odap-gateway.example",
+    actorEmail: "system@odap.local",
     action: "phase4.seed_state",
     target: "admin-console",
     metadata: {
@@ -1040,7 +1042,7 @@ export async function recordQueryDryRun(
     .run();
 
   await recordAuditEvent(env, {
-    actorEmail: actorEmail ?? "anonymous@odap-gateway.example",
+    actorEmail: actorEmail ?? "anonymous@odap.local",
     action: "query.dry_run",
     target: id,
     metadata: {
@@ -1472,7 +1474,7 @@ async function seedAdminDefaults(db: D1Database) {
         .bind(
           item.id,
           item.workspace,
-          "seed@odap-gateway.example",
+          "seed@odap.local",
           sql,
           item.status,
           "simulated",
@@ -1755,7 +1757,7 @@ function mapQueryRunRow(row: QueryRunRow): QueryRunDetail {
 
 function getSeedRunSql(id: string) {
   if (id === "run-1026") {
-    return "SELECT campaign_id, session_id FROM `marketing.sessions`;";
+    return "SELECT campaign_id, session_id FROM `demo.events`;";
   }
 
   if (id === "run-1025") {
@@ -1767,7 +1769,7 @@ function getSeedRunSql(id: string) {
   acquisition_channel,
   SUM(revenue) AS weekly_revenue,
   COUNT(*) AS order_count
-FROM \`analytics.orders\`
+FROM \`demo.orders\`
 WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 8 WEEK)
 GROUP BY week_start, acquisition_channel
 ORDER BY week_start DESC;`;
@@ -1877,7 +1879,7 @@ function createSeedSchemaCatalog(): SchemaCatalogTable[] {
 
 function createSeedSchemaTable(table: SchemaTable): SchemaCatalogTable {
   const id = createSchemaTableId(table.name);
-  const workspace = table.name.split(".")[0] ?? "analytics";
+  const workspace = table.name.split(".")[0] ?? "demo";
   const updatedAt = "2026-06-22T00:00:00.000Z";
 
   return {
@@ -1932,15 +1934,15 @@ function slugify(value: string) {
 }
 
 function getTableDescription(tableName: string) {
-  if (tableName === "analytics.orders") {
+  if (tableName === "demo.orders") {
     return "Order facts for revenue, channel, and status analysis.";
   }
 
-  if (tableName === "analytics.customers") {
+  if (tableName === "demo.customers") {
     return "Customer profile dimensions used for cohort and plan reporting.";
   }
 
-  if (tableName === "analytics.events") {
+  if (tableName === "demo.events") {
     return "Product event stream for funnel, session, and behavior queries.";
   }
 
@@ -1949,9 +1951,9 @@ function getTableDescription(tableName: string) {
 
 function getSeedRowCount(tableName: string) {
   const rowCounts: Record<string, number> = {
-    "analytics.orders": 8420000,
-    "analytics.customers": 1240000,
-    "analytics.events": 178000000
+    "demo.orders": 8420000,
+    "demo.customers": 1240000,
+    "demo.events": 178000000
   };
 
   return rowCounts[tableName] ?? 0;
@@ -2014,7 +2016,7 @@ function createRunId() {
 
 function normalizeWorkspace(value: string) {
   const trimmed = value.trim().toLowerCase();
-  return trimmed || "analytics";
+  return trimmed || "demo";
 }
 
 function parseMetadata(value: string) {

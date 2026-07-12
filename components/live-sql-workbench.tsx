@@ -18,8 +18,8 @@ import {
   TableProperties,
   WandSparkles
 } from "lucide-react";
-import { generateGoogleSql, validateGoogleSql } from "@/lib/copilot-engine";
-import { schemaTables } from "@/lib/content";
+import { generateBigQuerySql, validateBigQuerySql } from "@/lib/copilot-engine";
+import { schemaTables } from "@/lib/demo-data";
 import {
   estimateDryRun,
   formatBytes,
@@ -42,7 +42,7 @@ type QueryDryRunApiResponse = {
 const sampleQuestion =
   "Show weekly revenue and order count for the last 8 weeks, grouped by acquisition channel";
 
-const initialResult = generateGoogleSql(sampleQuestion);
+const initialResult = generateBigQuerySql(sampleQuestion);
 const initialSql = initialResult.sql ?? "";
 
 const fallbackSql = `SELECT
@@ -50,7 +50,7 @@ const fallbackSql = `SELECT
   acquisition_channel,
   SUM(revenue) AS weekly_revenue,
   COUNT(*) AS order_count
-FROM \`analytics.orders\`
+FROM \`demo.orders\`
 WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 8 WEEK)
   AND order_date < CURRENT_DATE()
   AND status = 'completed'
@@ -60,7 +60,7 @@ ORDER BY week_start DESC, weekly_revenue DESC;`;
 export function LiveSqlWorkbench({ compact = false }: { compact?: boolean }) {
   const [question, setQuestion] = useState(sampleQuestion);
   const [sqlDraft, setSqlDraft] = useState(initialSql || fallbackSql);
-  const [workspace, setWorkspace] = useState("analytics");
+  const [workspace, setWorkspace] = useState("demo");
   const [queryType, setQueryType] = useState("Revenue rollup");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDryRunning, setIsDryRunning] = useState(false);
@@ -68,7 +68,7 @@ export function LiveSqlWorkbench({ compact = false }: { compact?: boolean }) {
 
   const sql = sqlDraft.trim() ? sqlDraft : fallbackSql;
   const localEstimate = useMemo(() => estimateDryRun(sql), [sql]);
-  const checks = runPreview?.checks ?? validateGoogleSql(sql);
+  const checks = runPreview?.checks ?? validateBigQuerySql(sql);
   const usedFields = useMemo(() => extractUsedFields(sql), [sql]);
   const approvedChecks = checks.filter((check) => check.status === "pass").length;
   const riskChecks = checks.length - approvedChecks;
@@ -76,7 +76,7 @@ export function LiveSqlWorkbench({ compact = false }: { compact?: boolean }) {
   function generateSql() {
     setIsGenerating(true);
     window.setTimeout(() => {
-      const nextResult = generateGoogleSql(question);
+      const nextResult = generateBigQuerySql(question);
       setSqlDraft(nextResult.sql ?? fallbackSql);
       setRunPreview(null);
       setIsGenerating(false);

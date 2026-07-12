@@ -1,13 +1,12 @@
 import type { MetadataRoute } from "next";
-import { publicRoutes, siteUrl } from "@/lib/seo";
 
 export const dynamic = "force-static";
 
+const routes = ["/", "/sql", "/schemas", "/approvals", "/cost", "/team/policies", "/docs"];
+
 export default function sitemap(): MetadataRoute.Sitemap {
-  return publicRoutes.map((route) => ({
-    url: `${siteUrl}${route.path}`,
-    lastModified: new Date(route.lastModified),
-    changeFrequency: route.changeFrequency,
-    priority: route.priority
+  return routes.map((route) => ({
+    url: `https://example.com${route}`,
+    lastModified: new Date("2026-07-01")
   }));
 }

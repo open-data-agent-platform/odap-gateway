@@ -7,7 +7,7 @@ import {
 } from "../lib/bigquery";
 
 const boundedSql =
-  "SELECT order_id FROM `analytics.orders` WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY);";
+  "SELECT order_id FROM `demo.orders` WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY);";
 
 describe("bigquery dry-run client", () => {
   afterEach(() => {
@@ -20,7 +20,7 @@ describe("bigquery dry-run client", () => {
     expect(preview.mode).toBe("simulated");
     expect(preview.configured).toBe(false);
     expect(preview.error?.code).toBe("bigquery_not_configured");
-    expect(preview.referencedTables).toEqual(["analytics.orders"]);
+    expect(preview.referencedTables).toEqual(["demo.orders"]);
   });
 
   it("supports forced simulated mode even when credentials exist", async () => {
@@ -40,7 +40,7 @@ describe("bigquery dry-run client", () => {
 
   it("blocks destructive SQL before any BigQuery network call", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const preview = await runBigQueryDryRun("DROP TABLE `analytics.orders`;", {
+    const preview = await runBigQueryDryRun("DROP TABLE `demo.orders`;", {
       BIGQUERY_PROJECT_ID: "demo-project",
       BIGQUERY_CLIENT_EMAIL: "svc@example.iam.gserviceaccount.com",
       BIGQUERY_PRIVATE_KEY: "not-used-for-blocked-preflight"

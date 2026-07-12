@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  generateGoogleSql,
-  optimizeGoogleSql,
-  validateGoogleSql
+  generateBigQuerySql,
+  optimizeBigQuerySql,
+  validateBigQuerySql
 } from "../lib/copilot-engine";
 
 describe("copilot engine", () => {
-  it("generates read-only GoogleSQL with a bounded date filter", () => {
-    const result = generateGoogleSql("weekly revenue by acquisition channel");
+  it("generates read-only BigQuery SQL with a bounded date filter", () => {
+    const result = generateBigQuerySql("weekly revenue by acquisition channel");
 
     expect(result.sql).toContain("SELECT");
     expect(result.sql).toContain("DATE_SUB");
@@ -15,7 +15,7 @@ describe("copilot engine", () => {
   });
 
   it("warns when destructive SQL is pasted", () => {
-    const checks = validateGoogleSql("DROP TABLE analytics.orders;");
+    const checks = validateBigQuerySql("DROP TABLE demo.orders;");
 
     expect(checks[0]).toMatchObject({
       label: "No destructive operations",
@@ -24,8 +24,8 @@ describe("copilot engine", () => {
   });
 
   it("warns when selected columns are not in the known schema", () => {
-    const checks = validateGoogleSql(
-      "SELECT order_id, made_up_metric FROM `analytics.orders` WHERE order_date >= CURRENT_DATE();"
+    const checks = validateBigQuerySql(
+      "SELECT order_id, made_up_metric FROM `demo.orders` WHERE order_date >= CURRENT_DATE();"
     );
     const schemaCheck = checks.find(
       (check) => check.label === "Schema-validated columns"
@@ -38,8 +38,8 @@ describe("copilot engine", () => {
   });
 
   it("does not treat interval units as schema columns", () => {
-    const checks = validateGoogleSql(
-      "SELECT order_id FROM `analytics.orders` WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY);"
+    const checks = validateBigQuerySql(
+      "SELECT order_id FROM `demo.orders` WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY);"
     );
     const schemaCheck = checks.find(
       (check) => check.label === "Schema-validated columns"
@@ -51,8 +51,8 @@ describe("copilot engine", () => {
   });
 
   it("warns when SQL selects likely PII fields", () => {
-    const checks = validateGoogleSql(
-      "SELECT email, phone_number FROM `analytics.customers` WHERE created_at >= CURRENT_TIMESTAMP();"
+    const checks = validateBigQuerySql(
+      "SELECT email, phone_number FROM `demo.customers` WHERE created_at >= CURRENT_TIMESTAMP();"
     );
     const piiCheck = checks.find(
       (check) => check.label === "No PII exposure risk"
@@ -65,7 +65,7 @@ describe("copilot engine", () => {
   });
 
   it("adds a cost guard when optimizing an unbounded query", () => {
-    const result = optimizeGoogleSql("SELECT * FROM `analytics.orders`;");
+    const result = optimizeBigQuerySql("SELECT * FROM `demo.orders`;");
 
     expect(result.sql).toContain("order_date >=");
     expect(result.sql).not.toContain("SELECT *");

@@ -12,8 +12,8 @@ describe("phase 4 schema policy enforcement", () => {
     const evaluation = await evaluateSchemaPolicy(
       {},
       {
-        workspace: "analytics",
-        sql: "SELECT order_id FROM `analytics.orders` WHERE order_date >= CURRENT_DATE();"
+        workspace: "demo",
+        sql: "SELECT order_id FROM `demo.orders` WHERE order_date >= CURRENT_DATE();"
       }
     );
 
@@ -31,14 +31,14 @@ describe("phase 4 schema policy enforcement", () => {
     const evaluation = await evaluateSchemaPolicy(
       {},
       {
-        workspace: "analytics",
-        sql: "SELECT customer_id FROM `analytics.orders` WHERE order_date >= CURRENT_DATE();"
+        workspace: "demo",
+        sql: "SELECT customer_id FROM `demo.orders` WHERE order_date >= CURRENT_DATE();"
       }
     );
 
     expect(evaluation.blocked).toBe(true);
     expect(evaluation.reasons.join(" ")).toContain(
-      "analytics.orders.customer_id"
+      "demo.orders.customer_id"
     );
   });
 
@@ -46,8 +46,8 @@ describe("phase 4 schema policy enforcement", () => {
     const evaluation = await evaluateSchemaPolicy(
       {},
       {
-        workspace: "analytics",
-        sql: "SELECT COUNT(*) AS order_count FROM `analytics.orders` WHERE order_date >= CURRENT_DATE();"
+        workspace: "demo",
+        sql: "SELECT COUNT(*) AS order_count FROM `demo.orders` WHERE order_date >= CURRENT_DATE();"
       }
     );
 
@@ -58,18 +58,18 @@ describe("phase 4 schema policy enforcement", () => {
     const evaluation = await evaluateSchemaPolicy(
       {},
       {
-        workspace: "analytics",
-        sql: "SELECT EXTRACT(ISOWEEK FROM order_date) AS week_num FROM `analytics.orders` WHERE order_date >= CURRENT_DATE();"
+        workspace: "demo",
+        sql: "SELECT EXTRACT(ISOWEEK FROM order_date) AS week_num FROM `demo.orders` WHERE order_date >= CURRENT_DATE();"
       }
     );
 
     expect(evaluation.blocked).toBe(false);
-    expect(evaluation.referencedTables).toEqual(["analytics.orders"]);
+    expect(evaluation.referencedTables).toEqual(["demo.orders"]);
   });
 
   it("blocks tables outside the selected workspace allowlist", () => {
     const evaluation = evaluateSchemaCatalog(
-      "SELECT order_id FROM `analytics.orders` WHERE order_date >= CURRENT_DATE();",
+      "SELECT order_id FROM `demo.orders` WHERE order_date >= CURRENT_DATE();",
       "marketing",
       createPolicyCatalog(),
       "d1"
@@ -85,11 +85,11 @@ describe("phase 4 schema policy enforcement", () => {
 
   it("turns blocked policy results into blocked dry-run previews", async () => {
     const sql =
-      "SELECT customer_id FROM `analytics.orders` WHERE order_date >= CURRENT_DATE();";
+      "SELECT customer_id FROM `demo.orders` WHERE order_date >= CURRENT_DATE();";
     const evaluation = await evaluateSchemaPolicy(
       {},
       {
-        workspace: "analytics",
+        workspace: "demo",
         sql
       }
     );
@@ -107,9 +107,9 @@ describe("phase 4 schema policy enforcement", () => {
 function createPolicyCatalog(): SchemaCatalogTable[] {
   return [
     {
-      id: "table-analytics-orders",
-      workspace: "analytics",
-      name: "analytics.orders",
+      id: "table-demo-orders",
+      workspace: "demo",
+      name: "demo.orders",
       description: "Orders",
       rowCount: 100,
       updatedAt: "2026-06-22T00:00:00.000Z",

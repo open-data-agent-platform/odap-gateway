@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { onRequestPost } from "../functions/api/query/dry-run";
 
 const boundedSql =
-  "SELECT order_id FROM `analytics.orders` WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY);";
+  "SELECT order_id FROM `demo.orders` WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY);";
 
 describe("query dry-run API", () => {
   afterEach(() => {
@@ -11,11 +11,11 @@ describe("query dry-run API", () => {
 
   it("returns simulated dry-run data when BigQuery is not configured", async () => {
     const response = await onRequestPost({
-      request: new Request("https://odap-gateway.example/api/query/dry-run", {
+      request: new Request("https://odap-gateway.local/api/query/dry-run", {
         method: "POST",
         body: JSON.stringify({
           sql: boundedSql,
-          workspace: "analytics",
+          workspace: "demo",
           queryType: "Revenue rollup"
         })
       }),
@@ -45,16 +45,16 @@ describe("query dry-run API", () => {
   it("blocks schema policy violations before BigQuery dry-run", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const response = await onRequestPost({
-      request: new Request("https://odap-gateway.example/api/query/dry-run", {
+      request: new Request("https://odap-gateway.local/api/query/dry-run", {
         method: "POST",
         body: JSON.stringify({
-          sql: "SELECT customer_id FROM `analytics.orders` WHERE order_date >= CURRENT_DATE();",
-          workspace: "analytics",
+          sql: "SELECT customer_id FROM `demo.orders` WHERE order_date >= CURRENT_DATE();",
+          workspace: "demo",
           queryType: "Customer identifier export"
         })
       }),
       env: {
-        BIGQUERY_PROJECT_ID: "analytics-prod",
+        BIGQUERY_PROJECT_ID: "demo-project",
         BIGQUERY_CLIENT_EMAIL: "svc@example.iam.gserviceaccount.com",
         BIGQUERY_PRIVATE_KEY: "not-used-for-policy-blocked-query"
       }
@@ -87,7 +87,7 @@ describe("query dry-run API", () => {
 
   it("rejects empty SQL", async () => {
     const response = await onRequestPost({
-      request: new Request("https://odap-gateway.example/api/query/dry-run", {
+      request: new Request("https://odap-gateway.local/api/query/dry-run", {
         method: "POST",
         body: JSON.stringify({
           sql: " "

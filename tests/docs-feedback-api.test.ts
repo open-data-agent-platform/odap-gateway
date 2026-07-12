@@ -9,7 +9,7 @@ import { updateDocsFeedbackReview } from "../lib/docs-feedback";
 describe("docs feedback API", () => {
   it("returns seed feedback when D1 is not configured", async () => {
     const response = await onRequestGet({
-      request: new Request("https://odap-gateway.example/api/docs/feedback"),
+      request: new Request("https://odap-gateway.local/api/docs/feedback"),
       env: {}
     });
 
@@ -29,7 +29,7 @@ describe("docs feedback API", () => {
 
   it("accepts valid questions in preview mode", async () => {
     const response = await onRequestPost({
-      request: new Request("https://odap-gateway.example/api/docs/feedback", {
+      request: new Request("https://odap-gateway.local/api/docs/feedback", {
         method: "POST",
         body: JSON.stringify({
           kind: "question",
@@ -57,7 +57,7 @@ describe("docs feedback API", () => {
 
   it("rejects short feedback messages", async () => {
     const response = await onRequestPost({
-      request: new Request("https://odap-gateway.example/api/docs/feedback", {
+      request: new Request("https://odap-gateway.local/api/docs/feedback", {
         method: "POST",
         body: JSON.stringify({
           kind: "comment",
@@ -76,7 +76,7 @@ describe("docs feedback API", () => {
 
   it("silently accepts honeypot submissions without persistence", async () => {
     const response = await onRequestPost({
-      request: new Request("https://odap-gateway.example/api/docs/feedback", {
+      request: new Request("https://odap-gateway.local/api/docs/feedback", {
         method: "POST",
         body: JSON.stringify({
           kind: "question",
@@ -117,7 +117,7 @@ describe("docs feedback API", () => {
   it("requires an admin session for answer management", async () => {
     const response = await onAdminDocsFeedbackPatch({
       request: new Request(
-        "https://odap-gateway.example/api/admin/docs-feedback/seed-docs-question-1",
+        "https://odap-gateway.local/api/admin/docs-feedback/seed-docs-question-1",
         {
           method: "PATCH",
           body: JSON.stringify({

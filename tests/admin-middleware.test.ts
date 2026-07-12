@@ -11,7 +11,7 @@ const secret = "test-secret-that-is-long-enough-for-hmac";
 describe("admin middleware", () => {
   it("redirects unauthenticated admin page requests to login", async () => {
     const response = await onRequest({
-      request: new Request("https://odap-gateway.example/admin"),
+      request: new Request("https://odap-gateway.local/admin"),
       env: {
         AUTH_COOKIE_SECRET: secret
       },
@@ -33,7 +33,7 @@ describe("admin middleware", () => {
     });
 
     const response = await onRequest({
-      request: new Request("https://odap-gateway.example/admin", {
+      request: new Request("https://odap-gateway.local/admin", {
         headers: {
           Cookie: cookie
         }
@@ -61,7 +61,7 @@ describe("admin middleware", () => {
     });
 
     const response = await onRequest({
-      request: new Request("https://odap-gateway.example/admin", {
+      request: new Request("https://odap-gateway.local/admin", {
         headers: {
           Cookie: cookie
         }

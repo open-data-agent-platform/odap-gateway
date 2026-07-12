@@ -1,34 +1,21 @@
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "odap-gateway-worker",
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "odap-gateway",
   "main": "worker/index.ts",
-  "compatibility_date": "2026-06-21",
-  "routes": [
-    {
-      "pattern": "your-domain.example",
-      "custom_domain": true
-    }
-  ],
+  "compatibility_date": "2026-07-01",
   "assets": {
     "directory": "./out",
-    "binding": "ASSETS",
-    "run_worker_first": [
-      "/api/*",
-      "/admin*"
-    ]
+    "binding": "ASSETS"
   },
   "d1_databases": [
     {
       "binding": "ODAP_GATEWAY_DB",
-      "database_name": "odap-gateway",
-      "database_id": "replace-with-your-d1-database-id"
+      "database_name": "odap-gateway-db",
+      "database_id": "your-d1-database-id"
     }
   ],
   "vars": {
-    "ADMIN_EMAILS": "admin@example.com"
-  },
-  "observability": {
-    "enabled": true,
-    "head_sampling_rate": 1
+    "ADMIN_EMAILS": "admin@example.com",
+    "BIGQUERY_DRY_RUN_MODE": "simulated"
   }
 }

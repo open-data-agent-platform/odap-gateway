@@ -106,7 +106,7 @@ export function SqlDetailPage({ id }: { id: string }) {
   acquisition_channel,
   SUM(revenue) AS weekly_revenue,
   COUNT(*) AS order_count
-FROM \`analytics.orders\`
+FROM \`demo.orders\`
 WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 8 WEEK)
   AND status = 'completed'
 GROUP BY week_start, acquisition_channel

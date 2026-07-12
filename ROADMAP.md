@@ -1,21 +1,32 @@
-# Roadmap
+# ODAP Gateway - Roadmap
 
-## Phase 1: Reference Gateway
+Direction, not promises. Sequenced by what makes the reference implementation
+more reference-worthy, not by feature demand.
 
-- Keep SQL validation deterministic and test-covered.
-- Maintain BigQuery dry-run mode as the first reference connector.
-- Preserve D1-backed audit events and query-run records.
-- Keep schema field policy controls explicit and reviewable.
+## v0.1.x - now
 
-## Phase 2: ODAP Alignment
+- Initial open-source release package
+- Clause mapping published (`ODAP_CLAUSE_MAPPING.md`)
+- Hardening: demo fixtures, example configs, docs cleanup
 
-- Map implementation modules to the ODAP Five Musts.
-- Add machine-readable policy examples.
-- Add more connector boundary tests.
-- Document challenge and review workflows against the ODAP Rubric.
+## v0.2 - governance depth
 
-## Phase 3: Ecosystem
+- One-command local demo (Docker Compose)
+- Sandbox validation on masked data (G3.4)
+- Organization-level budget circuit-breakers (C5.2 full)
+- Query rewrite suggestions with savings estimates (C5.4)
 
-- Add adapter interfaces for additional warehouse engines.
-- Add deployment recipes for Workers environments.
-- Publish sample datasets and non-production fixtures.
+## v0.3 - semantic layer
+
+- Business-editable metric definitions with ownership (S2.1)
+- Confidence scoring per answer (A4.3)
+- One-click audit replay (A4.4)
+
+## Later - openness
+
+- Iceberg / Delta Lake read support (O1.1)
+- Second source beyond BigQuery (O1.2)
+- Stable public API spec (O1.4)
+- Energy/resource awareness, tracking proposed C5.5
+
+Priorities can be challenged by issue.

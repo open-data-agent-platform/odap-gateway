@@ -2,24 +2,16 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://odap-gateway.example"),
+  metadataBase: new URL("https://example.com"),
   title: {
-    default: "ODAP Gateway - Governed Agent Data Access",
+    default: "ODAP Gateway - Governed BigQuery Access for AI Agents",
     template: "%s | ODAP Gateway"
   },
   description:
-    "Reference implementation of a governed gateway for AI agents querying enterprise data with schema policy, audit, approvals, and dry-run cost controls.",
-  openGraph: {
-    title: "ODAP Gateway",
-    description:
-      "Reference implementation of the ODAP Five Musts for governed agent data access.",
-    url: "https://odap-gateway.example",
-    siteName: "ODAP Gateway",
-    type: "website"
-  },
+    "A local reference implementation of the Open Data Agent Platform Five Musts for governed BigQuery dry-runs, approvals, audit trails, and schema policy.",
   robots: {
-    index: true,
-    follow: true
+    index: false,
+    follow: false
   }
 };
 

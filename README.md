@@ -1,52 +1,67 @@
+<p align="center">
+  <img src="assets/demo.gif" alt="ODAP Gateway workflow overview: natural language to governed BigQuery SQL with pre-execution cost estimate and approval flow" width="820">
+</p>
+
+<p align="center"><em>Workflow overview using demo data. A real operation recording is planned for v0.1.1.</em></p>
+
 # ODAP Gateway
 
-ODAP Gateway is the reference implementation of the ODAP Five Musts: Open,
-Semantic, Governed, Auditable, and Cost-controlled.
+**A reference implementation of the [ODAP Five Musts](https://github.com/open-data-agent-platform/awesome-odap/blob/main/RUBRIC.md): a governed gateway for AI agents querying enterprise data. Starting with BigQuery, done deeply.**
 
-It provides a governed gateway for AI agents querying enterprise data, starting
-with BigQuery dry-run workflows. The repository focuses on the implementation
-layer: policy checks, schema governance, approval workflows, audit records, and
-cost controls. Product website, brand, billing, and commercial hosting layers
-are intentionally kept outside this open-source package.
+Every query is schema-grounded, cost-estimated via dry-run **before** execution,
+routed through approval flows when risky, and written to an audit trail.
 
-## Scope
+> ODAP (Open Data Agent Platform) is an open, CC0 standard: when an AI agent
+> touches enterprise data, it must pass through a gateway that is **Open,
+> Semantic, Governed, Auditable, and Cost-controlled.**
+> Standard and rubric: [awesome-odap](https://github.com/open-data-agent-platform/awesome-odap) |
+> Manifesto: [googlesql.com/odap/manifesto](https://googlesql.com/odap/manifesto)
 
-- SQL generation and validation engine
-- BigQuery dry-run integration
-- Schema catalog and field policy controls
-- Workspace allowlist and approval workflow
-- Query run audit records
-- Admin review APIs
-- Google and GitHub OAuth flow scaffolding
-- Cloudflare D1 schema for governance and audit data
-- Tests for the gateway policy, auth, admin, schema, and dry-run layers
+## What it does
 
-## Not Included
+- **Schema-aware Text-to-SQL** - generation grounded in approved tables and fields.
+- **Dry-run first, always** - bytes scanned, estimated cost, and runtime are surfaced before execution.
+- **Approval flows** - high-cost or policy-sensitive queries route to reviewers.
+- **Audit trail** - logins, dry-runs, approvals, policy changes, and rollbacks are recorded.
+- **Role-based access** - OAuth-protected sessions and admin-only governance routes.
 
-- Product website and marketing pages
-- Billing, checkout, Stripe webhook, and paid-plan management
-- Production Cloudflare routes, D1 database IDs, OAuth client IDs, or secrets
-- Private development history
+## Standard conformance
 
-## Commands
+This codebase is mapped clause-by-clause against the ODAP Scoring Rubric v1.0,
+including what is **not** implemented yet. See
+[ODAP_CLAUSE_MAPPING.md](ODAP_CLAUSE_MAPPING.md). Honest gaps > green checkmarks.
+
+## Stack
+
+Next.js (App Router) | Cloudflare Workers and Functions | D1 (SQLite) |
+BigQuery API | TypeScript.
+
+## Run locally
 
 ```bash
 npm install
-npm run lint
-npm run typecheck
-npm run test
-npm run build
+cp .dev.vars.example .dev.vars
+cp wrangler.example.jsonc wrangler.jsonc
+npx wrangler d1 create odap-gateway-db
+npx wrangler d1 execute odap-gateway-db --file=db/schema.sql
+npm run dev
 ```
 
-For Cloudflare Workers validation, copy `wrangler.example.jsonc` to your own
-local config and add real resource IDs and routes outside version control.
+You will need a Google Cloud project with the BigQuery API enabled, plus OAuth
+credentials for sign-in. See `docs/AUTH_SETUP.md`.
 
-## Environment
+## Status
 
-Copy `.dev.vars.example` to `.dev.vars` and replace placeholders with your own
-values. OAuth client IDs and secrets, BigQuery service-account keys, and cookie
-secrets must never be committed.
+**Early-stage reference implementation (v0.1.x). APIs subject to change.**
+Roadmap: [ROADMAP.md](ROADMAP.md). One-command Docker demo is planned for v0.2.
+
+## Contributing and challenging
+
+PRs welcome. If you think a Rubric clause is mapped wrong, or a Must is
+implemented worse than claimed, [file an issue](../../issues). The ODAP
+standard's public challenge process applies to its reference implementation too.
 
 ## License
 
-Apache-2.0. See `LICENSE`.
+Apache-2.0. The ODAP standard itself is CC0 and maintained separately at
+[awesome-odap](https://github.com/open-data-agent-platform/awesome-odap).

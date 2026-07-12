@@ -12,7 +12,7 @@ describe("admin schema field API", () => {
   it("requires an admin session for policy updates", async () => {
     const response = await onRequestPatch({
       request: new Request(
-        "https://odap-gateway.example/api/admin/schema-fields/table-analytics-orders-customer-id",
+        "https://odap-gateway.local/api/admin/schema-fields/table-demo-orders-customer-id",
         {
           method: "PATCH",
           body: JSON.stringify({ queryable: true })
@@ -22,7 +22,7 @@ describe("admin schema field API", () => {
         AUTH_COOKIE_SECRET: secret
       },
       params: {
-        id: "table-analytics-orders-customer-id"
+        id: "table-demo-orders-customer-id"
       }
     });
 
@@ -36,7 +36,7 @@ describe("admin schema field API", () => {
         AUTH_COOKIE_SECRET: secret
       },
       params: {
-        id: "table-analytics-orders-customer-id"
+        id: "table-demo-orders-customer-id"
       }
     });
 
@@ -53,7 +53,7 @@ describe("admin schema field API", () => {
         AUTH_COOKIE_SECRET: secret
       },
       params: {
-        id: "table-analytics-orders-customer-id"
+        id: "table-demo-orders-customer-id"
       }
     });
 
@@ -75,7 +75,7 @@ async function createAdminRequest(body: Record<string, unknown>) {
   });
 
   return new Request(
-    "https://odap-gateway.example/api/admin/schema-fields/table-analytics-orders-customer-id",
+    "https://odap-gateway.local/api/admin/schema-fields/table-demo-orders-customer-id",
     {
       method: "PATCH",
       headers: {

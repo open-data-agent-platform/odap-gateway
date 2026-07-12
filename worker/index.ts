@@ -1,9 +1,5 @@
 import { getPhase4Health, getPublicHealth } from "../lib/phase2";
-import {
-  getPublicSession,
-  getSessionRole,
-  type AuthEnv
-} from "../lib/auth";
+import { getPublicSession, getSessionRole, type AuthEnv } from "../lib/auth";
 import {
   getSessionFromRequest,
   jsonResponse,
@@ -72,7 +68,7 @@ const worker = {
         {
           ok: false,
           code: "internal_error",
-          message: "Open Data Agent Platform could not complete this request."
+          message: "ODAP Gateway could not complete this request."
         },
         { status: 500 }
       );
@@ -147,16 +143,12 @@ function matchApiRoute(
         onAuthStartGet({
           request,
           env,
-          params: {
-            provider: authStart[1]
-          }
+          params: { provider: authStart[1] }
         })
     };
   }
 
-  const authCallback = url.pathname.match(
-    /^\/api\/auth\/callback\/([^/]+)$/
-  );
+  const authCallback = url.pathname.match(/^\/api\/auth\/callback\/([^/]+)$/);
   if (authCallback) {
     return {
       allowedMethods: ["GET"],
@@ -164,9 +156,7 @@ function matchApiRoute(
         onAuthCallbackGet({
           request,
           env,
-          params: {
-            provider: authCallback[1]
-          }
+          params: { provider: authCallback[1] }
         })
     };
   }
@@ -209,9 +199,7 @@ function matchApiRoute(
     };
   }
 
-  const docsFeedback = url.pathname.match(
-    /^\/api\/admin\/docs-feedback\/([^/]+)$/
-  );
+  const docsFeedback = url.pathname.match(/^\/api\/admin\/docs-feedback\/([^/]+)$/);
   if (docsFeedback) {
     return {
       allowedMethods: ["PATCH"],
@@ -219,9 +207,7 @@ function matchApiRoute(
         onAdminDocsFeedbackPatch({
           request,
           env,
-          params: {
-            id: docsFeedback[1]
-          }
+          params: { id: docsFeedback[1] }
         })
     };
   }
@@ -234,16 +220,12 @@ function matchApiRoute(
         onAdminUserPatch({
           request,
           env,
-          params: {
-            id: adminUser[1]
-          }
+          params: { id: adminUser[1] }
         })
     };
   }
 
-  const featureFlag = url.pathname.match(
-    /^\/api\/admin\/feature-flags\/([^/]+)$/
-  );
+  const featureFlag = url.pathname.match(/^\/api\/admin\/feature-flags\/([^/]+)$/);
   if (featureFlag) {
     return {
       allowedMethods: ["PATCH"],
@@ -251,16 +233,12 @@ function matchApiRoute(
         onAdminFeatureFlagPatch({
           request,
           env,
-          params: {
-            id: featureFlag[1]
-          }
+          params: { id: featureFlag[1] }
         })
     };
   }
 
-  const runReview = url.pathname.match(
-    /^\/api\/admin\/run-reviews\/([^/]+)$/
-  );
+  const runReview = url.pathname.match(/^\/api\/admin\/run-reviews\/([^/]+)$/);
   if (runReview) {
     return {
       allowedMethods: ["GET", "PATCH"],
@@ -269,23 +247,17 @@ function matchApiRoute(
           ? onAdminRunReviewGet({
               request,
               env,
-              params: {
-                id: runReview[1]
-              }
+              params: { id: runReview[1] }
             })
           : onAdminRunReviewPatch({
               request,
               env,
-              params: {
-                id: runReview[1]
-              }
+              params: { id: runReview[1] }
             })
     };
   }
 
-  const schemaField = url.pathname.match(
-    /^\/api\/admin\/schema-fields\/([^/]+)$/
-  );
+  const schemaField = url.pathname.match(/^\/api\/admin\/schema-fields\/([^/]+)$/);
   if (schemaField) {
     return {
       allowedMethods: ["PATCH"],
@@ -293,9 +265,7 @@ function matchApiRoute(
         onAdminSchemaFieldPatch({
           request,
           env,
-          params: {
-            id: schemaField[1]
-          }
+          params: { id: schemaField[1] }
         })
     };
   }
