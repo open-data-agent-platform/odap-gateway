@@ -1,10 +1,30 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { onRequestPost } from "../functions/api/query/dry-run";
+import * as authRequest from "../lib/auth-request";
 
 const boundedSql =
   "SELECT order_id FROM `demo.orders` WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY);";
 
 describe("query dry-run API", () => {
+  it("refuses demo fallback for an authenticated production request without configuration", async () => {
+    vi.spyOn(authRequest, "getSessionFromRequest").mockResolvedValue({ provider: "google", providerId: "demo",
+      email: "demo@example.test", name: "Demo", role: "member", expiresAt: Date.now() + 60_000 });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const response = await onRequestPost({ request: new Request("https://odap-gateway.local/api/query/dry-run", {
+      method: "POST", body: JSON.stringify({ sql: boundedSql })
+    }), env: { GATEWAY_MODE: "production" } });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "production_not_configured" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+  it("denies production requests before reading SQL or calling the warehouse without a session", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const response = await onRequestPost({ request: new Request("https://odap-gateway.local/api/query/dry-run", {
+      method: "POST", body: "not-json"
+    }), env: { GATEWAY_MODE: "production" } });
+    expect(response.status).toBe(401);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
   afterEach(() => {
     vi.restoreAllMocks();
   });

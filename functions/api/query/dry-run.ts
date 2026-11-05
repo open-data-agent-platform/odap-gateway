@@ -9,6 +9,7 @@ import {
 } from "../../../lib/admin-store";
 import {
   runBigQueryDryRun,
+  hasBigQueryCredentials,
   type BigQueryEnv
 } from "../../../lib/bigquery";
 import { estimateDryRun } from "../../../lib/phase2";
@@ -31,6 +32,17 @@ type QueryDryRunBody = {
 const MAX_SQL_LENGTH = 20_000;
 
 export async function onRequestPost(context: QueryDryRunContext) {
+  if (context.env.GATEWAY_MODE && !["demo", "production"].includes(context.env.GATEWAY_MODE)) {
+    return jsonResponse({ ok: false, code: "invalid_gateway_mode" }, { status: 503 });
+  }
+  const session = await getSessionFromRequest(context.request, context.env);
+  if (context.env.GATEWAY_MODE === "production") {
+    if (!session) return jsonResponse({ ok: false, code: "unauthenticated" }, { status: 401 });
+    if (!hasBigQueryCredentials(context.env) || context.env.BIGQUERY_DRY_RUN_MODE === "simulated" ||
+      !(context.env.ODAP_GATEWAY_DB ?? context.env.DB)) {
+      return jsonResponse({ ok: false, code: "production_not_configured" }, { status: 503 });
+    }
+  }
   const body = await readJsonBody(context.request);
   if (!body.ok) {
     return jsonResponse(
@@ -68,7 +80,6 @@ export async function onRequestPost(context: QueryDryRunContext) {
 
   const workspace = getString(body.value.workspace) || inferWorkspace(sql);
   const queryType = getString(body.value.queryType) || "Generated Query";
-  const session = await getSessionFromRequest(context.request, context.env);
   const policyEvaluation = await evaluateSchemaPolicy(context.env, {
     sql,
     workspace
@@ -80,6 +91,10 @@ export async function onRequestPost(context: QueryDryRunContext) {
     basePreview,
     policyEvaluation
   );
+  if (context.env.GATEWAY_MODE === "production" && (policyEvaluation.blocked || basePreview.mode !== "live" || basePreview.error)) {
+    return jsonResponse({ ok: false, code: policyEvaluation.blocked ? "policy_blocked" : "live_preview_required", preview },
+      { status: policyEvaluation.blocked ? 403 : 503 });
+  }
   const record = await recordQueryDryRun(context.env, {
     workspace,
     queryType,
@@ -92,6 +107,9 @@ export async function onRequestPost(context: QueryDryRunContext) {
     runId: record.id,
     persisted: record.persisted
   };
+  if (context.env.GATEWAY_MODE === "production" && !record.persisted) {
+    return jsonResponse({ ok: false, code: "preview_persistence_failed" }, { status: 503 });
+  }
 
   return jsonResponse({
     ok: true,
