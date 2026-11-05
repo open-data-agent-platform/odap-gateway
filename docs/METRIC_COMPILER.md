@@ -30,7 +30,8 @@ The supported query is deliberately narrow:
 A missing, changed or unsupported definition fails before the dispatch claim;
 policy and membership are still rechecked after loading and compilation.
 The output is a **query configuration fragment**, not a complete executable
-job. No public submission route, live schema verification, production
-definition loader or cost-limit derivation is provided here. Warehouse access
-controls, safe views, schema drift detection and an enforced billing ceiling
-remain necessary.
+job. The dispatcher subsequently adds the
+[scan byte ceiling](BIGQUERY_SCAN_LIMITS.md) before handing it to the adapter.
+No public submission route, live schema verification or production definition
+loader is provided here. Warehouse access controls, safe views, schema drift
+detection and enforcement by the warehouse remain necessary.

@@ -13,19 +13,21 @@ import type { D1Database, D1Value } from "../lib/d1";
 const run = promisify(execFile);
 const target = { BIGQUERY_PROJECT_ID: "demo-project", BIGQUERY_LOCATION: "US" };
 let dir: string;
+let dbName: string;
 let access: ControlAccess;
 let beforeClaim: (() => Promise<unknown>) | undefined;
-let claimMode: "run" | "run-after-expiry";
+let claimMode: "run" | "run-after-expiry" | "run-after-price-expiry";
 
 async function sqlite(mode: string, sql = "", params: D1Value[] = []) {
   const python = process.env.ODAP_TEST_PYTHON || (process.platform === "win32" ? "python" : "python3");
-  const { stdout } = await run(python, ["tests/fixtures/job-binding-sqlite.py", join(dir, "test.db"),
+  const { stdout } = await run(python, ["tests/fixtures/job-binding-sqlite.py", join(dir, dbName),
     mode, JSON.stringify([sql, params])]);
   return JSON.parse(stdout);
 }
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "odap-binding-"));
+  dbName = "test.db";
   await sqlite("setup");
   beforeClaim = undefined;
   claimMode = "run";
@@ -39,6 +41,42 @@ beforeEach(async () => {
   access = { db, tenantId: "t", principalId: "owner" };
 });
 
+async function prepareDispatchFixture() {
+  await prepareIntentJob(access, "i", target);
+  await sqlite("run", "INSERT INTO dispatch_targets VALUES('t','orders','r','p1','s1','demo-project','US')");
+  await sqlite("run", "INSERT INTO dispatch_read_grants VALUES('t','orders','user','agent','p1')");
+}
+
+it("upgrades actual v6 claims without fabricating their historical ceiling", async () => {
+  dbName = "legacy.db";
+  await sqlite("setup-v6");
+  await prepareDispatchFixture();
+  await sqlite("run", "INSERT INTO dispatch_claims(tenant_id,intent_id,claimed_by) VALUES('t','i','owner')");
+  await sqlite("apply-scan-limits");
+  expect(await sqlite("first", "SELECT claimed_by,maximum_bytes_billed FROM dispatch_claims"))
+    .toEqual({ claimed_by: "owner", maximum_bytes_billed: null });
+  await expect(sqlite("run", "UPDATE dispatch_claims SET maximum_bytes_billed=1")).rejects.toThrow("immutable");
+  await expect(sqlite("run", "INSERT INTO dispatch_claims(tenant_id,intent_id,claimed_by) VALUES('t','new','owner')"))
+    .rejects.toThrow("requires byte ceiling");
+}, 20_000);
+
+it("does not fall back to a default price or a different revision or region", async () => {
+  await prepareDispatchFixture();
+  const adapter = { projectId: "demo-project", location: "US", loadDefinition: vi.fn(), submitRead: vi.fn() };
+  const dispatch = () => dispatchPreparedMetricRead(access, "i", { principalId: "user", agentId: "agent" },
+    { target: "orders", metricId: "revenue", parameters: { year: 2026 } }, adapter);
+  await expect(dispatch()).rejects.toThrow("Dispatch authority unavailable");
+  const addPolicy = (revision: string, location: string, mode: string) => sqlite("run",
+    `INSERT INTO bigquery_scan_policies VALUES('t','orders',?,'demo-project',?,?,1,5000,'2080-01-01T00:00:00.000Z','test')`,
+    [revision, location, mode]);
+  await expect(addPolicy("p1", "US", "capacity")).rejects.toThrow("CHECK");
+  await addPolicy("p2", "US", "on_demand");
+  await addPolicy("p1", "EU", "on_demand");
+  await expect(dispatch()).rejects.toThrow("Dispatch authority unavailable");
+  expect(adapter.submitRead).not.toHaveBeenCalled();
+  expect(await sqlite("first", "SELECT count(*) AS n FROM dispatch_claims")).toEqual({ n: 0 });
+}, 20_000);
+
 describe("final dispatch gate", { timeout: 20_000 }, () => {
   const agent = { principalId: "user", agentId: "agent" };
   const action = { target: "orders", metricId: "revenue", parameters: { year: 2026 } };
@@ -50,9 +88,9 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
   beforeEach(async () => {
     submitRead.mockReset().mockResolvedValue("submitted");
     loadDefinition.mockReset().mockResolvedValue(JSON.stringify(revenue));
-    await prepareIntentJob(access, "i", target);
-    await sqlite("run", "INSERT INTO dispatch_targets VALUES('t','orders','r','p1','s1','demo-project','US')");
-    await sqlite("run", "INSERT INTO dispatch_read_grants VALUES('t','orders','user','agent','p1')");
+    await prepareDispatchFixture();
+    await sqlite("run", `INSERT INTO bigquery_scan_policies VALUES
+      ('t','orders','p1','demo-project','US','on_demand',262144,100000000,'2080-01-01T00:00:00.000Z','synthetic fixture')`);
   });
 
   it("hands the exact bound read to one adapter across parallel attempts", async () => {
@@ -61,11 +99,30 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
     expect(submitRead).toHaveBeenCalledTimes(1);
     expect(submitRead).toHaveBeenCalledWith(expect.objectContaining({
       queryConfig: { query: "SELECT SUM(`net_amount`) AS metric_value FROM `demo-project.analytics.orders` WHERE `order_year` = @p0",
-        useLegacySql: false, parameterMode: "NAMED",
+        useLegacySql: false, parameterMode: "NAMED", maximumBytesBilled: "83886080",
         queryParameters: [{ name: "p0", parameterType: { type: "INT64" }, parameterValue: { value: "2026" } }] },
       release: expect.objectContaining({ id: "r", definitionDigest: expect.stringMatching(/^sha256:/) }),
       identity: expect.objectContaining({ jobReference: expect.objectContaining({ jobId: expect.stringMatching(/^odap_/) }) })
     }));
+    expect(await sqlite("first", "SELECT maximum_bytes_billed AS cap FROM dispatch_claims")).toEqual({ cap: 83886080 });
+    await expect(sqlite("run", `INSERT OR REPLACE INTO dispatch_claims(tenant_id,intent_id,claimed_by,maximum_bytes_billed)
+      VALUES('t','i','owner',99999999)`)).rejects.toThrow("immutable dispatch claim");
+  });
+
+  it("declines a rate that expires after compilation, without a claim or adapter call", async () => {
+    claimMode = "run-after-price-expiry";
+    await expect(dispatch()).rejects.toThrow("Dispatch denied");
+    expect(loadDefinition).toHaveBeenCalled();
+    expect(submitRead).not.toHaveBeenCalled();
+    expect(await sqlite("first", "SELECT count(*) AS n FROM dispatch_claims")).toEqual({ n: 0 });
+  });
+
+  it("cannot rewrite the policy rate, cap or scope at the old revision", async () => {
+    await expect(sqlite("run", "UPDATE bigquery_scan_policies SET micro_usd_per_tib=1")).rejects.toThrow("immutable scan policy");
+    await expect(sqlite("run", "DELETE FROM bigquery_scan_policies")).rejects.toThrow("immutable scan policy");
+    await expect(sqlite("run", `INSERT OR REPLACE INTO bigquery_scan_policies VALUES
+      ('t','orders','p1','other-project','EU','on_demand',1,999999999,'2099-01-01T00:00:00.000Z','replacement')`))
+      .rejects.toThrow("immutable scan policy");
   });
 
   it("does not consume the claim for a missing or substituted metric definition", async () => {
