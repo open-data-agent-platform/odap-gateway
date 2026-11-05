@@ -67,7 +67,7 @@ function shape(value: unknown, strings: string[], enums: Record<string, readonly
     Object.entries(enums).every(([key, options]) => typeof value[key] === "string" && options.includes(value[key] as string));
 }
 
-function timestamp(value: unknown) {
+export function isControlTimestamp(value: unknown) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
   const time = Date.parse(value);
   return Number.isFinite(time) && new Date(time).toISOString() === value;
@@ -83,7 +83,7 @@ export function isApprovalContract(value: unknown): value is ApprovalContract {
     "policyRevision", "sourceRevision", "target", "reservationId", "expiresAt"],
   { schemaVersion: ["0.1"], actionType: ["data.read"], state: ["authorized", "consumed", "revoked"] }, ["authority"])) return false;
   const record = value as Record<string, unknown>;
-  return timestamp(record.expiresAt) && shape(record.authority, ["reference"], { mode: ["human", "policy"] });
+  return isControlTimestamp(record.expiresAt) && shape(record.authority, ["reference"], { mode: ["human", "policy"] });
 }
 
 export function isEvidenceReceipt(value: unknown): value is EvidenceReceipt {
@@ -91,7 +91,7 @@ export function isEvidenceReceipt(value: unknown): value is EvidenceReceipt {
     { schemaVersion: ["0.1"], outcome: ["denied", "pending", "succeeded", "failed", "cancelled"] },
     ["contractId", "semanticReleaseId"])) return false;
   const record = value as Record<string, unknown>;
-  return timestamp(record.recordedAt) && ["contractId", "semanticReleaseId"].every(key =>
+  return isControlTimestamp(record.recordedAt) && ["contractId", "semanticReleaseId"].every(key =>
     record[key] === null ? record.outcome === "denied" : typeof record[key] === "string" && (record[key] as string).trim().length > 0);
 }
 
