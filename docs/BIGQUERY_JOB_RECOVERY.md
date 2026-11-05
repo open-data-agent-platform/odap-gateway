@@ -52,5 +52,28 @@ For the internal dispatch authorization gate that follows preparation, see
 submission, final receipt issuance from trusted outcomes, and deployed tenant
 tests are separate work.
 
+## Terminal observations without a bill
+
+`reconcileTerminalObservation(access, intentId, env)` is an internal operation.
+It checks the immutable job binding, pending receipt and dispatch claim before
+looking up metadata. The returned project, location, job ID, action label and
+query byte ceiling must match. A legacy claim without a ceiling is ineligible;
+migration 0008 adds no historical outcomes.
+
+The first terminal observation stores the outcome, optional billed bytes,
+observing tenant owner and database timestamp. If bytes were unknown, a later
+sample with the same outcome may append the first known count (including zero).
+Conflicting outcomes or known counts are rejected, not overwritten. Membership
+is checked again under the write lock. Concurrent identical readings are safe.
+Pending and not-found responses add nothing and never erase earlier evidence.
+Lookup failures propagate; callers can still use `readTerminalObservation`
+to read the most informative saved sample without contacting the warehouse.
+
+This record is operational evidence, **not a final monetary receipt**. Neither
+operation resubmits a job, returns query results, converts bytes to money,
+releases reserved funds or changes the pending Evidence Receipt. Authoritative
+billing reconciliation is a [separate internal step](COST_SETTLEMENT.md#bounded-bigquery-jobs-local-engineering),
+exercised locally with synthetic monetary evidence.
+
 References: [BigQuery Job](https://cloud.google.com/bigquery/docs/reference/rest/v2/Job)
 and [jobs.get](https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/get).

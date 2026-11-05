@@ -16,6 +16,7 @@ const eslintConfig = [
       "node_modules/**",
       "coverage/**",
       "out/**",
+      "dist/evidence/**",
       "next-env.d.ts"
     ]
   }

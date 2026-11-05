@@ -1,16 +1,16 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { observePreparedIntentJob, prepareIntentJob } from "../lib/bigquery-job-storage";
 import { dispatchPreparedMetricRead } from "../lib/dispatch-authority";
+import { stopBeforeDispatch } from "../lib/pre-dispatch-stop";
+import { dispatchBigQueryMetricRead } from "../lib/bigquery-governed-transport";
 import revenue from "./fixtures/revenue-metric.json";
 import type { ControlAccess } from "../lib/control-storage";
 import type { D1Database, D1Value } from "../lib/d1";
+import { jobSqlite } from "./fixtures/job-sqlite";
 
-const run = promisify(execFile);
 const target = { BIGQUERY_PROJECT_ID: "demo-project", BIGQUERY_LOCATION: "US" };
 let dir: string;
 let dbName: string;
@@ -19,10 +19,7 @@ let beforeClaim: (() => Promise<unknown>) | undefined;
 let claimMode: "run" | "run-after-expiry" | "run-after-price-expiry";
 
 async function sqlite(mode: string, sql = "", params: D1Value[] = []) {
-  const python = process.env.ODAP_TEST_PYTHON || (process.platform === "win32" ? "python" : "python3");
-  const { stdout } = await run(python, ["tests/fixtures/job-binding-sqlite.py", join(dir, dbName),
-    mode, JSON.stringify([sql, params])]);
-  return JSON.parse(stdout);
+  return jobSqlite(join(dir, dbName), mode, sql, params);
 }
 
 beforeEach(async () => {
@@ -58,11 +55,16 @@ it("upgrades actual v6 claims without fabricating their historical ceiling", asy
   await expect(sqlite("run", "UPDATE dispatch_claims SET maximum_bytes_billed=1")).rejects.toThrow("immutable");
   await expect(sqlite("run", "INSERT INTO dispatch_claims(tenant_id,intent_id,claimed_by) VALUES('t','new','owner')"))
     .rejects.toThrow("requires byte ceiling");
+  await sqlite("apply-terminal-observations");
+  await expect(sqlite("run", `INSERT INTO bigquery_terminal_observations
+    (tenant_id,intent_id,outcome,billed_bytes,has_bytes,observed_by)
+    VALUES('t','i','succeeded',NULL,0,'owner')`)).rejects.toThrow("terminal observation denied");
+  expect(await sqlite("first", "SELECT count(*) AS samples FROM bigquery_terminal_observations")).toEqual({ samples: 0 });
 }, 20_000);
 
 it("does not fall back to a default price or a different revision or region", async () => {
   await prepareDispatchFixture();
-  const adapter = { projectId: "demo-project", location: "US", loadDefinition: vi.fn(), submitRead: vi.fn() };
+  const adapter = { projectId: "demo-project", location: "US", loadDefinition: vi.fn(), prepareRead: vi.fn() };
   const dispatch = () => dispatchPreparedMetricRead(access, "i", { principalId: "user", agentId: "agent" },
     { target: "orders", metricId: "revenue", parameters: { year: 2026 } }, adapter);
   await expect(dispatch()).rejects.toThrow("Dispatch authority unavailable");
@@ -73,7 +75,7 @@ it("does not fall back to a default price or a different revision or region", as
   await addPolicy("p2", "US", "on_demand");
   await addPolicy("p1", "EU", "on_demand");
   await expect(dispatch()).rejects.toThrow("Dispatch authority unavailable");
-  expect(adapter.submitRead).not.toHaveBeenCalled();
+  expect(adapter.prepareRead).not.toHaveBeenCalled();
   expect(await sqlite("first", "SELECT count(*) AS n FROM dispatch_claims")).toEqual({ n: 0 });
 }, 20_000);
 
@@ -82,7 +84,8 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
   const action = { target: "orders", metricId: "revenue", parameters: { year: 2026 } };
   const submitRead = vi.fn<(job: unknown) => Promise<string>>();
   const loadDefinition = vi.fn<() => Promise<string>>();
-  const adapter = { projectId: "demo-project", location: "US", loadDefinition, submitRead };
+  const adapter = { projectId: "demo-project", location: "US", loadDefinition,
+    prepareRead: async (job: unknown) => () => submitRead(job) };
   const dispatch = () => dispatchPreparedMetricRead(access, "i", agent, action, adapter);
 
   beforeEach(async () => {
@@ -92,6 +95,78 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
     await sqlite("run", `INSERT INTO bigquery_scan_policies VALUES
       ('t','orders','p1','demo-project','US','on_demand',262144,100000000,'2080-01-01T00:00:00.000Z','synthetic fixture')`);
   });
+
+  function wire() {
+    return { projectId: "demo-project", location: "US", maxBytesBilled: 1048576, loadDefinition,
+      getAccessToken: vi.fn(async () => "offline-fixture"), sendOnce: vi.fn<(request: Request) => Promise<Response>>() };
+  }
+
+  it("constructs exactly one bounded jobs.insert after the claim, with no result data or implicit network", async () => {
+    const t = wire();
+    const network = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network not allowed"));
+    const prepared = await prepareIntentJob(access, "i", target);
+    t.sendOnce.mockImplementationOnce(async req => {
+      expect(req.method).toBe("POST");
+      expect(req.redirect).toBe("error");
+      const url = new URL(req.url);
+      expect(url.origin + url.pathname).toBe("https://bigquery.googleapis.com/bigquery/v2/projects/demo-project/jobs");
+      expect(req.headers.get("authorization")).toBe("Bearer offline-fixture");
+      const body = await req.json();
+      expect(body).toEqual({ jobReference: prepared.identity.jobReference, configuration: {
+        labels: prepared.identity.labels, query: {
+          query: "SELECT SUM(`net_amount`) AS metric_value FROM `demo-project.analytics.orders` WHERE `order_year` = @p0",
+          useLegacySql: false, parameterMode: "NAMED", maximumBytesBilled: "1048576",
+          queryParameters: [{ name: "p0", parameterType: { type: "INT64" }, parameterValue: { value: "2026" } }]
+        }
+      } });
+      expect(await sqlite("first", "SELECT maximum_bytes_billed AS cap FROM dispatch_claims")).toEqual({ cap: 1048576 });
+      return Response.json({ ...body, configuration: { ...body.configuration, jobType: "QUERY" } });
+    });
+    const result = await dispatchBigQueryMetricRead(access, "i", agent, action, t);
+    expect(result).toEqual({ state: "accepted", jobReference: prepared.identity.jobReference });
+    await expect(dispatchBigQueryMetricRead(access, "i", agent, action, t)).rejects.toThrow("already claimed");
+    expect(t.getAccessToken).toHaveBeenCalledTimes(1);
+    expect(t.sendOnce).toHaveBeenCalledTimes(1);
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  it("does not claim when authentication fails and rechecks authorization after token acquisition", async () => {
+    const t = wire();
+    await expect(dispatchBigQueryMetricRead(access, "i", agent, action, { ...t, maxBytesBilled: 0 }))
+      .rejects.toThrow("Explicit transport byte ceiling required");
+    expect(t.getAccessToken).not.toHaveBeenCalled();
+    t.getAccessToken.mockRejectedValueOnce(new Error("sensitive provider detail"));
+    await expect(dispatchBigQueryMetricRead(access, "i", agent, action, t)).rejects.toThrow(/^BigQuery transport authentication unavailable$/);
+    t.getAccessToken.mockImplementationOnce(async () => {
+      await sqlite("run", "DELETE FROM dispatch_read_grants");
+      return "offline-fixture";
+    });
+    await expect(dispatchBigQueryMetricRead(access, "i", agent, action, t)).rejects.toThrow("Dispatch denied");
+    expect(t.getAccessToken).toHaveBeenCalledTimes(2);
+    expect(t.sendOnce).not.toHaveBeenCalled();
+    expect(await sqlite("first", "SELECT count(*) AS n FROM dispatch_claims")).toEqual({ n: 0 });
+  });
+
+  it.each(["duplicate", "timeout", "invalid-json", "wrong-id", "wrong-label", "changed-cap"])(
+    "requires observation and never rearms a claim after %s", async failure => {
+      const t = wire();
+      t.sendOnce.mockImplementationOnce(async req => {
+        if (failure === "duplicate") return new Response(null, { status: 409 });
+        if (failure === "timeout") throw new Error("timeout");
+        if (failure === "invalid-json") return new Response("invalid");
+        const job = await req.json();
+        job.configuration.jobType = "QUERY";
+        if (failure === "wrong-id") job.jobReference.jobId = "different";
+        if (failure === "wrong-label") job.configuration.labels.odap_action = "different";
+        if (failure === "changed-cap") job.configuration.query.maximumBytesBilled = "999999999";
+        return Response.json(job);
+      });
+      expect((await dispatchBigQueryMetricRead(access, "i", agent, action, t)).state).toBe("observation-required");
+      await expect(dispatchBigQueryMetricRead(access, "i", agent, action, t)).rejects.toThrow("already claimed");
+      expect(t.sendOnce).toHaveBeenCalledTimes(1);
+      expect(await sqlite("first", "SELECT reserved_units,spent_units FROM control_budgets"))
+        .toEqual({ reserved_units: 20, spent_units: 0 });
+    });
 
   it("hands the exact bound read to one adapter across parallel attempts", async () => {
     const attempts = await Promise.allSettled([dispatch(), dispatch(), dispatch()]);
@@ -145,13 +220,40 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
     ["source revision", "UPDATE dispatch_targets SET source_revision='s2'"],
     ["project mapping", "UPDATE dispatch_targets SET project_id='another'"],
     ["release retirement", "INSERT INTO dispatch_retired_releases VALUES('t','r','superseded')"],
-    ["intent stop", "INSERT INTO dispatch_stopped_intents VALUES('t','i','revoked after admission')"],
     ["budget overrun", "UPDATE control_budgets SET overrun_units=1"]
   ])("denies changes to %s between preflight and claim", async (_name, sql) => {
     beforeClaim = () => sqlite("run", sql);
     await expect(dispatch()).rejects.toThrow("Dispatch denied");
     expect(submitRead).not.toHaveBeenCalled();
     expect(await sqlite("first", "SELECT count(*) AS n FROM dispatch_claims")).toEqual({ n: 0 });
+  });
+
+  it("does not hand off a prepared read when an owner stops it immediately before the final claim", async () => {
+    beforeClaim = async () => {
+      expect(await stopBeforeDispatch(access, "i")).toMatchObject({ state: "stopped", stoppedBy: "owner" });
+    };
+    await expect(dispatch()).rejects.toThrow("Dispatch denied");
+    expect(submitRead).not.toHaveBeenCalled();
+    await expect(sqlite("run", `INSERT INTO dispatch_claims(tenant_id,intent_id,claimed_by,maximum_bytes_billed)
+      VALUES('t','i','owner',1)`)).rejects.toThrow("dispatch stopped");
+    expect(await sqlite("first", `SELECT (SELECT count(*) FROM dispatch_claims) AS claims,
+      (SELECT count(*) FROM cost_settlements) AS settlements,
+      (SELECT json_extract(payload,'$.outcome') FROM evidence_receipts) AS receipt,
+      reserved_units,spent_units FROM control_budgets`))
+      .toEqual({ claims: 0, settlements: 0, receipt: "pending", reserved_units: 20, spent_units: 0 });
+  });
+
+  it("serializes a stop racing the real final claim on separate SQLite connections", async () => {
+    const ready = new Promise<void>(resolve => { beforeClaim = async () => resolve(); });
+    const [handoff, stop] = await Promise.allSettled([dispatch(), ready.then(() => stopBeforeDispatch(access, "i"))]);
+    expect(stop.status).toBe("fulfilled");
+    const sent = handoff.status === "fulfilled";
+    expect(stop).toMatchObject({ value: { state: sent ? "already-claimed" : "stopped" } });
+    if (!sent) expect(handoff.reason.message).toContain("Dispatch denied");
+    expect(submitRead).toHaveBeenCalledTimes(sent ? 1 : 0);
+    expect(await sqlite("first", `SELECT (SELECT count(*) FROM dispatch_claims) AS claims,
+      (SELECT count(*) FROM dispatch_stopped_intents) AS stops,reserved_units,spent_units FROM control_budgets`))
+      .toEqual({ claims: Number(sent), stops: Number(!sent), reserved_units: 20, spent_units: 0 });
   });
 
   it("does not carry authority over to a newer policy or a replacement semantic release", async () => {
@@ -176,6 +278,8 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
     beforeClaim = () => sqlite("run", "INSERT INTO cost_settlements(tenant_id,intent_id,receipt_id,actual_units,actor) VALUES('t','i','final',0,'owner')");
     await expect(dispatch()).rejects.toThrow("Dispatch denied");
     expect(submitRead).not.toHaveBeenCalled();
+    expect(await stopBeforeDispatch(access, "i")).toEqual({ state: "already-settled" });
+    expect(await sqlite("first", "SELECT count(*) AS n FROM dispatch_stopped_intents")).toEqual({ n: 0 });
   });
 
   it("rejects a substituted action, principal, tenant, agent or adapter", async () => {
@@ -190,6 +294,8 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
   it("does not resubmit after an ambiguous adapter failure", async () => {
     submitRead.mockRejectedValueOnce(new Error("network timeout"));
     await expect(dispatch()).rejects.toThrow("network timeout");
+    expect(await stopBeforeDispatch(access, "i")).toEqual({ state: "already-claimed" });
+    expect(await sqlite("first", "SELECT count(*) AS n FROM dispatch_stopped_intents")).toEqual({ n: 0 });
     await expect(dispatch()).rejects.toThrow("already claimed");
     expect(submitRead).toHaveBeenCalledTimes(1);
   });

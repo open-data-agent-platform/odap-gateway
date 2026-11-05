@@ -6,16 +6,23 @@ import sys
 from pathlib import Path
 
 path, mode = sys.argv[1:3]
-db = sqlite3.connect(path, timeout=15)
+db = (sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True, timeout=15)
+      if mode == "readonly-first" else sqlite3.connect(path, timeout=15))
 db.row_factory = sqlite3.Row
 db.execute("PRAGMA foreign_keys=ON")
 migrations = Path(__file__).resolve().parents[2] / "db/migrations"
-if mode == "apply-scan-limits":
-    db.executescript((migrations / "0007_bigquery_scan_limits.sql").read_text(encoding="utf-8"))
+upgrades = {"apply-scan-limits": "0007_bigquery_scan_limits.sql",
+            "apply-terminal-observations": "0008_bigquery_terminal_observations.sql",
+            "apply-billing-evidence": "0009_bigquery_billing_evidence.sql",
+            "apply-preapproval-denials": "0010_missing_release_denials.sql",
+            "apply-pre-dispatch-stop": "0011_pre_dispatch_stop.sql",
+            "apply-cancellation-requests": "0012_bigquery_cancellation_requests.sql"}
+if mode in upgrades:
+    db.executescript((migrations / upgrades[mode]).read_text(encoding="utf-8"))
     result = None
-elif mode in ("setup", "setup-v6"):
+elif mode in ("setup", "setup-v6", "setup-v8", "setup-v9", "setup-v10"):
     for migration in sorted(migrations.glob("*.sql")):
-        if mode == "setup-v6" and int(migration.name.split("_", 1)[0]) > 6:
+        if mode.startswith("setup-v") and int(migration.name.split("_", 1)[0]) > int(mode[len("setup-v"):]):
             continue
         db.executescript(migration.read_text(encoding="utf-8"))
     db.execute("INSERT INTO control_tenants VALUES ('t','Tenant')")
@@ -46,7 +53,7 @@ else:
                            (future if v == "now" else v,)).fetchone()[0])
     sql, params = json.loads(sys.argv[3])
     cursor = db.execute(sql, params)
-    if mode == "first":
+    if mode in ("first", "readonly-first"):
         row = cursor.fetchone()
         result = dict(row) if row is not None else None
     else:

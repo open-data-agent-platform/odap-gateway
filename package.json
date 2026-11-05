@@ -10,6 +10,8 @@
     "lint": "node node_modules/eslint/bin/eslint.js .",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "test": "node node_modules/vitest/vitest.mjs run --environment node",
+    "evidence:build": "tsc -p scripts/tsconfig.evidence.json",
+    "evidence:verify": "node dist/evidence/scripts/verify-settled-evidence.js",
     "ci": "npm run lint && npm run typecheck && npm run test && npm run build",
     "worker:dry-run": "npx wrangler deploy --config wrangler.example.jsonc --dry-run",
     "worker:deploy": "npx wrangler deploy --config wrangler.example.jsonc"
