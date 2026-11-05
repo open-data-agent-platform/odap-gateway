@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { observePreparedIntentJob, prepareIntentJob } from "../lib/bigquery-job-storage";
 import { dispatchPreparedMetricRead } from "../lib/dispatch-authority";
+import revenue from "./fixtures/revenue-metric.json";
 import type { ControlAccess } from "../lib/control-storage";
 import type { D1Database, D1Value } from "../lib/d1";
 
@@ -42,11 +43,13 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
   const agent = { principalId: "user", agentId: "agent" };
   const action = { target: "orders", metricId: "revenue", parameters: { year: 2026 } };
   const submitRead = vi.fn<(job: unknown) => Promise<string>>();
-  const adapter = { projectId: "demo-project", location: "US", submitRead };
+  const loadDefinition = vi.fn<() => Promise<string>>();
+  const adapter = { projectId: "demo-project", location: "US", loadDefinition, submitRead };
   const dispatch = () => dispatchPreparedMetricRead(access, "i", agent, action, adapter);
 
   beforeEach(async () => {
     submitRead.mockReset().mockResolvedValue("submitted");
+    loadDefinition.mockReset().mockResolvedValue(JSON.stringify(revenue));
     await prepareIntentJob(access, "i", target);
     await sqlite("run", "INSERT INTO dispatch_targets VALUES('t','orders','r','p1','s1','demo-project','US')");
     await sqlite("run", "INSERT INTO dispatch_read_grants VALUES('t','orders','user','agent','p1')");
@@ -57,10 +60,24 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
     expect(attempts.filter(r => r.status === "fulfilled")).toHaveLength(1);
     expect(submitRead).toHaveBeenCalledTimes(1);
     expect(submitRead).toHaveBeenCalledWith(expect.objectContaining({
-      canonicalAction: '{"metricId":"revenue","parameters":{"year":2026},"profile":"odap.metric-read.v1","target":"orders"}',
-      release: expect.objectContaining({ id: "r", definitionDigest: "definition" }),
+      queryConfig: { query: "SELECT SUM(`net_amount`) AS metric_value FROM `demo-project.analytics.orders` WHERE `order_year` = @p0",
+        useLegacySql: false, parameterMode: "NAMED",
+        queryParameters: [{ name: "p0", parameterType: { type: "INT64" }, parameterValue: { value: "2026" } }] },
+      release: expect.objectContaining({ id: "r", definitionDigest: expect.stringMatching(/^sha256:/) }),
       identity: expect.objectContaining({ jobReference: expect.objectContaining({ jobId: expect.stringMatching(/^odap_/) }) })
     }));
+  });
+
+  it("does not consume the claim for a missing or substituted metric definition", async () => {
+    loadDefinition.mockRejectedValueOnce(new Error("not found")).mockResolvedValueOnce(JSON.stringify({
+      ...revenue, measure: { aggregate: "SUM", column: "gross_amount" }
+    }));
+    await expect(dispatch()).rejects.toThrow("not found");
+    await expect(dispatch()).rejects.toThrow("Metric release mismatch");
+    expect(loadDefinition).toHaveBeenCalledWith({ tenantId: "t", releaseId: "r" });
+    expect(submitRead).not.toHaveBeenCalled();
+    expect(await sqlite("first", "SELECT count(*) AS n FROM dispatch_claims")).toEqual({ n: 0 });
+    await expect(dispatch()).resolves.toBe("submitted");
   });
 
   it.each([

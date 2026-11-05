@@ -141,6 +141,11 @@ export function validateEvidenceReceipt(receipt: EvidenceReceipt) {
   return receipt.outcome === "denied" || Boolean(receipt.contractId?.trim() && receipt.semanticReleaseId?.trim());
 }
 
+export async function sha256Text(text: string) {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return "sha256:" + Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, "0")).join("");
+}
+
 // Local canonical JSON profile, not an interoperable signing standard.
 // Restrict values to JSON and safe integers; reject undefined and exotic objects.
 export function canonicalControlJson(value: unknown): string {
