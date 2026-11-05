@@ -1,4 +1,5 @@
 import { getPhase4Health, getPublicHealth } from "../lib/phase2";
+import { onRequestGet as onControlObjectGet } from "../functions/api/control/[tenant]/[kind]/[id]";
 import { getPublicSession, getSessionRole, type AuthEnv } from "../lib/auth";
 import {
   getSessionFromRequest,
@@ -114,6 +115,11 @@ function matchApiRoute(
   env: WorkerEnv,
   url: URL
 ): RouteMatch | null {
+  const control = url.pathname.match(/^\/api\/control\/([^/]+)\/([^/]+)\/([^/]+)$/);
+  if (control) return {
+    allowedMethods: ["GET"],
+    handler: () => onControlObjectGet({ request, env, params: { tenant: control[1], kind: control[2], id: control[3] } })
+  };
   if (url.pathname === "/api/health") {
     return {
       allowedMethods: ["GET", "HEAD"],
