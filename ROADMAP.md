@@ -34,7 +34,7 @@ Priorities can be challenged by issue.
 ## Proposed experiments - pending design review
 
 Track [discussion #8](https://github.com/open-data-agent-platform/awesome-odap/issues/8)
-and [the design proposal PR](https://github.com/open-data-agent-platform/awesome-odap/pull/9).
+and [the design proposals](https://github.com/open-data-agent-platform/awesome-odap/blob/main/docs/design-proposals.md).
 These optional experiments are not v0.1.0 functionality or release commitments.
 
 - Semantic candidates: stage generated definitions, preserve provenance, validate,
