@@ -1,0 +1,10 @@
+{
+  "profile": "odap.bigquery-metric.v1",
+  "tenantId": "t",
+  "sourceRevision": "s1",
+  "target": "orders",
+  "metricId": "revenue",
+  "table": { "project": "demo-project", "dataset": "analytics", "name": "orders" },
+  "measure": { "aggregate": "SUM", "column": "net_amount" },
+  "filters": { "year": { "column": "order_year", "type": "INT64" } }
+}

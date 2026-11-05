@@ -14,8 +14,10 @@ if mode == "setup":
         db.executescript(migration.read_text(encoding="utf-8"))
     db.execute("INSERT INTO control_tenants VALUES ('t','Tenant')")
     db.execute("INSERT INTO control_memberships VALUES ('t','owner','owner',1),('t','user','reader',1)")
+    metric = json.loads(Path(__file__).with_name("revenue-metric.json").read_text(encoding="utf-8"))
+    definition_digest = hashlib.sha256(json.dumps(metric, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     release = {"id": "r", "tenantId": "t", "schemaVersion": "0.1", "state": "released",
-               "owner": "owner", "definitionDigest": "definition", "sourceRevision": "s1"}
+               "owner": "owner", "definitionDigest": "sha256:" + definition_digest, "sourceRevision": "s1"}
     db.execute("INSERT INTO semantic_releases(tenant_id,id,payload,created_by) VALUES('t','r',?,'owner')",
                (json.dumps(release),))
     action = {"profile": "odap.metric-read.v1", "target": "orders", "metricId": "revenue", "parameters": {"year": 2026}}

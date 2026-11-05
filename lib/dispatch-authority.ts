@@ -1,6 +1,7 @@
 import { readPreparedJob } from "./bigquery-job-storage";
 import type { intentJobIdentity } from "./bigquery-job-recovery";
-import { canonicalControlJson, isApprovalContract, isSemanticRelease, type SemanticRelease } from "./control-objects";
+import { canonicalControlJson, isApprovalContract, isSemanticRelease, sha256Text, type SemanticRelease } from "./control-objects";
+import { compileReleasedMetric } from "./metric-compiler";
 import type { ControlAccess } from "./control-storage";
 
 type MetricRead = {
@@ -11,9 +12,13 @@ type MetricRead = {
 type Submission = {
   identity: Awaited<ReturnType<typeof intentJobIdentity>>;
   release: SemanticRelease;
-  canonicalAction: string;
+  queryConfig: Awaited<ReturnType<typeof compileReleasedMetric>>;
 };
-type ReadAdapter<T> = { projectId: string; location: string; submitRead(job: Submission): Promise<T> };
+type ReadAdapter<T> = {
+  projectId: string; location: string;
+  loadDefinition(key: { tenantId: string; releaseId: string }): Promise<string>;
+  submitRead(job: Submission): Promise<T>;
+};
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
@@ -28,9 +33,7 @@ export async function bindMetricRead(action: MetricRead) {
         v === null || ["string", "boolean", "number"].includes(typeof v))) throw new Error("Invalid metric read");
   const canonicalAction = canonicalControlJson({ profile: "odap.metric-read.v1", target: action.target,
     metricId: action.metricId, parameters: action.parameters });
-  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalAction));
-  return { canonicalAction, actionDigest: "sha256:" + Array.from(new Uint8Array(bytes),
-    b => b.toString(16).padStart(2, "0")).join("") };
+  return { canonicalAction, actionDigest: await sha256Text(canonicalAction) };
 }
 
 // Internal dispatcher only. Access is the verified tenant operator; subject and
@@ -42,6 +45,7 @@ export async function dispatchPreparedMetricRead<T>(access: ControlAccess, inten
   const { projectId, location } = adapter;
   const target = action.target;
   const submit = adapter.submitRead.bind(adapter);
+  const loadDefinition = adapter.loadDefinition.bind(adapter);
   const { canonicalAction, actionDigest } = await bindMetricRead(action);
   const job = await readPreparedJob({ db, tenantId, principalId: operator }, intentId);
   if (job.binding.actionDigest !== actionDigest || job.binding.projectId !== projectId ||
@@ -62,6 +66,8 @@ export async function dispatchPreparedMetricRead<T>(access: ControlAccess, inten
       release.id !== job.receipt.semanticReleaseId || contract.semanticReleaseId !== release.id) {
     throw new Error("Invalid dispatch authority");
   }
+  const definition = await loadDefinition({ tenantId, releaseId: release.id });
+  const queryConfig = await compileReleasedMetric(release, definition, canonicalAction, projectId);
   // Mutable facts and database time are reread under the claim's write lock.
   // Never retry submission after a conflict, timeout, or ambiguous storage result.
   const claim = await db.prepare(`INSERT INTO dispatch_claims(tenant_id,intent_id,claimed_by)
@@ -69,5 +75,5 @@ export async function dispatchPreparedMetricRead<T>(access: ControlAccess, inten
     ON CONFLICT(tenant_id,intent_id) DO NOTHING`)
     .bind(operator, ...args, row.contract_payload, row.release_payload).run();
   if (!claim.success || claim.meta?.changes !== 1) throw new Error("Dispatch denied or already claimed");
-  return submit({ identity: job.identity, release, canonicalAction });
+  return submit({ identity: job.identity, release, queryConfig });
 }

@@ -19,7 +19,10 @@ BigQuery job**. It changes no public endpoint and enables no tenant by default.
    with verified operator access and delegated subject/agent identity. **Do
    not trust subject IDs, adapter configuration or permissions from a client.**
    The gate checks the stored job and pending evidence, validates both
-   versioned snapshots and hashes the exact proposed action.
+   versioned snapshots and hashes the exact proposed action. Its trusted
+   definition loader resolves the tenant and release ID. The [metric
+   compiler](METRIC_COMPILER.md) verifies the returned definition against the
+   release digest and builds the parameterized query before claiming.
 4. A single conditional write rechecks both memberships, the explicit grant,
    current target and release, policy and source revisions, original action,
    contract consumption by this intent, database-time expiry, budget overrun,
@@ -27,8 +30,8 @@ BigQuery job**. It changes no public endpoint and enables no tenant by default.
    permits handoff. No grant, mismatch, stale evidence, storage failure or
    existing claim means no adapter call. Earlier reservations remain held.
 
-The trusted adapter gets the canonical action string, the validated semantic
-release and the exact pinned job identity; it is not given arbitrary SQL.
+The trusted adapter gets only the compiled query configuration, the validated
+semantic release and the exact pinned job identity, not caller-supplied SQL.
 The claim is the local decision time, **not** proof of warehouse acceptance.
 A revocation committed before the claim prevents handoff. A revocation after
 the claim cannot atomically retract an external request. Crash or timeout
@@ -38,6 +41,6 @@ and terminal/denial receipts need separate handling.
 
 Coverage uses actual migration and service SQL in SQLite and a test adapter.
 This is not a live submission path or independent authentication of a remote
-agent. A production adapter still needs release-bound query compilation,
+agent. A production adapter still needs an authoritative definition store,
 warehouse-level permissions, a billing ceiling, cancellation and recovery.
 Legacy schema import and dry-run endpoints are outside this governed handoff.
