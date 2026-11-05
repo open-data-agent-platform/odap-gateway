@@ -7,6 +7,7 @@ import {
 } from "./phase2";
 
 export type BigQueryEnv = {
+  GATEWAY_MODE?: "demo" | "production";
   BIGQUERY_PROJECT_ID?: string;
   BIGQUERY_CLIENT_EMAIL?: string;
   BIGQUERY_PRIVATE_KEY?: string;

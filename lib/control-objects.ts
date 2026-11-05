@@ -54,6 +54,61 @@ function headerValid(value: ObjectHeader) {
   return value.schemaVersion === "0.1" && Boolean(value.id?.trim()) && Boolean(value.tenantId?.trim());
 }
 
+function object(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function shape(value: unknown, strings: string[], enums: Record<string, readonly string[]>, extra: string[] = []) {
+  if (!object(value)) return false;
+  const keys = [...strings, ...Object.keys(enums), ...extra];
+  if (Object.keys(value).some(key => !keys.includes(key))) return false;
+  return strings.every(key => typeof value[key] === "string" && (value[key] as string).trim().length > 0) &&
+    Object.entries(enums).every(([key, options]) => typeof value[key] === "string" && options.includes(value[key] as string));
+}
+
+function timestamp(value: unknown) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && new Date(time).toISOString() === value;
+}
+
+export function isSemanticRelease(value: unknown): value is SemanticRelease {
+  return shape(value, ["id", "tenantId", "definitionDigest", "sourceRevision", "owner"],
+    { schemaVersion: ["0.1"], state: ["released", "deprecated", "revoked"] });
+}
+
+export function isApprovalContract(value: unknown): value is ApprovalContract {
+  if (!shape(value, ["id", "tenantId", "semanticReleaseId", "principalId", "agentId", "actionDigest",
+    "policyRevision", "sourceRevision", "target", "reservationId", "expiresAt"],
+  { schemaVersion: ["0.1"], actionType: ["data.read"], state: ["authorized", "consumed", "revoked"] }, ["authority"])) return false;
+  const record = value as Record<string, unknown>;
+  return timestamp(record.expiresAt) && shape(record.authority, ["reference"], { mode: ["human", "policy"] });
+}
+
+export function isEvidenceReceipt(value: unknown): value is EvidenceReceipt {
+  if (!shape(value, ["id", "tenantId", "intentId", "reason", "recordedAt"],
+    { schemaVersion: ["0.1"], outcome: ["denied", "pending", "succeeded", "failed", "cancelled"] },
+    ["contractId", "semanticReleaseId"])) return false;
+  const record = value as Record<string, unknown>;
+  return timestamp(record.recordedAt) && ["contractId", "semanticReleaseId"].every(key =>
+    record[key] === null ? record.outcome === "denied" : typeof record[key] === "string" && (record[key] as string).trim().length > 0);
+}
+
+export function isExecutionContext(value: unknown): value is ExecutionContext {
+  return shape(value, ["tenantId", "principalId", "agentId", "actionDigest", "policyRevision", "sourceRevision", "target", "reservationId"],
+    {}, ["now", "permissionGranted", "reservationActive"]) && object(value) &&
+    typeof value.now === "number" && Number.isSafeInteger(value.now) &&
+    typeof value.permissionGranted === "boolean" && typeof value.reservationActive === "boolean";
+}
+
+export function evaluateUntrustedExecution(release: unknown, contract: unknown, context: unknown) {
+  if (!isSemanticRelease(release) || !isApprovalContract(contract) || !isExecutionContext(context)) {
+    return { allowed: false, reason: "invalid_wire_object" };
+  }
+  return evaluateExecutionContract(release, contract, context);
+}
+
 export function evaluateExecutionContract(
   release: SemanticRelease,
   contract: ApprovalContract,

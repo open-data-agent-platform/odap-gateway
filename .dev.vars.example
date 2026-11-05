@@ -10,3 +10,5 @@ BIGQUERY_PRIVATE_KEY=your-pkcs8-service-account-private-key
 BIGQUERY_LOCATION=US
 BIGQUERY_MAX_BYTES_BILLED=10737418240
 BIGQUERY_DRY_RUN_MODE=simulated
+# Set explicitly for production. Missing mode preserves legacy demo behavior.
+GATEWAY_MODE=demo

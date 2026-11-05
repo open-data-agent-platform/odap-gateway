@@ -27,6 +27,16 @@ migration is required before combining them with these objects.
 
 ## P0 acceptance still open
 
+Development update: strict runtime guards now validate the three wire objects
+and execution context. Unknown fields/versions and noncanonical UTC timestamps
+are rejected. Use evaluateUntrustedExecution at untrusted JSON boundaries.
+
+The dry-run endpoint now supports explicit GATEWAY_MODE=production. This requires
+a session, live credentials and D1 binding, rejects policy-blocked or simulated
+previews, and refuses successful responses when persistence fails. Omitted mode
+retains legacy demo-compatible behavior; configure production explicitly.
+This is not complete tenant authorization or the full execution contract path.
+
 - Runtime schemas and complete lifecycle fixtures for all three objects.
 - Full execution/auth path inventory and explicit production/demo configuration.
 - Independent review of contracts, canonicalization and recovery semantics.
