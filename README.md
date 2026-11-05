@@ -58,7 +58,6 @@ binding records. It is a CLI experiment with trusted operator inputs, not a
 production authorization service or NVIDIA integration.
 
 **Early-stage reference implementation (v0.1.x). APIs subject to change.**
-Roadmap: [ROADMAP.md](ROADMAP.md). One-command Docker demo is planned for v0.2.
 
 ## Contributing and challenging
 
@@ -68,8 +67,7 @@ Optional [design proposals](https://github.com/open-data-agent-platform/awesome-
 cover human-reviewed semantic candidates (including possible NVIDIA Auto Ontology
 adapters), delegated identity and session policies, and cost/audit evidence.
 Join [discussion #8](https://github.com/open-data-agent-platform/awesome-odap/issues/8).
-These are planning documents, not implemented v0.1.0 features. See the
-[roadmap](ROADMAP.md) for prototype acceptance criteria. The Five Musts,
+These optional proposals do not describe implemented v0.1.0 features. The Five Musts,
 Rubric, and current clause mapping are unchanged.
 
 PRs welcome. If you think a Rubric clause is mapped wrong, or a Must is
