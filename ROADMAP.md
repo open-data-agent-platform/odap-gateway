@@ -30,3 +30,26 @@ more reference-worthy, not by feature demand.
 - Energy/resource awareness, tracking proposed C5.5
 
 Priorities can be challenged by issue.
+
+## Proposed experiments - pending design review
+
+Track [discussion #8](https://github.com/open-data-agent-platform/awesome-odap/issues/8)
+and [the design proposal PR](https://github.com/open-data-agent-platform/awesome-odap/pull/9).
+These optional experiments are not v0.1.0 functionality or release commitments.
+
+- Semantic candidates: stage generated definitions, preserve provenance, validate,
+  require named human approval, and publish immutable releases. NVIDIA Auto
+  Ontology is a possible adapter source; no integration is claimed today.
+- Semantic use: bind queries to a released version; reject unreleased or
+  unauthorized definitions. Schema drift triggers review instead of silent edits.
+- Identity and session policy: preserve the original caller and tenant across
+  tool calls, recheck execution permissions, and bound retries and delegation.
+- Cost and audit: distinguish estimates, alerts, delayed blocking, admission
+  limits, and cancellation. Correlate decisions, approvals, semantic/policy
+  versions, jobs, and costs without exposing credentials or sensitive results.
+
+Prototype acceptance uses synthetic/public data and held-out evaluation cases:
+prove candidate-to-release behavior, tenant isolation, rejection of changed or
+expired approvals, concurrent budget accounting, bounded retries, and complete
+decision/execution audit links. Document any enforcement latency and overspend.
+Update the clause mapping only after code and evidence justify a status change.
