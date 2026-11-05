@@ -348,8 +348,7 @@ function parseMaxBytesBilled(value: string | undefined) {
 function createDryRunJobRequest(sql: string, env: BigQueryEnv) {
   const query: Record<string, unknown> = {
     query: sql,
-    useLegacySql: false,
-    dryRun: true
+    useLegacySql: false
   };
 
   if (env.BIGQUERY_MAX_BYTES_BILLED) {
@@ -358,6 +357,7 @@ function createDryRunJobRequest(sql: string, env: BigQueryEnv) {
 
   return {
     configuration: {
+      dryRun: true,
       query
     },
     jobReference: {
@@ -387,7 +387,7 @@ function createQueryRequest(sql: string, env: BigQueryEnv) {
   return query;
 }
 
-async function createBigQueryAccessToken(env: BigQueryEnv) {
+export async function createBigQueryAccessToken(env: BigQueryEnv) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const assertion = await signJwt(
     {
@@ -468,11 +468,13 @@ function createQueriesUrl(projectId: string | undefined) {
 function getProcessedBytes(job: BigQueryJobResponse) {
   const value =
     job.statistics?.query?.totalBytesProcessed ??
-    job.statistics?.totalBytesProcessed ??
-    "0";
+    job.statistics?.totalBytesProcessed;
+  if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) {
+    throw new Error("Missing or invalid dry-run byte estimate.");
+  }
   const parsed = Number(value);
-
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  if (!Number.isSafeInteger(parsed)) throw new Error("Dry-run byte estimate exceeds supported range.");
+  return parsed;
 }
 
 function estimateBigQueryCostUsd(scannedBytes: number) {
