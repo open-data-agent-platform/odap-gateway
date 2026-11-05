@@ -52,6 +52,11 @@ credentials for sign-in. See `docs/AUTH_SETUP.md`.
 
 ## Status
 
+Experimental development: a [local semantic registry prototype](docs/SEMANTIC_REGISTRY_PROTOTYPE.md)
+supports candidate review, owner approval, immutable release IDs, and query
+binding records. It is a CLI experiment with trusted operator inputs, not a
+production authorization service or NVIDIA integration.
+
 **Early-stage reference implementation (v0.1.x). APIs subject to change.**
 Roadmap: [ROADMAP.md](ROADMAP.md). One-command Docker demo is planned for v0.2.
 
