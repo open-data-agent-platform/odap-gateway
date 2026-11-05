@@ -9,8 +9,14 @@ path, mode = sys.argv[1:3]
 db = sqlite3.connect(path, timeout=15)
 db.row_factory = sqlite3.Row
 db.execute("PRAGMA foreign_keys=ON")
-if mode == "setup":
-    for migration in sorted((Path(__file__).resolve().parents[2] / "db/migrations").glob("*.sql")):
+migrations = Path(__file__).resolve().parents[2] / "db/migrations"
+if mode == "apply-scan-limits":
+    db.executescript((migrations / "0007_bigquery_scan_limits.sql").read_text(encoding="utf-8"))
+    result = None
+elif mode in ("setup", "setup-v6"):
+    for migration in sorted(migrations.glob("*.sql")):
+        if mode == "setup-v6" and int(migration.name.split("_", 1)[0]) > 6:
+            continue
         db.executescript(migration.read_text(encoding="utf-8"))
     db.execute("INSERT INTO control_tenants VALUES ('t','Tenant')")
     db.execute("INSERT INTO control_memberships VALUES ('t','owner','owner',1),('t','user','reader',1)")
@@ -33,10 +39,11 @@ if mode == "setup":
     db.execute("INSERT INTO execution_intents VALUES('t','i','c','b','s','user',?,20,'now')", (digest,))
     result = None
 else:
-    if mode == "run-after-expiry":
+    if mode in ("run-after-expiry", "run-after-price-expiry"):
         clock = sqlite3.connect(":memory:")
+        future = "2100-01-01" if mode == "run-after-expiry" else "2090-01-01"
         db.create_function("julianday", 1, lambda v: clock.execute("SELECT julianday(?)",
-                           ("2100-01-01" if v == "now" else v,)).fetchone()[0])
+                           (future if v == "now" else v,)).fetchone()[0])
     sql, params = json.loads(sys.argv[3])
     cursor = db.execute(sql, params)
     if mode == "first":

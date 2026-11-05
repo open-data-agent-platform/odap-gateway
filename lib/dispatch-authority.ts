@@ -2,6 +2,7 @@ import { readPreparedJob } from "./bigquery-job-storage";
 import type { intentJobIdentity } from "./bigquery-job-recovery";
 import { canonicalControlJson, isApprovalContract, isSemanticRelease, sha256Text, type SemanticRelease } from "./control-objects";
 import { compileReleasedMetric } from "./metric-compiler";
+import { bigQueryByteCeiling } from "./bigquery-byte-ceiling";
 import type { ControlAccess } from "./control-storage";
 
 type MetricRead = {
@@ -12,7 +13,7 @@ type MetricRead = {
 type Submission = {
   identity: Awaited<ReturnType<typeof intentJobIdentity>>;
   release: SemanticRelease;
-  queryConfig: Awaited<ReturnType<typeof compileReleasedMetric>>;
+  queryConfig: Awaited<ReturnType<typeof compileReleasedMetric>> & { maximumBytesBilled: string };
 };
 type ReadAdapter<T> = {
   projectId: string; location: string;
@@ -56,8 +57,9 @@ export async function dispatchPreparedMetricRead<T>(access: ControlAccess, inten
     AND EXISTS(SELECT 1 FROM control_memberships WHERE tenant_id=? AND principal_id=? AND active=1 AND role='owner')`;
   const args = [tenantId, intentId, principalId, agentId, target, actionDigest, projectId, location,
     job.identity.jobReference.jobId, job.identity.labels.odap_action, job.receipt.id, tenantId, operator];
-  const row = await db.prepare(`SELECT contract_payload,release_payload FROM dispatch_eligible_reads WHERE ${scope}`)
-    .bind(...args).first<{ contract_payload: string; release_payload: string }>();
+  const row = await db.prepare(`SELECT contract_payload,release_payload,reserved_units,micro_usd_per_tib,max_job_bytes
+    FROM dispatch_priced_reads WHERE ${scope}`).bind(...args).first<{ contract_payload: string; release_payload: string;
+      reserved_units: number; micro_usd_per_tib: number; max_job_bytes: number }>();
   if (!row) throw new Error("Dispatch authority unavailable");
   const contract: unknown = JSON.parse(row.contract_payload);
   const release: unknown = JSON.parse(row.release_payload);
@@ -66,14 +68,18 @@ export async function dispatchPreparedMetricRead<T>(access: ControlAccess, inten
       release.id !== job.receipt.semanticReleaseId || contract.semanticReleaseId !== release.id) {
     throw new Error("Invalid dispatch authority");
   }
+  const ceiling = bigQueryByteCeiling(row.reserved_units, row.micro_usd_per_tib, row.max_job_bytes);
   const definition = await loadDefinition({ tenantId, releaseId: release.id });
-  const queryConfig = await compileReleasedMetric(release, definition, canonicalAction, projectId);
+  const compiled = await compileReleasedMetric(release, definition, canonicalAction, projectId);
+  const queryConfig = { ...compiled, maximumBytesBilled: String(ceiling) };
   // Mutable facts and database time are reread under the claim's write lock.
   // Never retry submission after a conflict, timeout, or ambiguous storage result.
-  const claim = await db.prepare(`INSERT INTO dispatch_claims(tenant_id,intent_id,claimed_by)
-    SELECT tenant_id,intent_id,? FROM dispatch_eligible_reads WHERE ${scope} AND contract_payload=? AND release_payload=?
-    ON CONFLICT(tenant_id,intent_id) DO NOTHING`)
-    .bind(operator, ...args, row.contract_payload, row.release_payload).run();
+  const claim = await db.prepare(`INSERT INTO dispatch_claims(tenant_id,intent_id,claimed_by,maximum_bytes_billed)
+    SELECT tenant_id,intent_id,?,? FROM dispatch_priced_reads WHERE ${scope} AND contract_payload=? AND release_payload=?
+    AND reserved_units=? AND micro_usd_per_tib=? AND max_job_bytes=?
+    AND NOT EXISTS(SELECT 1 FROM dispatch_claims WHERE tenant_id=? AND intent_id=?)`)
+    .bind(operator, ceiling, ...args, row.contract_payload, row.release_payload,
+      row.reserved_units, row.micro_usd_per_tib, row.max_job_bytes, tenantId, intentId).run();
   if (!claim.success || claim.meta?.changes !== 1) throw new Error("Dispatch denied or already claimed");
   return submit({ identity: job.identity, release, queryConfig });
 }
