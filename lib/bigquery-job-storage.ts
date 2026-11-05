@@ -8,7 +8,7 @@ type StoredJob = {
   receipt_id: string; contract_id: string; release_id: string; payload: string;
 };
 
-async function readPreparedJob(access: ControlAccess, intentId: string) {
+export async function readPreparedJob(access: ControlAccess, intentId: string) {
   const row = await access.db.prepare(`SELECT b.project_id,b.location,b.job_id,b.action_tag,b.receipt_id,
       i.action_digest,i.contract_id,c.release_id,r.payload
     FROM bigquery_job_bindings b

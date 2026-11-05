@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { observePreparedIntentJob, prepareIntentJob } from "../lib/bigquery-job-storage";
+import { dispatchPreparedMetricRead } from "../lib/dispatch-authority";
 import type { ControlAccess } from "../lib/control-storage";
 import type { D1Database, D1Value } from "../lib/d1";
 
@@ -12,6 +13,8 @@ const run = promisify(execFile);
 const target = { BIGQUERY_PROJECT_ID: "demo-project", BIGQUERY_LOCATION: "US" };
 let dir: string;
 let access: ControlAccess;
+let beforeClaim: (() => Promise<unknown>) | undefined;
+let claimMode: "run" | "run-after-expiry";
 
 async function sqlite(mode: string, sql = "", params: D1Value[] = []) {
   const python = process.env.ODAP_TEST_PYTHON || (process.platform === "win32" ? "python" : "python3");
@@ -23,10 +26,99 @@ async function sqlite(mode: string, sql = "", params: D1Value[] = []) {
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "odap-binding-"));
   await sqlite("setup");
+  beforeClaim = undefined;
+  claimMode = "run";
   const db = { prepare: (sql: string) => ({ bind: (...params: D1Value[]) => ({
-    first: () => sqlite("first", sql, params), run: () => sqlite("run", sql, params)
+    first: () => sqlite("first", sql, params), run: async () => {
+      if (!sql.startsWith("INSERT INTO dispatch_claims")) return sqlite("run", sql, params);
+      await beforeClaim?.();
+      return sqlite(claimMode, sql, params);
+    }
   }) }) } as D1Database;
   access = { db, tenantId: "t", principalId: "owner" };
+});
+
+describe("final dispatch gate", { timeout: 20_000 }, () => {
+  const agent = { principalId: "user", agentId: "agent" };
+  const action = { target: "orders", metricId: "revenue", parameters: { year: 2026 } };
+  const submitRead = vi.fn<(job: unknown) => Promise<string>>();
+  const adapter = { projectId: "demo-project", location: "US", submitRead };
+  const dispatch = () => dispatchPreparedMetricRead(access, "i", agent, action, adapter);
+
+  beforeEach(async () => {
+    submitRead.mockReset().mockResolvedValue("submitted");
+    await prepareIntentJob(access, "i", target);
+    await sqlite("run", "INSERT INTO dispatch_targets VALUES('t','orders','r','p1','s1','demo-project','US')");
+    await sqlite("run", "INSERT INTO dispatch_read_grants VALUES('t','orders','user','agent','p1')");
+  });
+
+  it("hands the exact bound read to one adapter across parallel attempts", async () => {
+    const attempts = await Promise.allSettled([dispatch(), dispatch(), dispatch()]);
+    expect(attempts.filter(r => r.status === "fulfilled")).toHaveLength(1);
+    expect(submitRead).toHaveBeenCalledTimes(1);
+    expect(submitRead).toHaveBeenCalledWith(expect.objectContaining({
+      canonicalAction: '{"metricId":"revenue","parameters":{"year":2026},"profile":"odap.metric-read.v1","target":"orders"}',
+      release: expect.objectContaining({ id: "r", definitionDigest: "definition" }),
+      identity: expect.objectContaining({ jobReference: expect.objectContaining({ jobId: expect.stringMatching(/^odap_/) }) })
+    }));
+  });
+
+  it.each([
+    ["original membership", "UPDATE control_memberships SET active=0 WHERE principal_id='user'"],
+    ["operator role", "UPDATE control_memberships SET role='reader' WHERE principal_id='owner'"],
+    ["grant", "DELETE FROM dispatch_read_grants"],
+    ["policy revision", "UPDATE dispatch_targets SET policy_revision='p2'"],
+    ["source revision", "UPDATE dispatch_targets SET source_revision='s2'"],
+    ["project mapping", "UPDATE dispatch_targets SET project_id='another'"],
+    ["release retirement", "INSERT INTO dispatch_retired_releases VALUES('t','r','superseded')"],
+    ["intent stop", "INSERT INTO dispatch_stopped_intents VALUES('t','i','revoked after admission')"],
+    ["budget overrun", "UPDATE control_budgets SET overrun_units=1"]
+  ])("denies changes to %s between preflight and claim", async (_name, sql) => {
+    beforeClaim = () => sqlite("run", sql);
+    await expect(dispatch()).rejects.toThrow("Dispatch denied");
+    expect(submitRead).not.toHaveBeenCalled();
+    expect(await sqlite("first", "SELECT count(*) AS n FROM dispatch_claims")).toEqual({ n: 0 });
+  });
+
+  it("does not carry authority over to a newer policy or a replacement semantic release", async () => {
+    await sqlite("run", "INSERT INTO dispatch_read_grants VALUES('t','orders','user','agent','p2')");
+    beforeClaim = () => sqlite("run", "UPDATE dispatch_targets SET policy_revision='p2'");
+    await expect(dispatch()).rejects.toThrow("Dispatch denied");
+    await sqlite("run", "UPDATE dispatch_targets SET policy_revision='p1'");
+    await sqlite("run", `INSERT INTO semantic_releases(tenant_id,id,payload,created_by)
+      SELECT tenant_id,'r2',json_set(payload,'$.id','r2','$.definitionDigest','changed'),created_by FROM semantic_releases WHERE id='r'`);
+    beforeClaim = () => sqlite("run", "UPDATE dispatch_targets SET release_id='r2'");
+    await expect(dispatch()).rejects.toThrow("Dispatch denied");
+    expect(submitRead).not.toHaveBeenCalled();
+  });
+
+  it("denies expiry at the database clock and settlement after preflight", async () => {
+    claimMode = "run-after-expiry";
+    await expect(dispatch()).rejects.toThrow("Dispatch denied");
+    claimMode = "run";
+    await sqlite("run", `INSERT INTO evidence_receipts(tenant_id,id,contract_id,release_id,payload,created_by)
+      VALUES('t','final','c','r',?,'owner')`, [JSON.stringify({ id: "final", tenantId: "t",
+      contractId: "c", semanticReleaseId: "r", intentId: "i", outcome: "cancelled" })]);
+    beforeClaim = () => sqlite("run", "INSERT INTO cost_settlements(tenant_id,intent_id,receipt_id,actual_units,actor) VALUES('t','i','final',0,'owner')");
+    await expect(dispatch()).rejects.toThrow("Dispatch denied");
+    expect(submitRead).not.toHaveBeenCalled();
+  });
+
+  it("rejects a substituted action, principal, tenant, agent or adapter", async () => {
+    await expect(dispatchPreparedMetricRead(access, "i", agent, { ...action, parameters: { year: 2025 } }, adapter)).rejects.toThrow();
+    await expect(dispatchPreparedMetricRead(access, "i", { ...agent, principalId: "owner" }, action, adapter)).rejects.toThrow();
+    await expect(dispatchPreparedMetricRead(access, "i", { ...agent, agentId: "other" }, action, adapter)).rejects.toThrow();
+    await expect(dispatchPreparedMetricRead({ ...access, tenantId: "other" }, "i", agent, action, adapter)).rejects.toThrow();
+    await expect(dispatchPreparedMetricRead(access, "i", agent, action, { ...adapter, location: "EU" })).rejects.toThrow();
+    expect(submitRead).not.toHaveBeenCalled();
+  });
+
+  it("does not resubmit after an ambiguous adapter failure", async () => {
+    submitRead.mockRejectedValueOnce(new Error("network timeout"));
+    await expect(dispatch()).rejects.toThrow("network timeout");
+    await expect(dispatch()).rejects.toThrow("already claimed");
+    expect(submitRead).toHaveBeenCalledTimes(1);
+  });
 });
 afterEach(async () => { vi.restoreAllMocks(); await rm(dir, { recursive: true, force: true }); });
 

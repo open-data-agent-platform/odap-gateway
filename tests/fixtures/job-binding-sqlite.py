@@ -1,5 +1,6 @@
 """One SQLite connection per call to exercise recovery across fresh processes."""
 import json
+import hashlib
 import sqlite3
 import sys
 from pathlib import Path
@@ -13,17 +14,27 @@ if mode == "setup":
         db.executescript(migration.read_text(encoding="utf-8"))
     db.execute("INSERT INTO control_tenants VALUES ('t','Tenant')")
     db.execute("INSERT INTO control_memberships VALUES ('t','owner','owner',1),('t','user','reader',1)")
+    release = {"id": "r", "tenantId": "t", "schemaVersion": "0.1", "state": "released",
+               "owner": "owner", "definitionDigest": "definition", "sourceRevision": "s1"}
     db.execute("INSERT INTO semantic_releases(tenant_id,id,payload,created_by) VALUES('t','r',?,'owner')",
-               (json.dumps({"id": "r", "tenantId": "t"}),))
-    contract = {"id": "c", "tenantId": "t", "semanticReleaseId": "r", "state": "authorized",
-                "principalId": "user", "reservationId": "s", "actionDigest": "digest",
+               (json.dumps(release),))
+    action = {"profile": "odap.metric-read.v1", "target": "orders", "metricId": "revenue", "parameters": {"year": 2026}}
+    digest = "sha256:" + hashlib.sha256(json.dumps(action, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    contract = {"id": "c", "tenantId": "t", "semanticReleaseId": "r", "state": "authorized", "schemaVersion": "0.1",
+                "agentId": "agent", "target": "orders", "actionType": "data.read", "policyRevision": "p1",
+                "sourceRevision": "s1", "authority": {"mode": "human", "reference": "review"},
+                "principalId": "user", "reservationId": "s", "actionDigest": digest,
                 "expiresAt": "2099-01-01T00:00:00.000Z"}
     db.execute("INSERT INTO approval_contracts(tenant_id,id,release_id,payload,created_by) VALUES('t','c','r',?,'owner')",
                (json.dumps(contract),))
     db.execute("INSERT INTO control_budgets(tenant_id,id,limit_units) VALUES('t','b',100)")
-    db.execute("INSERT INTO execution_intents VALUES('t','i','c','b','s','user','digest',20,'now')")
+    db.execute("INSERT INTO execution_intents VALUES('t','i','c','b','s','user',?,20,'now')", (digest,))
     result = None
 else:
+    if mode == "run-after-expiry":
+        clock = sqlite3.connect(":memory:")
+        db.create_function("julianday", 1, lambda v: clock.execute("SELECT julianday(?)",
+                           ("2100-01-01" if v == "now" else v,)).fetchone()[0])
     sql, params = json.loads(sys.argv[3])
     cursor = db.execute(sql, params)
     if mode == "first":

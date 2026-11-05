@@ -47,8 +47,10 @@ credentials or result rows are stored in the binding.
 
 Tests run the actual migration and service SQL against SQLite using Python 3
 (`ODAP_TEST_PYTHON` can override the executable). Warehouse HTTP is mocked.
-Live authorization rechecks, dispatch, final receipt issuance from trusted
-outcomes, and tests on a deployed tenant are not part of this change.
+For the internal dispatch authorization gate that follows preparation, see
+[Final dispatch authorization](DISPATCH_AUTHORIZATION.md). Live warehouse
+submission, final receipt issuance from trusted outcomes, and deployed tenant
+tests are separate work.
 
 References: [BigQuery Job](https://cloud.google.com/bigquery/docs/reference/rest/v2/Job)
 and [jobs.get](https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/get).
