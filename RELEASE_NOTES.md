@@ -21,7 +21,6 @@ Mapped clause-by-clause, including honest gaps, in
 
 **Known boundaries**
 
-Early-stage. APIs subject to change. BigQuery-only by design. One-command
-Docker demo lands in v0.2; see [ROADMAP.md](ROADMAP.md).
+Early-stage. APIs subject to change. BigQuery-only by design.
 
 Challenges to any clause status are welcome via issues.
