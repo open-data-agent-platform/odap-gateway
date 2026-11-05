@@ -57,6 +57,16 @@ Roadmap: [ROADMAP.md](ROADMAP.md). One-command Docker demo is planned for v0.2.
 
 ## Contributing and challenging
 
+### Design discussions
+
+Optional [design proposals](https://github.com/open-data-agent-platform/awesome-odap/blob/main/docs/design-proposals.md)
+cover human-reviewed semantic candidates (including possible NVIDIA Auto Ontology
+adapters), delegated identity and session policies, and cost/audit evidence.
+Join [discussion #8](https://github.com/open-data-agent-platform/awesome-odap/issues/8).
+These are planning documents, not implemented v0.1.0 features. See the
+[roadmap](ROADMAP.md) for prototype acceptance criteria. The Five Musts,
+Rubric, and current clause mapping are unchanged.
+
 PRs welcome. If you think a Rubric clause is mapped wrong, or a Must is
 implemented worse than claimed, [file an issue](../../issues). The ODAP
 standard's public challenge process applies to its reference implementation too.
