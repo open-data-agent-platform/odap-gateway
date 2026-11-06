@@ -139,6 +139,16 @@ and action tag, and checks outcome, receipt IDs, monetary units and settlement
 actor. It does not consult a database or require credentials. The optional
 digest must match if provided; reformatting the file is not supported.
 
+Both local settled profiles also require nondecreasing recorded times: pending
+receipt, dispatch claim, terminal observation, then final receipt/billing. Equal
+timestamps are allowed because the records have millisecond precision. The claim
+must precede the contract's expiry strictly; observation and billing may follow
+expiry. Verification does not compare with today's clock or require a historical
+contract to remain active. Reversed times, including clock-regression artifacts,
+are inconsistent evidence, not repaired or reordered records. A matching checksum
+does not excuse an inconsistent chain. This checks the declared database times;
+it neither authenticates a clock nor proves when the warehouse executed a job.
+
 **A match is not issuer authentication.** Someone can rewrite an entire
 consistent bundle and recompute its digest. Retaining the digest independently
 can detect that later replacement, but cannot establish that the original

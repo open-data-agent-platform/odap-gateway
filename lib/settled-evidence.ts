@@ -60,6 +60,7 @@ export async function verifySettledEvidence(json: string, scope: Scope, expected
   if (typeof job.projectId !== "string" || typeof job.location !== "string" ||
       !natural(job.maximumBytesBilled) || job.maximumBytesBilled === 0) throw new Error("Invalid bounded job");
   if (![job.claimedBy, observation.observedBy, bill.actor].every(v => typeof v === "string" && v.trim()) ||
+      typeof job.claimedAt !== "string" || typeof observation.observedAt !== "string" ||
       !isControlTimestamp(job.claimedAt) || !isControlTimestamp(observation.observedAt) ||
       bill.actor !== settlement.actor) throw new Error("Invalid evidence attribution");
   const identity = await intentJobIdentity({ tenantId: scope.tenantId, intentId: scope.intentId,
@@ -72,6 +73,11 @@ export async function verifySettledEvidence(json: string, scope: Scope, expected
   if (bill.receiptId !== final.id || settlement.receiptId !== final.id || bill.recordedAt !== final.recordedAt ||
       typeof bill.reference !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,127}$/.test(bill.reference) ||
       !natural(bill.actualMicroUsd) || settlement.actualMicroUsd !== bill.actualMicroUsd) throw new Error("Billing link mismatch");
+  const preparedAt = Date.parse(pending.recordedAt), claimedAt = Date.parse(job.claimedAt),
+    observedAt = Date.parse(observation.observedAt), settledAt = Date.parse(final.recordedAt);
+  // These are recorded database times, not verified warehouse times or a current authorization check.
+  if (preparedAt > claimedAt || claimedAt > observedAt || observedAt > settledAt ||
+      claimedAt >= Date.parse(contract.expiresAt)) throw new Error("Invalid evidence chronology");
   if (canonicalControlJson(data) !== json) throw new Error("Noncanonical evidence JSON");
   const digest = await sha256Text(json);
   if (expectedDigest !== undefined && digest !== expectedDigest) throw new Error("Evidence checksum mismatch");

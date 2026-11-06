@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildDetachedVerifier } from "./fixtures/detached-verifier";
+import { canonicalControlJson, sha256Text } from "../lib/control-objects";
 
 const bundle = resolve("tests/fixtures/settled-job.json");
 const pin = resolve("tests/pins/settled-job.sha256");
@@ -36,6 +37,27 @@ describe("detached file verifier", () => {
     await expect(invoke(modified, "t", "i", pin)).rejects.toMatchObject({
       code: 1, stdout: "", stderr: expect.stringContaining("checksum mismatch")
     });
+  });
+  it.each(["reversed observation", "expired claim"])("rejects %s with a matching pin outside the checkout", async scenario => {
+    const data = JSON.parse(await readFile(bundle, "utf8"));
+    if (scenario === "reversed observation") data.observation.observedAt = data.pending.recordedAt;
+    else data.contract.expiresAt = data.job.claimedAt;
+    const json = canonicalControlJson(data), modified = join(dir, scenario + ".json"), matchingPin = modified + ".sha256";
+    await writeFile(modified, json);
+    await writeFile(matchingPin, await sha256Text(json));
+    await expect(invoke(modified, "t", "i", matchingPin)).rejects.toMatchObject({
+      code: 1, stdout: "", stderr: expect.stringMatching(/^Unreadable or invalid evidence input\r?\n$/)
+    });
+  });
+  it("accepts a historical eligible claim after its contract has expired", async () => {
+    const data = JSON.parse(await readFile(bundle, "utf8"));
+    data.contract.expiresAt = "2026-01-01T00:00:01.001Z";
+    const json = canonicalControlJson(data), modified = join(dir, "historical.json"), matchingPin = modified + ".sha256";
+    await writeFile(modified, json);
+    await writeFile(matchingPin, await sha256Text(json));
+    const result = await invoke(modified, "t", "i", matchingPin);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({ consistent: true, issuerAuthenticated: false });
   });
   it("requires an explicit pin and never supplies its own expected checksum", async () => {
     await expect(invoke(bundle, "t", "i")).rejects.toMatchObject({ code: 2, stdout: "" });
