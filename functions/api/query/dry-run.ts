@@ -14,6 +14,7 @@ import {
   type BigQueryEnv
 } from "../../../lib/bigquery";
 import { estimateDryRun } from "../../../lib/phase2";
+import { readBoundedRequestJson } from "../../../lib/request-json";
 import {
   applySchemaPolicyToDryRunPreview,
   evaluateSchemaPolicy
@@ -31,6 +32,8 @@ type QueryDryRunBody = {
 };
 
 const MAX_SQL_LENGTH = 20_000;
+// Accommodate the SQL limit even when every character uses a six-byte JSON escape.
+const MAX_BODY_BYTES = 128 * 1024;
 
 export async function onRequestPost(context: QueryDryRunContext) {
   const transport = resolveDryRunTransport(context.env);
@@ -57,7 +60,7 @@ export async function onRequestPost(context: QueryDryRunContext) {
         code: body.code,
         message: body.message
       },
-      { status: 400 }
+      { status: body.status }
     );
   }
 
@@ -130,29 +133,23 @@ async function readJsonBody(
   request: Request
 ): Promise<
   | { ok: true; value: QueryDryRunBody }
-  | { ok: false; code: string; message: string }
+  | { ok: false; status: number; code: string; message: string }
 > {
-  try {
-    const value = (await request.json()) as unknown;
-    if (!isRecord(value)) {
-      return {
-        ok: false,
-        code: "invalid_json",
-        message: "Request body must be a JSON object."
-      };
-    }
-
+  const body = await readBoundedRequestJson(request, MAX_BODY_BYTES);
+  if (!body.ok) {
+    if (body.reason === "too_large") return { ok: false, status: 413,
+      code: "dry_run_body_too_large", message: "Dry-run body exceeds the 128 KiB limit." };
+    if (body.reason === "timeout") return { ok: false, status: 408,
+      code: "dry_run_body_timeout", message: "Dry-run body did not arrive in time." };
     return {
-      ok: true,
-      value
-    };
-  } catch {
-    return {
-      ok: false,
+      ok: false, status: 400,
       code: "invalid_json",
       message: "Request body must be valid JSON."
     };
   }
+  if (!isRecord(body.value)) return { ok: false, status: 400,
+    code: "invalid_json", message: "Request body must be a JSON object." };
+  return { ok: true, value: body.value };
 }
 
 function inferWorkspace(sql: string) {
@@ -177,5 +174,5 @@ function getString(value: unknown) {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
