@@ -84,11 +84,11 @@ const worker = {
       }
       const response = await handleRequest(request, env, context);
       return withSecurityHeaders(withGatewayLocation(response, request, env));
-    } catch (error) {
+    } catch {
+      // Exception properties can contain credentials or throw while inspected.
       console.error(
         JSON.stringify({
-          event: "worker_request_failed",
-          message: error instanceof Error ? error.message : "Unknown error"
+          event: "worker_request_failed"
         })
       );
 

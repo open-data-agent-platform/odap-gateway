@@ -11,6 +11,19 @@ a partial JSON `success:true` is insufficient. See
 [native D1 verification](NATIVE_D1_VERIFICATION.md) for evidence paths and limits.
 This uses local temporary databases and does not perform production migrations.
 
+## Unexpected Worker failures
+
+The outer request boundary returns no-store 500 `internal_error` with a fixed
+public message. Its application log contains only the fixed
+`worker_request_failed` event, never the thrown value, message, stack, cause,
+request URL, headers or body. It does not inspect exception properties, which
+may themselves throw. Asset, API and adjacent-site forwarding failures use this
+same boundary; it does not retry them or change successful responses.
+This policy covers that application log, not Cloudflare's platform-generated
+request metadata or separately configured observability sinks. Detailed
+diagnostics should be reproduced with synthetic local fixtures, not added as
+raw production exception logging.
+
 ## Local setup
 
 ```bash
