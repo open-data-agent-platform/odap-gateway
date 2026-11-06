@@ -405,6 +405,12 @@ signed-in live preview. Without a gateway mode a would-be live request
 returns HTTP 503. Uncredentialed local estimates and explicitly simulated
 demo previews do not call the warehouse. A dry run is not an execution grant.
 
+The legacy editor's [SQL preview policy profile](SQL_PREVIEW_POLICY.md) uses a
+pinned BigQuery syntax-tree parser for a restricted single-table SELECT subset.
+Quoted fields and aliases cannot bypass catalog checks; unsupported syntax is
+blocked before transport rather than treated as safe. This does not enable
+production raw previews or replace the release-bound structured metric compiler.
+
 With a bound database, preview history requires transactional `batch` support.
 After the existing authentication and transport gates, the API rejects a missing
 or noncallable `batch` with 503 (`dry_run_history_transaction_unavailable`) before
