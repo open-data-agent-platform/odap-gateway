@@ -1,5 +1,6 @@
 import { validateBigQuerySql, type SafetyCheck } from "./copilot-engine";
 import { fetchOAuthJson } from "./oauth-provider-json";
+import { readBoundedProviderJson, withProviderDeadline } from "./provider-response";
 import {
   estimateDryRun,
   getGateLabel,
@@ -140,21 +141,14 @@ export async function runBigQueryDryRun(
 
   try {
     const accessToken = await createBigQueryAccessToken(env);
-    const response = await fetch(createJobsInsertUrl(env.BIGQUERY_PROJECT_ID), {
-      method: "POST",
-      redirect: "manual",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(createDryRunJobRequest(sql, env))
-    });
+    const response = await fetchBigQueryJson(createJobsInsertUrl(env.BIGQUERY_PROJECT_ID),
+      accessToken, createDryRunJobRequest(sql, env));
 
-    if (!response.ok || response.redirected) {
-      return createFailedLiveDryRun(sql, env, createGoogleApiError(response));
+    if (!response.ok) {
+      return createFailedLiveDryRun(sql, env, response.error);
     }
 
-    const job = (await response.json()) as BigQueryJobResponse;
+    const job = response.value as BigQueryJobResponse;
     const scannedBytes = getProcessedBytes(job);
     const checks = withLiveCostCheck(validateBigQuerySql(sql), scannedBytes, env);
     const status = getDryRunStatus(checks);
@@ -202,27 +196,14 @@ export async function runBigQueryQuery(
 
   try {
     const accessToken = await createBigQueryAccessToken(env);
-    const response = await fetch(createQueriesUrl(env.BIGQUERY_PROJECT_ID), {
-      method: "POST",
-      redirect: "manual",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(createQueryRequest(sql, env))
-    });
+    const response = await fetchBigQueryJson(createQueriesUrl(env.BIGQUERY_PROJECT_ID),
+      accessToken, createQueryRequest(sql, env));
 
-    if (!response.ok || response.redirected) {
-      const error = createGoogleApiError(response);
-
-      return {
-        ok: false,
-        code: error.code,
-        message: error.message
-      };
+    if (!response.ok) {
+      return { ok: false, ...response.error };
     }
 
-    const query = (await response.json()) as BigQueryQueryResponse;
+    const query = response.value as BigQueryQueryResponse;
     if (query.jobComplete === false) {
       return {
         ok: false,
@@ -497,6 +478,28 @@ function estimateBigQueryCostUsd(scannedBytes: number) {
 function estimateRuntimeMs(scannedBytes: number) {
   const scannedMb = scannedBytes / (1024 * 1024);
   return Math.round(850 + Math.min(scannedMb * 4.5, 45_000));
+}
+
+async function fetchBigQueryJson(url: string, accessToken: string, body: Record<string, unknown>) {
+  return withProviderDeadline(async signal => {
+    const response = await fetch(url, {
+      method: "POST", redirect: "manual", signal,
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (signal.aborted) {
+      void response.body?.cancel().catch(() => {});
+      throw new Error("BigQuery request failed.");
+    }
+    if (!response.ok || response.redirected) {
+      return { ok: false, error: createGoogleApiError(response) } as const;
+    }
+    const value = await readBoundedProviderJson(response, signal);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Invalid BigQuery response.");
+    }
+    return { ok: true, value } as const;
+  }, "BigQuery request failed.");
 }
 
 function createGoogleApiError(response: Response) {

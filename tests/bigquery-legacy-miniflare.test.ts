@@ -1,8 +1,9 @@
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { ReadableStream, type ReadableStreamDefaultController } from "node:stream/web";
 import { Miniflare, Response as NativeResponse, type Request as NativeRequest } from "miniflare";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
 const bundler = createRequire(require.resolve("wrangler/package.json"))("esbuild") as typeof import("esbuild");
@@ -11,6 +12,8 @@ let mf: Miniflare;
 let status = 200;
 let malformed = false;
 let queryError = false;
+let bodyMode = "normal";
+let activeStream: ReadableStreamDefaultController<Uint8Array> | undefined;
 
 beforeAll(async () => {
   const pair = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048,
@@ -41,11 +44,22 @@ beforeAll(async () => {
         if (malformed) return new NativeResponse("synthetic-private-response");
       }
       if (queryError) return NativeResponse.json({ errors: [{ reason: "synthetic-private-reason", message: "synthetic-private-response" }] });
-      return NativeResponse.json({ statistics: { totalBytesProcessed: "17" }, jobComplete: true, totalRows: "0", rows: [] });
+      const payload = JSON.stringify({ statistics: { totalBytesProcessed: "17" }, jobComplete: true, totalRows: "0", rows: [] });
+      if (bodyMode === "stall") return new NativeResponse(new ReadableStream<Uint8Array>({
+        start(controller) { activeStream = controller; controller.enqueue(new TextEncoder().encode("{")); },
+        cancel() { activeStream = undefined; }
+      }));
+      if (bodyMode === "invalid-utf8") return new NativeResponse(new Uint8Array([34, 0xff, 34]));
+      if (bodyMode === "declared-oversized") return new NativeResponse(payload,
+        { headers: { "Content-Length": String(256 * 1024 + 1) } });
+      if (bodyMode === "oversized" || bodyMode === "ceiling")
+        return new NativeResponse(" ".repeat(256 * 1024 + Number(bodyMode === "oversized") - payload.length) + payload);
+      return new NativeResponse(payload);
     }
   });
 }, 30000);
-beforeEach(() => { calls.length = 0; status = 200; malformed = false; queryError = false; });
+beforeEach(() => { calls.length = 0; status = 200; malformed = false; queryError = false; bodyMode = "normal"; });
+afterEach(() => { activeStream?.close(); activeStream = undefined; });
 afterAll(async () => { await mf?.dispose(); });
 
 async function run(operation: string, mode: string | undefined = "demo") {
@@ -87,6 +101,29 @@ describe.each(["dry-run", "query"] as const)("legacy %s in Workers", operation =
     expect(await run(operation, mode)).toMatchObject(operation === "dry-run" ? { status: "blocked" } : { ok: false, code: "legacy_query_disabled" });
     expect(calls).toHaveLength(0);
   });
+
+  it("accepts the exact byte ceiling", async () => {
+    bodyMode = "ceiling";
+    expect(await run(operation)).toMatchObject(operation === "dry-run" ? { scannedBytes: 17, mode: "live" } : { ok: true, rows: [] });
+    expect(calls).toHaveLength(2);
+  });
+
+  it.each(["oversized", "declared-oversized", "invalid-utf8"])("refuses %s without retry", async kind => {
+    bodyMode = kind;
+    expect(await run(operation)).toMatchObject(refusal(operation === "dry-run" ? "bigquery_request_failed" : "bigquery_query_failed",
+      operation === "dry-run" ? "BigQuery request failed." : "BigQuery query failed."));
+    expect(calls).toHaveLength(2);
+  });
+
+  it("ends a real stalled body without retrying", async () => {
+    bodyMode = "stall";
+    const started = Date.now();
+    expect(await run(operation)).toMatchObject(refusal(operation === "dry-run" ? "bigquery_request_failed" : "bigquery_query_failed",
+      operation === "dry-run" ? "BigQuery request failed." : "BigQuery query failed."));
+    expect(Date.now() - started).toBeGreaterThanOrEqual(14_000);
+    expect(Date.now() - started).toBeLessThan(25_000);
+    expect(calls).toHaveLength(2);
+  }, 30000);
 });
 
 it("rejects query errors without returning private provider details", async () => {

@@ -99,8 +99,8 @@ coverage, including a real stalled stream in Workers with synthetic credentials.
 The governed submitter still receives an injected token supplier; this helper is
 not implicitly wired into it. Integrators must preserve equivalent protections.
 Submission acknowledgments and job observations have their own bounded readers.
-Legacy demo query/dry-run response size and total deadline limits remain open;
-bounding token exchange does not bound the entire operation or authorize live
+Legacy demo query/dry-run responses also have a separate bounded exchange;
+bounding each exchange does not bound the entire operation or authorize live
 query execution.
 
 ## Legacy demo transport boundary
@@ -121,3 +121,21 @@ in local Workers with fully intercepted egress; redirects cannot forward its
 synthetic Bearer token or SQL. Unit and API regressions also check body cancellation,
 private-error suppression, successful results and no persistence after refusal.
 No real Google credentials or billable queries are part of these checks.
+
+The legacy query and dry-run responses now share the 256 KiB streamed-byte limit
+and a 15-second header-plus-body deadline. Oversized declared lengths are refused
+before reading; missing or misleading lengths do not bypass actual byte counting.
+Invalid UTF-8 and non-object JSON are refused. Oversized metadata imports fail in
+full rather than truncating rows or persisting a partial catalog. Network, size,
+encoding and deadline failures retain the static `bigquery_request_failed` or
+`bigquery_query_failed` response. Late responses and stalled bodies are cancelled
+without waiting for cancellation, and no automatic retry is added.
+
+This deadline starts after token acquisition and does not include signing, SQL
+preparation or database work. It may expire before the legacy query API's requested
+30-second server wait. Local timeout or cancellation is not evidence that a query
+was not accepted, stopped running or incurred no cost. These demo-only helpers
+remain unavailable in production and are not a substitute for governed dispatch.
+Synthetic unit tests cover exact/over-limit bytes, UTF-8, late headers and shared
+deadlines; native Workers tests cover real stalled streams for both helpers. The
+schema-import API tests verify that refused responses cannot reach catalog I/O.

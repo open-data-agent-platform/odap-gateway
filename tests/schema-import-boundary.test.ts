@@ -11,6 +11,7 @@ const queryUrl = "https://bigquery.googleapis.com/bigquery/v2/projects/fixture-p
 const calls: string[] = [];
 const prepare = vi.fn(() => { throw new Error("Unexpected catalog I/O"); });
 let fixtureKey: string;
+let warehouseBody: string | undefined;
 
 // Intercept the token exchange and the actual query submission; an invalid key
 // alone could make a broken production guard appear to block outbound traffic.
@@ -20,10 +21,12 @@ beforeAll(() => {
 beforeEach(() => {
   calls.length = 0;
   prepare.mockClear();
+  warehouseBody = undefined;
   vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
     calls.push(String(url));
     if (url === tokenUrl) return Response.json({access_token:"fixture-only"});
     if (url === queryUrl && init.method === "POST" && JSON.parse(String(init.body)).query.includes("INFORMATION_SCHEMA")) {
+      if (warehouseBody !== undefined) return new Response(warehouseBody);
       return Response.json({error:{status:"fixture_query_intercepted",message:"Synthetic stop before catalog persistence."}},{status:400});
     }
     throw new Error("Unexpected outbound request");
@@ -69,6 +72,16 @@ describe("legacy schema import warehouse boundary", () => {
     const response = await post("demo",role);
     expect(response.status).toBe(status);
     expect(calls).toEqual([]);
+    expect(prepare).not.toHaveBeenCalled();
+  });
+  it.each(["oversized", "non-object"])("does not persist a refused %s response", async kind => {
+    warehouseBody = kind === "oversized" ? " ".repeat(256 * 1024) + JSON.stringify({ jobComplete: true,
+      schema: { fields: [{ name: "table_name" }, { name: "column_name" }, { name: "data_type" }] },
+      rows: [{ f: [{ v: "events" }, { v: "id" }, { v: "STRING" }] }], totalRows: "1" }) : "false";
+    const response = await post("demo");
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ ok: false, code: "bigquery_query_failed", message: "BigQuery query failed." });
+    expect(calls).toEqual([tokenUrl, queryUrl]);
     expect(prepare).not.toHaveBeenCalled();
   });
   it("guards direct legacy query callers before reading credential material",async () => {

@@ -35,7 +35,9 @@ describe("Worker authentication ahead of the native static asset router", () => 
     const output = join(directory, "bundle");
     await run(process.execPath, [join(dirname(require.resolve("wrangler/package.json")), "bin/wrangler.js"),
       "deploy", "--dry-run", "--config", configPath, "--outdir", output], {
-      env: { ...process.env, WRANGLER_SEND_METRICS: "false", WRANGLER_LOG_PATH: join(directory, "wrangler.log") },
+      // Keep optional npm update-check sockets out of this local-only dry run.
+      env: { ...process.env, WRANGLER_SEND_METRICS: "false", WRANGLER_HIDE_BANNER: "true",
+        WRANGLER_LOG_PATH: join(directory, "wrangler.log") },
       windowsHide: true, timeout: 60000
     });
     const files = await readdir(output);
