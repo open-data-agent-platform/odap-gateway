@@ -39,6 +39,26 @@ describe("browser-bound, single-use OAuth state", () => {
     expect(exchange).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps both OAuth redirect_uri values and failure navigation inside the configured mount", async () => {
+    const mountedEnv = { ...env, GATEWAY_BASE_PATH: "/gateway" };
+    const origin = "https://gateway.test";
+    const start = await worker.fetch(new Request(origin + "/gateway/api/auth/start/google?returnTo=%2Fsql"),
+      mountedEnv, { waitUntil: () => undefined });
+    const authorize = new URL(start.headers.get("Location")!);
+    const callbackUrl = origin + "/gateway/api/auth/callback/google";
+    expect(authorize.origin).toBe("https://accounts.google.com");
+    expect(authorize.searchParams.get("redirect_uri")).toBe(callbackUrl);
+    const cookie = start.headers.getSetCookie().map(value => value.split(";")[0]).join("; ");
+    expect(cookie).toMatch(/^__Host-odap_gateway_oauth=/);
+    const response = await worker.fetch(new Request(callbackUrl + "?code=fixture&state=" +
+      encodeURIComponent(authorize.searchParams.get("state")!), { headers: { Cookie: cookie } }), mountedEnv,
+      { waitUntil: () => undefined });
+    expect(response.headers.get("Location")).toBe(origin + "/gateway/login?error=oauth_failed&provider=google");
+    expect(exchange).toHaveBeenCalledOnce();
+    const init = (exchange.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(new URLSearchParams(init.body as URLSearchParams).get("redirect_uri")).toBe(callbackUrl);
+  });
+
   it("consumes a valid state once even when the provider fails and the old cookie is replayed",async () => {
     const flow = await startOAuthLogin(env);
     expect((await callback(flow.request())).headers.get("Location")).toContain("error=oauth_failed");

@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import type { readEvidenceCoverage } from "./evidence-coverage";
 
 export type CoverageReport = NonNullable<Awaited<ReturnType<typeof readEvidenceCoverage>>>;
@@ -25,7 +26,7 @@ function validReport(value: unknown): value is CoverageReport {
 export async function inspectCoverage(tenant: string, signal: AbortSignal, get: typeof fetch = fetch): Promise<Inspection> {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(tenant)) return { state: "invalid" };
   try {
-    const res = await get("/api/control/" + tenant + "/evidence-coverage", {
+    const res = await get(gatewayPath("/api/control/") + tenant + "/evidence-coverage", {
       method: "GET", credentials: "same-origin", cache: "no-store", redirect: "error", signal
     });
     if (res.status === 401) return { state: "unauthenticated" };

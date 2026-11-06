@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import { isControlTimestamp } from "./control-objects";
 import { inspectObject } from "./object-inspection";
 import { validRequestId } from "./review-contract-request";
@@ -33,7 +34,7 @@ export async function confirmBudgetReservation(scope: BudgetScope, quote: NonNul
   const q = matchingQuote(quote, scope);
   if (!q || signal.aborted) return { state: "invalid" };
   try {
-    const res = await post("/api/control/" + q.tenantId + "/budget-admissions", {
+    const res = await post(gatewayPath("/api/control/") + q.tenantId + "/budget-admissions", {
       method: "POST", credentials: "same-origin", cache: "no-store", redirect: "error",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contractId: q.contractId }),
       signal: AbortSignal.any([signal, AbortSignal.timeout(15000)])

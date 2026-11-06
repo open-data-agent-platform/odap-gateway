@@ -16,6 +16,7 @@ import {
 } from "../../../../lib/admin-store";
 import { consumeOAuthState, clearOAuthCookie } from "../../../../lib/oauth-state";
 import { fetchOAuthJson as fetchJson } from "../../../../lib/oauth-provider-json";
+import { gatewayPath } from "../../../../lib/gateway-path";
 
 type AuthCallbackContext = {
   request: Request;
@@ -77,7 +78,7 @@ export async function onRequestGet(context: AuthCallbackContext) {
   if (denied || !code) return finish(redirectToLogin(url, "oauth_denied", provider));
 
   try {
-    const callbackUrl = `${url.origin}/api/auth/callback/${provider}`;
+    const callbackUrl = url.origin + gatewayPath(`/api/auth/callback/${provider}`, context.env.GATEWAY_BASE_PATH ?? "");
     const profile =
       provider === "google"
         ? await fetchGoogleProfile(code, providerCredentials, callbackUrl)

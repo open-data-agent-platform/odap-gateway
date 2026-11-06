@@ -1,8 +1,9 @@
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { ReadableStream, type ReadableStreamDefaultController } from "node:stream/web";
 import { Miniflare, Response as NativeResponse, type Request as NativeRequest } from "miniflare";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { intentJobIdentity } from "../lib/bigquery-job-identity";
 
 const require = createRequire(import.meta.url);
@@ -11,6 +12,8 @@ const binding = { tenantId: "fixture", intentId: "intent", actionDigest: "digest
 let mf: Miniflare;
 let identity: Awaited<ReturnType<typeof intentJobIdentity>>;
 let status = 200;
+let mode = "normal";
+let activeStream: ReadableStreamDefaultController<Uint8Array> | undefined;
 const calls: { url: string; method: string; authorization: string | null; body: string }[] = [];
 
 describe("BigQuery transport in the installed Workers runtime", () => {
@@ -52,13 +55,23 @@ describe("BigQuery transport in the installed Workers runtime", () => {
         calls.push({ url: request.url, method: request.method, authorization: request.headers.get("Authorization"), body: await request.text() });
         if (new URL(request.url).hostname !== "bigquery.googleapis.com") throw new Error("Unexpected destination");
         if (status !== 200) return new NativeResponse("not-json", { status, headers: { Location: "https://fixture.invalid/collect" } });
-        return NativeResponse.json({ jobReference: identity.jobReference, configuration: {
+        const payload = JSON.stringify({ jobReference: identity.jobReference, configuration: {
           jobType: "QUERY", labels: identity.labels, query: { maximumBytesBilled: "1024" }
         }, status: { state: "RUNNING" } });
+        if (mode === "stall") return new NativeResponse(new ReadableStream<Uint8Array>({
+          start(controller) { activeStream = controller; controller.enqueue(new TextEncoder().encode("{")); },
+          cancel() { activeStream = undefined; }
+        }));
+        if (mode === "invalid-utf8") return new NativeResponse(new Uint8Array([34, 0xff, 34]));
+        if (mode === "declared-oversized") return new NativeResponse(payload, { headers: { "Content-Length": String(256 * 1024 + 1) } });
+        if (mode === "oversized" || mode === "ceiling")
+          return new NativeResponse(" ".repeat(256 * 1024 + Number(mode === "oversized") - payload.length) + payload);
+        return new NativeResponse(payload, { headers: { "Content-Type": "application/json" } });
       }
     });
   }, 30000);
-  beforeEach(() => { calls.length = 0; status = 200; });
+  beforeEach(() => { calls.length = 0; status = 200; mode = "normal"; });
+  afterEach(() => { activeStream?.close(); activeStream = undefined; });
   afterAll(async () => { await mf?.dispose(); });
 
   async function run(operation: "submit" | "observe" | "legacy") {
@@ -114,4 +127,27 @@ describe("BigQuery transport in the installed Workers runtime", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].method).toBe("GET");
   });
+
+  it("accepts observation metadata at the exact byte ceiling", async () => {
+    mode = "ceiling";
+    expect(await run("observe")).toEqual({ status: 200, body: { state: "pending" } });
+    expect(calls).toHaveLength(1);
+  });
+
+  it.each(["oversized", "declared-oversized", "invalid-utf8"])("rejects observation %s without retry or submission", async kind => {
+    mode = kind;
+    expect(await run("observe")).toEqual({ status: 500, body: { error: "BigQuery job lookup failed" } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("GET");
+  });
+
+  it("ends a real stalled observation stream without retrying", async () => {
+    mode = "stall";
+    const start = Date.now();
+    expect(await run("observe")).toEqual({ status: 500, body: { error: "BigQuery job lookup failed" } });
+    expect(Date.now() - start).toBeGreaterThanOrEqual(14_000);
+    expect(Date.now() - start).toBeLessThan(25_000);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("GET");
+  }, 30000);
 });

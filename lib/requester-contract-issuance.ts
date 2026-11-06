@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import { isApprovalContract, type ApprovalContract } from "./control-objects";
 import { delegationHistory, type inspectOwnDelegation } from "./delegation-history";
 import { inspectObject } from "./object-inspection";
@@ -20,7 +21,7 @@ export async function issueForReviewedDelegation(scope: IssuanceScope, inspected
       d.agentId !== agentId || d.requestId !== requestId || d.expiresAt !== expiresAt || !canRequestIssuance(d)) return { state: "ineligible" };
   if (signal.aborted) return { state: "unknown" };
   try {
-    const res = await send("/api/control/" + tenantId + "/contract-issuances", { method: "POST",
+    const res = await send(gatewayPath("/api/control/") + tenantId + "/contract-issuances", { method: "POST",
       credentials: "same-origin", cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ delegationId: d.delegationId }), signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });
     const body = await res.json();
@@ -29,7 +30,7 @@ export async function issueForReviewedDelegation(scope: IssuanceScope, inspected
       (res.status === 403 && ["tenant_access_denied", "same_origin_required"].includes(body.code)))) return { state: "refused" };
     const id = body?.issuance?.contractId;
     if (signal.aborted || ![200, 201].includes(res.status) || body?.ok !== true || body.issuance?.delegationId !== d.delegationId ||
-        typeof id !== "string" || !validRequestId(id) || res.headers.get("Location") !== "/api/control/" + tenantId + "/contract/" + id)
+        typeof id !== "string" || !validRequestId(id) || res.headers.get("Location") !== gatewayPath("/api/control/") + tenantId + "/contract/" + id)
       return { state: "unknown" };
     // Reconstruct the read path locally. A matching Location alone does not bind this contract to the original proposal.
     const read = await inspectObject(tenantId, id, "contract", AbortSignal.any([signal, AbortSignal.timeout(15000)]), send, c =>

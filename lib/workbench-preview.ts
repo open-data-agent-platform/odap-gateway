@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import type { QueryRunPreview } from "./phase2";
 
 type Preview = Pick<QueryRunPreview, "scannedBytes" | "estimatedCostUsd" | "expectedRuntimeMs" |
@@ -16,7 +17,7 @@ const isCheck = (v: unknown): v is Preview["checks"][number] => record(v) &&
 export async function requestWorkbenchPreview(input: { sql: string; workspace: string; queryType: string },
   signal: AbortSignal, send: typeof fetch = fetch): Promise<WorkbenchResult> {
   try {
-    const res = await send("/api/query/dry-run", { method: "POST", credentials: "same-origin",
+    const res = await send(gatewayPath("/api/query/dry-run"), { method: "POST", credentials: "same-origin",
       cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), signal });
     if (res.status === 401) return { state: "sign_in" };
     if (res.status === 403) return { state: "denied" };

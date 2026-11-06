@@ -27,6 +27,35 @@ npx wrangler deploy
 - D1 binding: `ODAP_GATEWAY_DB`
 - Static assets binding: `ASSETS`
 
+## Hosting under a path
+
+To mount the Gateway at `https://googlesql.com/gateway`, build with
+`NEXT_PUBLIC_GATEWAY_BASE_PATH=/gateway` and
+`NEXT_PUBLIC_GATEWAY_ORIGIN=https://googlesql.com`. Set the Worker variable
+`GATEWAY_BASE_PATH` to the same `/gateway` value. An empty/unset path preserves
+standalone root hosting. The build-time prefix applies to Next links/assets and
+browser API requests; the Worker routes the prefixed APIs and assets and keeps
+same-origin redirects under that mount. Rebuild when changing the prefix.
+
+Use a path Route, not a Custom Domain, and leave the existing site's DNS and
+Worker binding intact. Cloudflare route matching includes query strings, so the
+production route is `https://googlesql.com/gateway*`. The Worker only handles the
+complete `/gateway` segment and its descendants. Set
+`GATEWAY_SITE_ORIGIN=https://googlesql.com` to pass sibling matches such as
+`/gateway-other` unchanged to the existing site origin; other hosts fail closed
+outside the mount. Verify that this origin is already served by the intended
+site and that no route being replaced belongs to another Worker. Keep
+`assets.run_worker_first: true` and verify main-site responses before and after
+deployment. Do not bind the site's existing database to this Worker.
+
+Register provider callbacks with the prefix, for example
+`https://googlesql.com/gateway/api/auth/callback/google`. Registration alone does
+not enable login: provider credentials, the session secret, empty-store bootstrap
+and an explicitly chosen administrator still need their corresponding setup.
+Path hosting shares the site's browser origin; it is not an origin-isolation
+boundary. Dedicated Gateway cookie names remain unchanged, including the
+host-only OAuth `__Host-` cookie whose required `Path=/` is retained.
+
 ## Static asset authentication
 
 Keep `assets.run_worker_first: true` in every deployment configuration. Cloudflare
@@ -299,7 +328,9 @@ synthetic responses and a loopback HTTP server, not a live provider login.
 
 ### Provider response bounds
 
-The five Google/GitHub login endpoints share `lib/oauth-provider-json.ts`.
+The five Google/GitHub login endpoints share `lib/oauth-provider-json.ts`,
+which uses the same bounded reader/deadline as job observation through
+`lib/provider-response.ts`.
 Each request has a fixed 256 KiB response ceiling and a 15-second deadline
 covering headers and body consumption. The reader counts actual streamed bytes
 even when `Content-Length` is absent, invalid or understated; a declared excess

@@ -1,4 +1,5 @@
 "use client";
+import { gatewayPath } from "@/lib/gateway-path";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -97,7 +98,7 @@ export function SchemasPage() {
     }));
 
     try {
-      const response = await fetch("/api/admin/state", {
+      const response = await fetch(gatewayPath("/api/admin/state"), {
         cache: "no-store",
         credentials: "include"
       });
@@ -176,7 +177,7 @@ export function SchemasPage() {
     setNotice(null);
 
     try {
-      const response = await fetch("/api/admin/schema-import", {
+      const response = await fetch(gatewayPath("/api/admin/schema-import"), {
         method: "POST",
         credentials: "include",
         headers: {

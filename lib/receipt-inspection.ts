@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import { inspectObject } from "./object-inspection";
 import { isControlTimestamp } from "./control-objects";
 import { isReceiptCorrectionInput } from "./receipt-correction-input";
@@ -42,7 +43,7 @@ function matchingCorrection(value: unknown, tenantId: string, id: string, revisi
   return { revision, correctedReason: input.correctedReason, evidenceRef: input.evidenceRef, actor: c.actor, recordedAt: c.recordedAt };
 }
 
-const correctionsPath = (tenantId: string, id: string) => "/api/control/" + tenantId + "/receipt-corrections/" + encodeURIComponent(id);
+const correctionsPath = (tenantId: string, id: string) => gatewayPath("/api/control/") + tenantId + "/receipt-corrections/" + encodeURIComponent(id);
 
 export async function inspectReceiptRevision(tenantId: string, id: string, revision: number, signal: AbortSignal,
   get: typeof fetch = fetch): Promise<RevisionRead> {

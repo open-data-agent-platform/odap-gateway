@@ -25,6 +25,32 @@ are a warehouse measurement, not invoice currency, and may be informational
 under capacity pricing. This reader is not a public endpoint. No live
 dispatch, final receipt issuance or budget settlement is wired to it yet.
 
+## Bounded observation transport
+
+Both the non-delegated GET and injected delegated lookup have a 15-second
+deadline covering response headers and body consumption. A successful metadata
+body is limited to 256 KiB of actual bytes, independent of Content-Length.
+Declared excess, invalid UTF-8, malformed JSON, missing bodies and transport
+failures are rejected without returning provider body fragments. The shared
+reader is also used by OAuth exchanges; their existing limits are unchanged.
+
+Redirected responses are refused before interpreting even a 404. Other non-200
+bodies, including ordinary 404s, are discarded without JSON parsing or waiting
+for cancellation to finish. An ordinary 404 still means not-found, never
+permission to resubmit. Late responses after the deadline are discarded. There
+is no automatic retry or new terminal write after an unsuccessful lookup;
+claims, existing observations, pending receipts and budget reservations remain
+unchanged. Access is still rechecked before successful observation persistence.
+
+The delegated observer receives the pinned reference and an AbortSignal. It
+must remain an observation-only operation and should honor that signal. The
+deadline bounds waiting even if the injected transport ignores cancellation;
+it cannot undo arbitrary side effects inside a supplied callback. The regular
+reader's token exchange precedes the lookup and has its own separate deadline.
+These bounds do not cover credential signing, storage operations, legacy query
+result bodies or jobs.insert acknowledgment bodies. Tests use synthetic providers
+and local Workers/D1; no real warehouse operation or pilot acceptance is implied.
+
 ## Durable preparation
 
 Migration 0005 adds immutable BigQuery job bindings. The internal
@@ -85,8 +111,8 @@ without wiring a real transport.
 For a **delegated** claim, migration 0025 and
 [`observeDelegatedClaim`](../lib/delegated-job-recovery.ts) use an explicitly
 injected metadata lookup. There is no HTTP route, default observer, token
-source or send operation. The observer receives only the persisted job
-reference. A successful metadata response must match project, region, job ID,
+source or send operation. The observer receives the persisted job
+reference and an AbortSignal, not SQL or an executable request. A successful metadata response must match project, region, job ID,
 action label, query type and claimed byte ceiling; a dry run is not execution.
 The stored digest links evidence to the original claim; it is not a signature
 from the warehouse.

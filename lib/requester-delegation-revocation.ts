@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import { delegationHistory, inspectOwnDelegation } from "./delegation-history";
 import { validRequestId } from "./review-contract-request";
 
@@ -9,7 +10,7 @@ export async function revokeInspectedDelegation(inspected: Snapshot, signal: Abo
   if (!before || !validRequestId(before.tenantId) || !validRequestId(before.grantId) || before.revokedAt !== null) return { state: "invalid" };
   if (signal.aborted) return { state: "revocation_unknown" };
   try {
-    await send("/api/control/" + before.tenantId + "/delegations", {
+    await send(gatewayPath("/api/control/") + before.tenantId + "/delegations", {
       method: "POST", credentials: "same-origin", cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ operation: "revoke", delegationId: before.delegationId }),
       signal: AbortSignal.any([signal, AbortSignal.timeout(15000)])

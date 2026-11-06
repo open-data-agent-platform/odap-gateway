@@ -75,7 +75,7 @@ describe("observation-only delegated recovery", { timeout: 25000 }, () => {
     expect(final.observation).toMatchObject({ state: "succeeded",billedBytes: 0,observedBy: owner.principalId });
     expect(await observe(lookup)).toEqual(final);
     expect(await stored()).toEqual(final);
-    expect(lookup.mock.calls).toEqual(Array.from({length:5},()=>[ref]));
+    expect(lookup.mock.calls).toEqual(Array.from({length:5},()=>[ref,expect.any(AbortSignal)]));
     const send = vi.fn();
     await expect(handoffDelegatedRead(owner,intentId,subject,action,send)).rejects.toThrow();
     expect(send).not.toHaveBeenCalled();
@@ -92,8 +92,49 @@ describe("observation-only delegated recovery", { timeout: 25000 }, () => {
       await expect(observe(async()=>Response.json({ ...good,configuration: { ...good.configuration,...substitute } }))).rejects.toThrow("Unmatched");
     await expect(observe(async()=>Response.json({ ...good,status: { state: "DONE",errorResult: {} } }))).rejects.toThrow("Malformed");
     await expect(observe(async()=>new Response(null,{ status: 503 }))).rejects.toThrow("lookup failed");
-    await expect(observe(async()=>{ throw new Error("lookup timeout"); })).rejects.toThrow("timeout");
+    await expect(observe(async()=>{ throw new Error("private lookup timeout"); })).rejects.toThrow("BigQuery job lookup failed");
     expect(await rows()).toBe(0);
+  });
+
+  it("keeps the claim, reservation and previous observation after an oversized lookup", async () => {
+    const before = await ledger();
+    const saved = await observe(async () => Response.json(resource("DONE", "0")));
+    const lookup = vi.fn(async () => new Response(" ".repeat(256 * 1024) + JSON.stringify(resource("DONE", "5"))));
+    await expect(observe(lookup)).rejects.toThrow("BigQuery job lookup failed");
+    expect(lookup).toHaveBeenCalledOnce();
+    expect(await stored()).toEqual(saved);
+    expect(await rows()).toBe(1);
+    expect(await ledger()).toEqual(before);
+  });
+
+  it("does not persist a late terminal response after the lookup deadline", async () => {
+    const before = await ledger();
+    let arrive!: (response: Response) => void;
+    let start!: () => void;
+    const started = new Promise<void>(resolve => { start = resolve; });
+    const lookup = vi.fn((reference, signal: AbortSignal) => {
+      expect(reference).toEqual(ref);
+      expect(signal.aborted).toBe(false);
+      start();
+      return new Promise<Response>(resolve => { arrive = resolve; });
+    });
+    vi.useFakeTimers();
+    const pending = expect(observe(lookup)).rejects.toThrow("BigQuery job lookup failed");
+    try {
+      await started;
+      await vi.advanceTimersByTimeAsync(15_000);
+      await pending;
+      expect(lookup.mock.calls[0][1].aborted).toBe(true);
+      const response = Response.json(resource("DONE", "0"));
+      const cancel = vi.spyOn(response.body!, "cancel");
+      arrive(response);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(lookup).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+    expect(await rows()).toBe(0);
+    expect((await stored()).observation).toBeNull();
+    expect(await ledger()).toEqual(before);
   });
 
   it("requires both a confirmed claim and a current owner in the specific tenant and audience", async () => {

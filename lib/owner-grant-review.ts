@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import { canonicalControlJson, sha256Text } from "./control-objects";
 import { validRequestId, type MetricAction } from "./review-contract-request";
 
@@ -19,7 +20,7 @@ export async function checkOwnerReview(tenantId: string, releaseId: string, ids:
     const body = JSON.stringify({ requesterId, requestId, requestedAgentId, policyRevision, releaseId, reviewedAction });
     const snapshot = JSON.parse(body) as ReviewIds & { releaseId: string; reviewedAction: MetricAction };
     const actionDigest = await sha256Text(canonicalControlJson(snapshot.reviewedAction));
-    const res = await post("/api/control/" + tenantId + "/human-grant-reviews", { method: "POST", body,
+    const res = await post(gatewayPath("/api/control/") + tenantId + "/human-grant-reviews", { method: "POST", body,
       credentials: "same-origin", cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json" },
       signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });
     const b: unknown = await res.json();

@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import type { Inspection } from "./review-inspection";
 
 type Filter = { name: string; type: "INT64" | "BOOL" | "STRING" };
@@ -37,7 +38,7 @@ export function previewAction(model: Model, values: ReadonlyMap<string, string>)
 export async function checkMetricPreview(model: Model, action: NonNullable<ReturnType<typeof previewAction>>,
   signal: AbortSignal, post: typeof fetch = fetch) {
   try {
-    const res = await post("/api/control/" + model.tenantId + "/metric-previews", { method: "POST",
+    const res = await post(gatewayPath("/api/control/") + model.tenantId + "/metric-previews", { method: "POST",
       credentials: "same-origin", cache: "no-store", redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
       headers: { "Content-Type": "application/json" }, body: JSON.stringify({ releaseId: model.releaseId, action }) });
     const b: unknown = await res.json();

@@ -1,11 +1,11 @@
 import { intentJobIdentity } from "./bigquery-job-identity";
-import { parseJobObservation } from "./bigquery-job-metadata";
+import { readJobObservation } from "./bigquery-job-metadata";
 import { isEvidenceReceipt } from "./control-objects";
 import type { ControlAccess } from "./control-storage";
 import type { D1Database } from "./d1";
 import { terminalOutcomesConflict } from "./terminal-outcome-sql";
 
-type Lookup = (ref: Readonly<Awaited<ReturnType<typeof intentJobIdentity>>["jobReference"]>) => Promise<Response>;
+type Lookup = (ref: Readonly<Awaited<ReturnType<typeof intentJobIdentity>>["jobReference"]>, signal: AbortSignal) => Promise<Response>;
 type Terminal = "succeeded" | "failed" | "cancelled";
 type Row = {
   compiled_body_digest: string; cap: number; project_id: string; location: string; job_id: string;
@@ -49,8 +49,7 @@ export async function observeDelegatedClaim(access: ControlAccess, audience: str
   const { db,tenantId,principalId } = access;
   const scope: Scope = [tenantId,intentId,audience,principalId];
   const { row,identity } = await loadDelegatedClaimSnapshot(db,scope);
-  const response = await lookup({ ...identity.jobReference });
-  const sample = await parseJobObservation(response,identity,row.cap);
+  const sample = await readJobObservation(signal => lookup({ ...identity.jobReference },signal),identity,row.cap);
   if ("billedBytes" in sample) {
     const write = await db.prepare(`INSERT INTO bigquery_terminal_observations
       (tenant_id,intent_id,outcome,billed_bytes,has_bytes,observed_by,delegation_audience,claim_body_digest)

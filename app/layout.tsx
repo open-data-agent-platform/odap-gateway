@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://example.com"),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ?? "https://example.com"),
   title: {
     default: "ODAP Gateway - Governed BigQuery Access for AI Agents",
     template: "%s | ODAP Gateway"

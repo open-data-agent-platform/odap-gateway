@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import { isReceiptId } from "./receipt-id";
 
 export type ObjectInspection<T> = { state: "ready"; snapshot: T } |
@@ -12,7 +13,7 @@ export async function inspectObject<T>(tenant: string, id: string, kind: "receip
   if (!idPattern.test(tenant) || !(summary || explanation ? isReceiptId(id) : idPattern.test(id))) return { state: "invalid" };
   try {
     const view = summary ? "?view=summary" : kind === "contract-request" ? "?view=grant-history" : "";
-    const res = await get("/api/control/" + tenant + "/" + kind + "/" + encodeURIComponent(id) + view, {
+    const res = await get(gatewayPath("/api/control/") + tenant + "/" + kind + "/" + encodeURIComponent(id) + view, {
       method: "GET", credentials: "same-origin", cache: "no-store", redirect: "error", signal
     });
     const body = await res.json();

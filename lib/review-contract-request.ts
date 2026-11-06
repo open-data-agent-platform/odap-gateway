@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import { canonicalControlJson, isControlTimestamp, sha256Text } from "./control-objects";
 import type { previewAction } from "./review-metric-preview";
 
@@ -16,7 +17,7 @@ export async function proposeMetricRequest(tenantId: string, draft: RequestDraft
   try {
     const body = JSON.stringify(draft);
     const digest = await sha256Text(canonicalControlJson(JSON.parse(body).action));
-    const res = await post("/api/control/" + tenantId + "/contract-requests", { method: "POST", body,
+    const res = await post(gatewayPath("/api/control/") + tenantId + "/contract-requests", { method: "POST", body,
       credentials: "same-origin", cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json" },
       signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });
     const b: unknown = await res.json();

@@ -2,6 +2,7 @@ export type AuthProvider = "google" | "github";
 export type AuthRole = "admin" | "member";
 
 export type AuthEnv = {
+  GATEWAY_BASE_PATH?: string;
   AUTH_COOKIE_SECRET?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;

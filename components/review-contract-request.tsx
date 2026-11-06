@@ -1,4 +1,5 @@
 "use client";
+import { gatewayPath } from "@/lib/gateway-path";
 
 import { Send } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -53,7 +54,7 @@ export function ReviewContractRequest({ tenantId, releaseId, action }: { tenantI
     {attempt && <div className="space-y-1 text-sm text-slate-300">
       <p role="status">{messages[attempt.state]}</p>
       <p className="break-all">Request ID: <a className="focus-ring font-mono text-sky-300 underline" target="_blank" rel="noopener noreferrer"
-        title="Look up the stored proposal in a new tab" href={"/api/control/" + tenantId + "/contract-request/" + attempt.draft.requestId}>{attempt.draft.requestId}</a></p>
+        title="Look up the stored proposal in a new tab" href={gatewayPath("/api/control/") + tenantId + "/contract-request/" + attempt.draft.requestId}>{attempt.draft.requestId}</a></p>
       <details><summary className="cursor-pointer">Submitted inputs</summary>
         <dl className="mt-2 space-y-1 break-all"><dt>Agent</dt><dd>{attempt.draft.requestedAgentId}</dd>
           <dt>Parameters</dt><dd className="whitespace-pre-wrap font-mono">{JSON.stringify(attempt.draft.action.parameters)}</dd></dl>

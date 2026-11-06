@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Github, ShieldCheck } from "lucide-react";
+import { gatewayPath } from "@/lib/gateway-path";
 
 type LoginMessage = {
   tone: "success" | "error";
@@ -112,7 +113,7 @@ function ProviderLink({
 }) {
   return (
     <a
-      href={href}
+      href={gatewayPath(href)}
       className="focus-ring flex h-12 items-center justify-center gap-3 rounded-lg border border-white/10 bg-white/[0.035] px-4 text-sm font-semibold text-slate-100 transition hover:border-[#4285f4]/40 hover:bg-white/[0.06]"
     >
       {icon}

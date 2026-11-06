@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import { canonicalControlJson, isControlTimestamp, sha256Text } from "./control-objects";
 import type { MatchedRequest } from "./owner-grant-review";
 import { validRequestId } from "./review-contract-request";
@@ -15,7 +16,7 @@ export async function grantMatchedRequest(match: MatchedRequest, signal: AbortSi
     const body = JSON.stringify({ grantId, ...terms, reviewedAction });
     if (await sha256Text(canonicalControlJson(JSON.parse(body).reviewedAction)) !== actionDigest) return { state: "refused" };
     signal.throwIfAborted();
-    const res = await post("/api/control/" + tenantId + "/human-grants", { method: "POST", body, credentials: "same-origin",
+    const res = await post(gatewayPath("/api/control/") + tenantId + "/human-grants", { method: "POST", body, credentials: "same-origin",
       cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json" },
       signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });
     const b = await res.json();

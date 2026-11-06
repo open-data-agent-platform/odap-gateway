@@ -1,4 +1,5 @@
 "use client";
+import { gatewayPath } from "@/lib/gateway-path";
 
 import Link from "next/link";
 import { ReviewMetricPreview } from "./review-metric-preview";
@@ -235,7 +236,7 @@ export function SemanticReviewPage() {
         {inspected.state === "retired" && !retirement && <p className="text-sm">{inspected.retiredAt
           ? <>Retired at: <time dateTime={inspected.retiredAt}>{inspected.retiredAt}</time></> : "No retirement time was recorded."}</p>}
         {inspected.releaseId && <p className="break-all text-sm">Release ID: <a className="focus-ring font-mono text-sky-300 underline"
-          href={"/api/control/" + inspected.tenantId + "/release/" + inspected.releaseId}>{inspected.releaseId}</a></p>}
+          href={gatewayPath("/api/control/") + inspected.tenantId + "/release/" + inspected.releaseId}>{inspected.releaseId}</a></p>}
         <div><h3 className="mb-2 text-sm font-semibold">Canonical definition</h3>
           <pre className="whitespace-pre-wrap break-all rounded-md border border-white/10 bg-[#10151d] p-4 font-mono text-sm leading-6 text-slate-200"><code>{inspected.definitionJson}</code></pre>
         </div>

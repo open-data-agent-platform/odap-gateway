@@ -15,6 +15,7 @@ const secret = "local-test-secret-never-used-in-production";
 let directory: string;
 let secured: Miniflare;
 let assetFirst: Miniflare;
+let mounted: Miniflare;
 
 describe("Worker authentication ahead of the native static asset router", () => {
   beforeAll(async () => {
@@ -41,20 +42,22 @@ describe("Worker authentication ahead of the native static asset router", () => 
     const bundle = files.filter(file => file.endsWith(".js"));
     expect(bundle).toHaveLength(1);
     const script = await readFile(join(output, bundle[0]), "utf8");
-    const instance = (workerFirst: boolean) => new Miniflare({
+    const instance = (workerFirst: boolean, base = "") => new Miniflare({
       name: "odap-local-asset-check", host: "127.0.0.1", port: 0,
       modules: true, script, compatibilityDate: config.compatibility_date,
-      bindings: { AUTH_COOKIE_SECRET: secret, GATEWAY_MODE: "production" },
+      bindings: { AUTH_COOKIE_SECRET: secret, GATEWAY_MODE: "production", GATEWAY_BASE_PATH: base },
       assets: { directory: assets, binding: "ASSETS", routerConfig: {
         has_user_worker: true, invoke_user_worker_ahead_of_assets: workerFirst
       } }
     });
     secured = instance(config.assets.run_worker_first === true);
     assetFirst = instance(false);
+    mounted = instance(true, "/gateway");
   }, 90000);
   afterAll(async () => {
     await secured?.dispose();
     await assetFirst?.dispose();
+    await mounted?.dispose();
     if (directory) await rm(directory, { recursive: true, force: true });
   });
 
@@ -93,4 +96,25 @@ describe("Worker authentication ahead of the native static asset router", () => 
     expect(await response.text()).toContain("public-");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
   });
+
+  it.each(paths)("protects the mounted private asset %s before decoding", async path => {
+    const response = await mounted.dispatchFetch(`http://localhost/gateway${path}`, { redirect: "manual" });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toContain("/gateway/login?returnTo=%2Fadmin");
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await response.text()).not.toContain("private-admin");
+  });
+
+  it.each(["/gateway", "/gateway/login"])("serves the mounted native asset %s", async path => {
+    const response = await mounted.dispatchFetch(`http://localhost${path}`, { redirect: "manual" });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("public-");
+  });
+
+  it.each(["/", "/login", "/admin", "/_next/app.js", "/api/health", "/gateway-other"])(
+    "does not expose assets or APIs outside the mount: %s", async path => {
+      const response = await mounted.dispatchFetch(`http://localhost${path}`, { redirect: "manual" });
+      expect(response.status).toBe(404);
+      expect(await response.text()).toBe("Not found");
+    });
 });

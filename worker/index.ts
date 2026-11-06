@@ -1,5 +1,6 @@
 import { getPhase4Health, getPublicHealth } from "../lib/phase2";
 import { isAdminPageRequest } from "../lib/admin-page-path";
+import { gatewayPath, internalGatewayPath } from "../lib/gateway-path";
 import { onRequestGet as onControlObjectGet } from "../functions/api/control/[tenant]/[kind]/[id]";
 import { onRequestGet as onCorrectionGet, onRequestPost as onCorrectionPost } from "../functions/api/control/[tenant]/receipt-corrections/[id]";
 import { onRequestGet as onEvidenceCoverageGet } from "../functions/api/control/[tenant]/evidence-coverage";
@@ -59,6 +60,7 @@ type WorkerEnv = AuthEnv &
   BigQueryEnv & {
     ASSETS: AssetFetcher;
     ODAP_DELEGATION_AUDIENCE?: string;
+    GATEWAY_SITE_ORIGIN?: string;
   };
 
 type WorkerContext = {
@@ -73,8 +75,15 @@ type RouteMatch = {
 const worker = {
   async fetch(request: Request, env: WorkerEnv, context: WorkerContext) {
     try {
+      const url = new URL(request.url);
+      if (env.GATEWAY_BASE_PATH && internalGatewayPath(url.pathname, env.GATEWAY_BASE_PATH) === null &&
+          env.GATEWAY_SITE_ORIGIN === url.origin) {
+        // A route's trailing wildcard also matches sibling prefixes. Leave those
+        // requests to the existing site origin without Gateway headers or auth.
+        return await fetch(request);
+      }
       const response = await handleRequest(request, env, context);
-      return withSecurityHeaders(response);
+      return withSecurityHeaders(withGatewayLocation(response, request, env));
     } catch (error) {
       console.error(
         JSON.stringify({
@@ -103,6 +112,9 @@ async function handleRequest(
   context: WorkerContext
 ) {
   const url = new URL(request.url);
+  const pathname = internalGatewayPath(url.pathname, env.GATEWAY_BASE_PATH);
+  if (pathname === null) return new Response("Not found", { status: 404 });
+  url.pathname = pathname;
   const apiRoute = matchApiRoute(request, env, url);
 
   if (apiRoute) {
@@ -121,7 +133,7 @@ async function handleRequest(
   }
 
   context.waitUntil(Promise.resolve());
-  const assetResponse = await serveStaticAsset(request, env);
+  const assetResponse = await serveStaticAsset(new Request(url, request), env);
 
   return isAdminPageRequest(url.pathname)
     ? withPrivateCacheHeaders(assetResponse)
@@ -444,6 +456,19 @@ function withSecurityHeaders(response: Response) {
     statusText: response.statusText,
     headers
   });
+}
+
+function withGatewayLocation(response: Response, request: Request, env: WorkerEnv) {
+  const location = response.headers.get("Location");
+  if (!env.GATEWAY_BASE_PATH || !location) return response;
+  const source = new URL(request.url);
+  const destination = new URL(location, source);
+  if (destination.origin !== source.origin ||
+      internalGatewayPath(destination.pathname, env.GATEWAY_BASE_PATH) !== null) return response;
+  destination.pathname = gatewayPath(destination.pathname, env.GATEWAY_BASE_PATH);
+  const headers = new Headers(response.headers);
+  headers.set("Location", location.startsWith("/") ? destination.pathname + destination.search + destination.hash : destination.href);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 function withPrivateCacheHeaders(response: Response) {

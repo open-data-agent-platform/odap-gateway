@@ -1,6 +1,6 @@
 import { createBigQueryAccessToken, hasBigQueryCredentials, type BigQueryEnv } from "./bigquery";
 import { intentJobIdentity, type BigQueryJobBinding } from "./bigquery-job-identity";
-import { parseJobObservation, type Observation } from "./bigquery-job-metadata";
+import { readJobObservation, type Observation } from "./bigquery-job-metadata";
 export { intentJobIdentity } from "./bigquery-job-identity";
 
 // Internal: obtain the binding from storage, never a client-supplied job ID.
@@ -16,6 +16,7 @@ export async function observeIntentJob(env: BigQueryEnv, binding: BigQueryJobBin
   const url = new URL(`https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(ref.projectId)}/jobs/${ref.jobId}`);
   url.searchParams.set("location", ref.location);
   url.searchParams.set("fields", "jobReference,configuration(jobType,dryRun,labels,query/maximumBytesBilled),status(state,errorResult/reason),statistics/query/totalBytesBilled");
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, redirect: "manual" });
-  return parseJobObservation(response, identity, expectedCap);
+  return readJobObservation(signal => fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }, redirect: "manual", signal
+  }), identity, expectedCap);
 }

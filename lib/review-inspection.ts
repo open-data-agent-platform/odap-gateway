@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import { isControlTimestamp, sha256Text } from "./control-objects";
 
 const controlId = /^[A-Za-z0-9_-]{1,128}$/;
@@ -21,7 +22,7 @@ export async function inspectRevision(tenantId: string, revisionId: string, sign
   get: typeof fetch = fetch): Promise<InspectionResult> {
   if (!controlId.test(tenantId) || !controlId.test(revisionId)) return { ok: false, error: "invalid" };
   const options: RequestInit = { method: "GET", credentials: "same-origin", cache: "no-store", redirect: "error", signal };
-  const path = (kind: string) => "/api/control/" + tenantId + "/" + kind + "/" + revisionId;
+  const path = (kind: string) => gatewayPath("/api/control/") + tenantId + "/" + kind + "/" + revisionId;
   async function failure(res: Response): Promise<InspectionResult> {
     const body: unknown = await res.json().catch(() => null);
     const code = record(body) && body.ok === false ? body.code : null;
@@ -109,7 +110,7 @@ async function sendDecision({ tenantId, revisionId, definitionDigest }: Inspecti
     if (!record(body)) return "unknown";
     const decision = body[kind];
     if (res.status === 201 && body.ok === true && record(decision) && decision.revisionId === revisionId &&
-        res.headers.get("Location") === "/api/control/" + tenantId + "/review/" + revisionId) {
+        res.headers.get("Location") === gatewayPath("/api/control/") + tenantId + "/review/" + revisionId) {
       if (approvalId && decision.approvalId === approvalId) return "approved";
       if (!approvalId && decision.definitionDigest === definitionDigest) return "recorded";
     }
@@ -124,7 +125,7 @@ async function sendDecision({ tenantId, revisionId, definitionDigest }: Inspecti
 
 function postCommand(tenantId: string, kind: "approval" | "validation" | "promotion" | "withdrawal" | "retirement", payload: object,
   signal: AbortSignal, post: typeof fetch) {
-  return post("/api/control/" + tenantId + "/" + kind + "s", {
+  return post(gatewayPath("/api/control/") + tenantId + "/" + kind + "s", {
     method: "POST", credentials: "same-origin", redirect: "error", cache: "no-store",
     signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
     headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
@@ -153,7 +154,7 @@ export async function submitRetirement(inspected: Inspection, reason: string, si
     if (!record(body)) return { kind: "unknown" };
     const r = body.retirement;
     if (body.ok === true && body.effect === "future_dispatch_claims_only" && record(r) &&
-        res.headers.get("Location") === "/api/control/" + tenantId + "/release/" + releaseId) {
+        res.headers.get("Location") === gatewayPath("/api/control/") + tenantId + "/release/" + releaseId) {
       if (res.status === 200 && r.status === "legacy_retired" && !("retiredAt" in r)) return { kind: "legacyRetired", releaseId, retiredAt: null };
       if (typeof r.retiredAt === "string" && isControlTimestamp(r.retiredAt)) {
         if (res.status === 201 && r.status === "retired") return { kind: "retired", releaseId, retiredAt: r.retiredAt };
@@ -180,7 +181,7 @@ export async function submitWithdrawal(inspected: Inspection, reason: string, si
     if (!record(body)) return { kind: "unknown" };
     const w = body.withdrawal;
     if (body.ok === true && record(w) && typeof w.withdrawnAt === "string" && isControlTimestamp(w.withdrawnAt) &&
-        res.headers.get("Location") === "/api/control/" + tenantId + "/review/" + revisionId) {
+        res.headers.get("Location") === gatewayPath("/api/control/") + tenantId + "/review/" + revisionId) {
       if (res.status === 201 && w.status === "withdrawn") return { kind: "withdrawn", approvalId, withdrawnAt: w.withdrawnAt };
       if (res.status === 200 && w.status === "already_withdrawn") return { kind: "alreadyWithdrawn", approvalId, withdrawnAt: w.withdrawnAt };
     }
@@ -203,7 +204,7 @@ export async function submitPromotion(inspected: Inspection, releaseId: string, 
     const body: unknown = await res.json();
     if (!record(body)) return "unknown";
     if (res.status === 201 && body.ok === true && record(body.promotion) && body.promotion.releaseId === releaseId &&
-        res.headers.get("Location") === "/api/control/" + tenantId + "/release/" + releaseId) return "published";
+        res.headers.get("Location") === gatewayPath("/api/control/") + tenantId + "/release/" + releaseId) return "published";
     if (body.ok === false) {
       if (res.status === 409 && body.code === "promotion_not_recorded") return "publicationRefused";
       if (res.status === 401 || res.status === 403) return "denied";

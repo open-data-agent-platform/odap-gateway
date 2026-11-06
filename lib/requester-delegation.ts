@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import { canonicalControlJson, isControlTimestamp } from "./control-objects";
 import { validRequestId } from "./review-contract-request";
 
@@ -15,7 +16,7 @@ export async function consentToDelegation(scope: ConsentScope, keyId: string, si
       !isControlTimestamp(expiresAt) || !/^sha256:[0-9a-f]{64}$/.test(actionDigest)) return { state: "invalid" };
   if (Date.parse(expiresAt) <= Date.now()) return { state: "expired" };
   try {
-    const res = await post("/api/control/" + tenantId + "/delegations", { method: "POST", credentials: "same-origin",
+    const res = await post(gatewayPath("/api/control/") + tenantId + "/delegations", { method: "POST", credentials: "same-origin",
       cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ operation: "create", grantId, agentId, keyId }),
       signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });

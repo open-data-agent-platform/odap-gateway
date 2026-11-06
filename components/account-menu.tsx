@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { LogIn, LogOut } from "lucide-react";
+import { gatewayPath } from "@/lib/gateway-path";
 
 type SessionState =
   | { status: "loading" }
@@ -45,7 +46,7 @@ export function AccountMenu() {
           <span className="max-w-28 truncate">{session.user.name}</span>
         </Link>
         <a
-          href="/api/auth/logout"
+          href={gatewayPath("/api/auth/logout")}
           title="Sign out"
           aria-label="Sign out"
           className="focus-ring rounded-md p-2 text-slate-500 transition hover:bg-white/[0.06] hover:text-slate-200"
@@ -75,7 +76,7 @@ function useAuthSession() {
   useEffect(() => {
     let active = true;
 
-    fetch("/api/auth/session", {
+    fetch(gatewayPath("/api/auth/session"), {
       cache: "no-store",
       credentials: "include"
     })

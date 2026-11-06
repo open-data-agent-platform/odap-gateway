@@ -6,6 +6,7 @@ import {
 } from "../../../../lib/auth";
 import type { AdminStorageEnv } from "../../../../lib/admin-store";
 import { issueOAuthState } from "../../../../lib/oauth-state";
+import { gatewayPath } from "../../../../lib/gateway-path";
 
 type AuthStartContext = {
   request: Request;
@@ -35,7 +36,7 @@ export async function onRequestGet(context: AuthStartContext) {
   } catch {
     return redirectToLogin(url, "oauth_state_unavailable", provider);
   }
-  const callbackUrl = `${url.origin}/api/auth/callback/${provider}`;
+  const callbackUrl = url.origin + gatewayPath(`/api/auth/callback/${provider}`, context.env.GATEWAY_BASE_PATH ?? "");
   const authorizeUrl = createAuthorizeUrl(
     provider,
     credentials.clientId,

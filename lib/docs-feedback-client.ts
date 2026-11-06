@@ -1,3 +1,4 @@
+import { gatewayPath } from "./gateway-path";
 import type { PublicDocsFeedback } from "./docs-content";
 import type { DocsFeedbackSubmission } from "./docs-feedback";
 
@@ -23,7 +24,7 @@ function feedback(value: unknown): PublicDocsFeedback | null {
 
 export async function loadDocsFeedback(signal: AbortSignal, send: typeof fetch = fetch): Promise<FeedbackListResult> {
   try {
-    const response = await send("/api/docs/feedback", {method:"GET",credentials:"same-origin",
+    const response = await send(gatewayPath("/api/docs/feedback"), {method:"GET",credentials:"same-origin",
       cache:"no-store",redirect:"error",signal});
     if (response.status !== 200 || response.redirected) return {state:"unavailable"};
     const body: unknown = await response.json();
@@ -38,7 +39,7 @@ export async function loadDocsFeedback(signal: AbortSignal, send: typeof fetch =
 export async function sendDocsFeedback(input: DocsFeedbackSubmission & {company:string}, signal: AbortSignal,
   send: typeof fetch = fetch): Promise<FeedbackSubmitResult> {
   try {
-    const response = await send("/api/docs/feedback", {method:"POST",credentials:"same-origin",
+    const response = await send(gatewayPath("/api/docs/feedback"), {method:"POST",credentials:"same-origin",
       cache:"no-store",redirect:"error",headers:{"Content-Type":"application/json"},body:JSON.stringify(input),signal});
     if (response.status !== 200 || response.redirected) return {state:"unconfirmed"};
     const body: unknown = await response.json();
