@@ -160,7 +160,7 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
     expect(await sqlite("first", "SELECT count(*) AS n FROM dispatch_claims")).toEqual({ n: 0 });
   });
 
-  it.each(["duplicate", "timeout", "invalid-json", "wrong-id", "wrong-label", "changed-cap",
+  it.each(["duplicate", "timeout", "invalid-json", "wrong-id", "wrong-label", "changed-cap", "oversized",
     "redirect-301", "redirect-302", "redirect-303", "redirect-307", "redirect-308"])(
     "requires observation and never rearms a claim after %s", async failure => {
       const t = wire();
@@ -176,6 +176,7 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
         if (failure === "wrong-id") job.jobReference.jobId = "different";
         if (failure === "wrong-label") job.configuration.labels.odap_action = "different";
         if (failure === "changed-cap") job.configuration.query.maximumBytesBilled = "999999999";
+        if (failure === "oversized") return new Response(JSON.stringify({ ...job, ignored: "x".repeat(256 * 1024) }));
         return Response.json(job);
       });
       expect((await dispatchBigQueryMetricRead(access, "i", agent, action, t)).state).toBe("observation-required");

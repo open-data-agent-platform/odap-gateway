@@ -106,6 +106,29 @@ describe("BigQuery transport in the installed Workers runtime", () => {
     expect(calls[0].method).toBe("POST");
   });
 
+  it("accepts submission metadata at the exact byte ceiling", async () => {
+    mode = "ceiling";
+    expect(await run("submit")).toEqual({ status: 200, body: { state: "accepted", jobReference: identity.jobReference } });
+    expect(calls).toHaveLength(1);
+  });
+
+  it.each(["oversized", "declared-oversized", "invalid-utf8"])("keeps submission %s observation-only", async kind => {
+    mode = kind;
+    expect(await run("submit")).toEqual({ status: 200, body: { state: "observation-required", jobReference: identity.jobReference } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("POST");
+  });
+
+  it("ends a real stalled submission stream without sending again", async () => {
+    mode = "stall";
+    const start = Date.now();
+    expect(await run("submit")).toEqual({ status: 200, body: { state: "observation-required", jobReference: identity.jobReference } });
+    expect(Date.now() - start).toBeGreaterThanOrEqual(14_000);
+    expect(Date.now() - start).toBeLessThan(25_000);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("POST");
+  }, 30000);
+
   it("observes the pinned job using GET without constructing an executable job", async () => {
     expect(await run("observe")).toEqual({ status: 200, body: { state: "pending" } });
     expect(calls).toHaveLength(1);

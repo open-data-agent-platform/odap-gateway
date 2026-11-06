@@ -15,7 +15,8 @@ discovery in this wrapper.
 - After the claim: invoke the trusted, non-retrying sender once. POST to the
   fixed BigQuery jobs endpoint with the pinned reference, action label, named
   parameters and decimal byte ceiling. Redirects are forbidden. The request
-  carries a timeout signal; an integrated sender must honor it.
+  carries a timeout signal; an integrated sender must honor it. A separate
+  deadline also bounds acknowledgment waiting if the sender ignores that signal.
 - A matching query job reference, label and echoed ceiling on a successful
   response mean **accepted**, not completed or billed. HTTP errors (including
   duplicate job), timeouts, bad JSON or mismatched metadata require read-only
@@ -29,6 +30,26 @@ supplies the transport must establish identity, supply a trusted definition
 loader, avoid logging tokens or query parameter values, and never retry the
 POST inside the sender. Terminal evidence and billing reconciliation are
 separate from the submission acknowledgement.
+
+## Bounded submission acknowledgment
+
+The acknowledgment reader uses the shared provider response boundary: 256 KiB
+of actual UTF-8 response bytes and one 15-second deadline across headers and body.
+The deadline starts after the durable dispatch claim, immediately before the
+single sender call. Preparing the immutable request and obtaining credentials
+still happen before the claim. This does not bound database work, compilation
+or an arbitrary injected token supplier.
+
+Oversized, invalid UTF-8, missing or malformed responses and stalled streams
+return `observation-required` with the original job reference. The claim and
+reservation are not released, and no automatic send retry occurs. Non-success,
+already-followed and late responses are discarded without awaiting cancellation.
+A timeout is not proof that the warehouse rejected or cancelled the job.
+
+Synthetic unit tests cover byte/declared-length boundaries, late headers and a
+shared header/body deadline. SQLite tests retain the claim and reservation after
+an oversized acknowledgment and refuse replay. Native Workers tests include an
+actual stalled response stream. None of these tests submit a real warehouse job.
 
 ## Workers redirect compatibility
 
@@ -77,9 +98,10 @@ coverage, including a real stalled stream in Workers with synthetic credentials.
 
 The governed submitter still receives an injected token supplier; this helper is
 not implicitly wired into it. Integrators must preserve equivalent protections.
-Separate query/submission/observation response size and total deadline limits
-remain open; bounding token exchange does not bound the entire operation or
-authorize live query execution.
+Submission acknowledgments and job observations have their own bounded readers.
+Legacy demo query/dry-run response size and total deadline limits remain open;
+bounding token exchange does not bound the entire operation or authorize live
+query execution.
 
 ## Legacy demo transport boundary
 
