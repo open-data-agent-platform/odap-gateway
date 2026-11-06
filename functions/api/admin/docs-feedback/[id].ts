@@ -1,3 +1,4 @@
+import { readAdminJsonBody } from "../../../../lib/admin-command-request";
 import {
   jsonResponse,
   requireAdminSession
@@ -41,7 +42,7 @@ export async function onRequestPatch(context: DocsFeedbackReviewContext) {
     );
   }
 
-  const body = await readJsonBody(context.request);
+  const body = await readAdminJsonBody(context.request);
   if (!body.ok) {
     return jsonResponse(
       {
@@ -49,7 +50,7 @@ export async function onRequestPatch(context: DocsFeedbackReviewContext) {
         code: body.code,
         message: body.message
       },
-      { status: 400 }
+      { status: body.status }
     );
   }
 
@@ -93,35 +94,6 @@ export async function onRequestPatch(context: DocsFeedbackReviewContext) {
   });
 }
 
-async function readJsonBody(
-  request: Request
-): Promise<
-  | { ok: true; value: ReviewBody }
-  | { ok: false; code: string; message: string }
-> {
-  try {
-    const value = (await request.json()) as unknown;
-    if (!isRecord(value)) {
-      return {
-        ok: false,
-        code: "invalid_json",
-        message: "Request body must be a JSON object."
-      };
-    }
-
-    return {
-      ok: true,
-      value
-    };
-  } catch {
-    return {
-      ok: false,
-      code: "invalid_json",
-      message: "Request body must be valid JSON."
-    };
-  }
-}
-
 function normalizeReviewInput(value: ReviewBody): DocsFeedbackReviewInput {
   return {
     status:
@@ -130,8 +102,4 @@ function normalizeReviewInput(value: ReviewBody): DocsFeedbackReviewInput {
         : undefined,
     answerText: typeof value.answerText === "string" ? value.answerText : undefined
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

@@ -7,6 +7,7 @@ import {
   type AdminStorageEnv
 } from "../../../../lib/admin-store";
 import { type AuthEnv } from "../../../../lib/auth";
+import { readAdminJsonBody } from "../../../../lib/admin-command-request";
 
 type FeatureFlagContext = {
   request: Request;
@@ -14,10 +15,6 @@ type FeatureFlagContext = {
   params: {
     id?: string;
   };
-};
-
-type RolloutBody = {
-  rollout?: unknown;
 };
 
 export async function onRequestPatch(context: FeatureFlagContext) {
@@ -38,8 +35,14 @@ export async function onRequestPatch(context: FeatureFlagContext) {
     );
   }
 
-  const body = await readJsonBody(context.request);
-  const rollout = body?.rollout;
+  const body = await readAdminJsonBody(context.request);
+  if (!body.ok) {
+    return jsonResponse({ ok: false,
+      code: body.status === 400 ? "invalid_rollout" : body.code,
+      message: body.status === 400 ? "Rollout must be a number." : body.message
+    }, { status: body.status });
+  }
+  const rollout = body.value.rollout;
   if (typeof rollout !== "number") {
     return jsonResponse(
       {
@@ -73,17 +76,4 @@ export async function onRequestPatch(context: FeatureFlagContext) {
     ok: true,
     featureFlag: result.value
   });
-}
-
-async function readJsonBody(request: Request): Promise<RolloutBody | null> {
-  try {
-    const body = (await request.json()) as unknown;
-    return isRecord(body) ? body : null;
-  } catch {
-    return null;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

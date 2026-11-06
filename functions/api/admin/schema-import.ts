@@ -1,3 +1,4 @@
+import { readAdminJsonBody } from "../../../lib/admin-command-request";
 import {
   jsonResponse,
   requireAdminSession
@@ -14,21 +15,13 @@ type SchemaImportContext = {
   env: AuthEnv & AdminRuntimeEnv;
 };
 
-type SchemaImportBody = {
-  workspace?: unknown;
-  dataset?: unknown;
-  projectId?: unknown;
-  tablePrefix?: unknown;
-  tableLimit?: unknown;
-};
-
 export async function onRequestPost(context: SchemaImportContext) {
   const auth = await requireAdminSession(context.request, context.env);
   if (!auth.ok) {
     return auth.response;
   }
 
-  const body = await readJsonBody(context.request);
+  const body = await readAdminJsonBody(context.request);
   if (!body.ok) {
     return jsonResponse(
       {
@@ -36,7 +29,7 @@ export async function onRequestPost(context: SchemaImportContext) {
         code: body.code,
         message: body.message
       },
-      { status: 400 }
+      { status: body.status }
     );
   }
 
@@ -70,35 +63,6 @@ export async function onRequestPost(context: SchemaImportContext) {
   });
 }
 
-async function readJsonBody(
-  request: Request
-): Promise<
-  | { ok: true; value: SchemaImportBody }
-  | { ok: false; code: string; message: string }
-> {
-  try {
-    const value = (await request.json()) as unknown;
-    if (!isRecord(value)) {
-      return {
-        ok: false,
-        code: "invalid_json",
-        message: "Request body must be a JSON object."
-      };
-    }
-
-    return {
-      ok: true,
-      value
-    };
-  } catch {
-    return {
-      ok: false,
-      code: "invalid_json",
-      message: "Request body must be valid JSON."
-    };
-  }
-}
-
 function getString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -119,8 +83,4 @@ function getOptionalInteger(value: unknown) {
   }
 
   return undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

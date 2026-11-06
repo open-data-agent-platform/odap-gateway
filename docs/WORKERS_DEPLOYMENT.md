@@ -246,8 +246,21 @@ size caps, error codes and authorization order unchanged. No retries or database
 writes follow a body refusal. This is not a rate limiter, a database execution
 deadline or client-disconnect coverage: the current pinned compatibility does
 not enable [client-disconnect request signals](https://developers.cloudflare.com/workers/runtime-apis/request/#properties).
-The read deadline works without that signal. Admin and legacy query readers are
-outside this change; valid feedback still requires confirmed persistence below.
+The read deadline works without that signal. The legacy query reader is outside
+this change; valid feedback still requires confirmed persistence below.
+
+Administrator role, feature rollout, schema-field policy, run review, feedback
+review and schema-import commands use the same bounded reader, with a 16 KiB
+actual-byte ceiling and one 15-second body deadline. These limits apply only
+after the existing session and current administrator checks, and route-ID checks
+where applicable. Refusal returns 413 (`admin_body_too_large`) or 408
+(`admin_body_timeout`) with no-store responses; no mutation or provider call
+follows it. Malformed JSON, non-object input, invalid UTF-8 and aborted bodies
+return 400 (`invalid_json`, or the existing `invalid_rollout` on feature rollout).
+The cap accommodates the maximum 1,600-character feedback answer even with
+six-byte JSON escapes. Field validation, write-time authority checks and atomic
+audit/write behavior are unchanged. This is a body-admission limit, not a time
+limit on the preceding authority-store read or on subsequent database work.
 
 Existing records, including seed-named records that may have been edited, are
 not automatically deleted, hidden or rewritten. Previously installed examples

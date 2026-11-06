@@ -2,7 +2,8 @@ import {
   jsonResponse,
   requireAdminSession
 } from "../../../../lib/auth-request";
-import { type AuthEnv, type AuthRole } from "../../../../lib/auth";
+import { type AuthEnv } from "../../../../lib/auth";
+import { readAdminJsonBody } from "../../../../lib/admin-command-request";
 import {
   updateAdminUserRole,
   type AdminStorageEnv
@@ -14,10 +15,6 @@ type AdminUserContext = {
   params: {
     id?: string;
   };
-};
-
-type AdminUserPatchBody = {
-  role?: unknown;
 };
 
 export async function onRequestPatch(context: AdminUserContext) {
@@ -38,7 +35,7 @@ export async function onRequestPatch(context: AdminUserContext) {
     );
   }
 
-  const body = await readJsonBody(context.request);
+  const body = await readAdminJsonBody(context.request);
   if (!body.ok) {
     return jsonResponse(
       {
@@ -46,8 +43,13 @@ export async function onRequestPatch(context: AdminUserContext) {
         code: body.code,
         message: body.message
       },
-      { status: 400 }
+      { status: body.status }
     );
+  }
+
+  if (body.value.role !== "admin" && body.value.role !== "member") {
+    return jsonResponse({ ok: false, code: "invalid_user_role",
+      message: "User role must be admin or member." }, { status: 400 });
   }
 
   const result = await updateAdminUserRole(
@@ -72,47 +74,4 @@ export async function onRequestPatch(context: AdminUserContext) {
     ok: true,
     user: result.value
   });
-}
-
-async function readJsonBody(
-  request: Request
-): Promise<
-  | { ok: true; value: { role: AuthRole } }
-  | { ok: false; code: string; message: string }
-> {
-  try {
-    const value = (await request.json()) as AdminUserPatchBody;
-    if (!isRecord(value)) {
-      return {
-        ok: false,
-        code: "invalid_json",
-        message: "Request body must be a JSON object."
-      };
-    }
-
-    if (value.role !== "admin" && value.role !== "member") {
-      return {
-        ok: false,
-        code: "invalid_user_role",
-        message: "User role must be admin or member."
-      };
-    }
-
-    return {
-      ok: true,
-      value: {
-        role: value.role
-      }
-    };
-  } catch {
-    return {
-      ok: false,
-      code: "invalid_json",
-      message: "Request body must be valid JSON."
-    };
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
