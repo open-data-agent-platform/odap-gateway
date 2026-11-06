@@ -66,6 +66,31 @@ describe("schema import transaction on installed local D1",() => {
     expect(await state()).toEqual(before);
   });
 
+  it.each([
+    ["source project", { table_catalog: "other-project" }],
+    ["source dataset", { table_schema: "other_dataset" }],
+    ["table prefix", { table_name: "payments" }],
+    ["invalid column", { column_name: "" }],
+    ["policy metadata", { policy_tags: false }],
+    ["duplicate column", { column_name: "contact" }],
+    ["table count", { table_name: "orders_archive" }]
+  ] satisfies Array<[string, bigquery.BigQueryQueryRow]>)("rejects %s without any native catalog or audit change", async (_name, patch) => {
+    const good = { table_catalog: "fixture-project", table_schema: "fixture", table_name: "orders", table_type: "BASE TABLE",
+      column_name: "contact", data_type: "STRING", is_nullable: "YES", ordinal_position: 1, policy_tags: null };
+    const query = vi.spyOn(bigquery, "runBigQueryQuery").mockResolvedValue({ ok: true, totalRows: 2,
+      rows: [good, { ...good, column_name: "new_column", ordinal_position: 2, ...patch }] });
+    const before = await state(), prepare = vi.fn((sql: string) => db.prepare(sql));
+    const batch = vi.fn((statements: Parameters<NonNullable<D1Database["batch"]>>[0]) => db.batch!(statements));
+    expect(await importBigQuerySchemaCatalog({ DB: { prepare, batch }, GATEWAY_MODE: "demo" },
+      { workspace: "fixture", projectId: "fixture-project", dataset: "fixture", tablePrefix: "ord", tableLimit: 1 }, actor))
+      .toEqual({ ok: false, status: 500, code: "schema_import_metadata_invalid",
+        message: "BigQuery schema metadata did not match the requested import." });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(batch).not.toHaveBeenCalled();
+    expect(await state()).toEqual(before);
+  });
+
   it("commits the complete catalog and audit while preserving existing IDs and policy",async () => {
     const result = await submit();
     expect(result).toMatchObject({ok:true,value:{importedTables:2,importedFields:3}});

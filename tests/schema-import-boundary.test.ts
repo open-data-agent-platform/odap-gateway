@@ -108,4 +108,26 @@ describe("legacy schema import warehouse boundary", () => {
     expect(calls).toEqual([tokenUrl, queryUrl]);
     expect(prepare).not.toHaveBeenCalled();
   });
+  it.each([
+    ["project", { table_catalog: "synthetic-private-project" }],
+    ["dataset", { table_schema: "synthetic_private_dataset" }],
+    ["invalid row", { data_type: "" }],
+    ["missing policy tag field", { policy_tags: undefined }],
+    ["false policy tags", { policy_tags: false }],
+    ["nullable flag", { is_nullable: "unknown" }],
+    ["duplicate column", { column_name: "id" }]
+  ])("refuses %s in complete metadata before catalog I/O", async (_name, patch) => {
+    const good = { table_catalog: "fixture-project", table_schema: "fixture_dataset", table_name: "orders",
+      table_type: "BASE TABLE", column_name: "id", data_type: "INT64", is_nullable: "NO", ordinal_position: "1", policy_tags: null };
+    const bad = { ...good, column_name: "other", ordinal_position: "2", ...patch };
+    const names = Object.keys(bad).filter(key => bad[key as keyof typeof bad] !== undefined);
+    warehouseBody = JSON.stringify({ jobComplete: true, totalRows: "2", schema: { fields: names.map(name => ({ name })) },
+      rows: [good, bad].map(row => ({ f: names.map(name => ({ v: row[name as keyof typeof row] })) })) });
+    const response = await post("demo");
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ ok: false, code: "schema_import_metadata_invalid",
+      message: "BigQuery schema metadata did not match the requested import." });
+    expect(calls).toEqual([tokenUrl, queryUrl]);
+    expect(prepare).not.toHaveBeenCalled();
+  });
 });

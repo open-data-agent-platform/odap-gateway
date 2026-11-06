@@ -45,7 +45,8 @@ describe("schema import mapping", () => {
           policy_tags: "projects/demo/locations/us/taxonomies/1/policyTags/2"
         }
       ],
-      "demo"
+      "demo",
+      { projectId: "demo-project", dataset: "demo", tablePrefix: "", tableLimit: 50 }
     );
 
     expect(catalog).toHaveLength(1);

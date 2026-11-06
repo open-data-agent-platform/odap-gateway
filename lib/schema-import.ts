@@ -35,12 +35,16 @@ type InformationSchemaRow = {
   column_name: string;
   data_type: string;
   is_nullable: string;
-  ordinal_position: number;
+  ordinal_position: number | null;
   policy_tags: string | null;
 };
 
 const DEFAULT_TABLE_LIMIT = 50;
 const MAX_TABLE_LIMIT = 100;
+const IMPORT_TABLE_TYPES = ["BASE TABLE", "CLONE", "EXTERNAL", "MATERIALIZED VIEW", "SNAPSHOT", "VIEW"];
+const METADATA_FIELDS = ["table_catalog", "table_schema", "table_name", "table_type", "column_name",
+  "data_type", "is_nullable", "ordinal_position", "policy_tags"];
+type SchemaImportSource = Required<Omit<BigQuerySchemaImportInput, "workspace">>;
 
 export async function importBigQuerySchemaCatalog(
   env: AdminStorageEnv & BigQueryEnv,
@@ -85,10 +89,13 @@ export async function importBigQuerySchemaCatalog(
     };
   }
 
-  const tables = mapInformationSchemaRowsToCatalog(
-    query.rows,
-    normalized.value.workspace
-  );
+  let tables: SchemaImportTableInput[];
+  try {
+    tables = mapInformationSchemaRowsToCatalog(query.rows, normalized.value.workspace, normalized.value);
+  } catch {
+    return { ok: false, status: 500, code: "schema_import_metadata_invalid",
+      message: "BigQuery schema metadata did not match the requested import." };
+  }
   const result = await importSchemaCatalog(
     env,
     {
@@ -113,12 +120,7 @@ export async function importBigQuerySchemaCatalog(
   };
 }
 
-export function buildInformationSchemaQuery(input: {
-  projectId: string;
-  dataset: string;
-  tablePrefix: string;
-  tableLimit: number;
-}) {
+export function buildInformationSchemaQuery(input: SchemaImportSource) {
   const tablePath = formatInformationSchemaPath(
     input.projectId,
     input.dataset,
@@ -138,7 +140,7 @@ export function buildInformationSchemaQuery(input: {
   return `WITH selected_tables AS (
   SELECT table_catalog, table_schema, table_name, table_type
   FROM ${tablePath}
-  WHERE table_type IN ('BASE TABLE', 'CLONE', 'EXTERNAL', 'MATERIALIZED VIEW', 'SNAPSHOT', 'VIEW')${prefixFilter}
+  WHERE table_type IN (${IMPORT_TABLE_TYPES.map(type => `'${type}'`).join(", ")})${prefixFilter}
   ORDER BY table_name
   LIMIT ${input.tableLimit}
 )
@@ -160,41 +162,52 @@ ORDER BY selected_tables.table_name, columns.ordinal_position`;
 
 export function mapInformationSchemaRowsToCatalog(
   rows: BigQueryQueryRow[],
-  workspace: string
+  workspace: string,
+  source: SchemaImportSource
 ): SchemaImportTableInput[] {
-  const tables = new Map<string, SchemaImportTableInput>();
+  const tables = new Map<string, { table: SchemaImportTableInput; type: string;
+    columns: Set<string>; positions: Set<number> }>();
 
   for (const row of rows) {
     const parsed = parseInformationSchemaRow(row);
-    if (!parsed) {
-      continue;
+    if (!parsed || parsed.table_catalog !== source.projectId || parsed.table_schema !== source.dataset ||
+        !parsed.table_name.startsWith(source.tablePrefix)) {
+      throw new Error("Invalid BigQuery schema metadata.");
     }
 
     const tableName = `${parsed.table_schema}.${parsed.table_name}`;
     const existing =
       tables.get(tableName) ??
-      ({
+      { type: parsed.table_type, columns: new Set<string>(), positions: new Set<number>(), table: {
         workspace,
         name: tableName,
         description: `${formatTableType(parsed.table_type)} imported from BigQuery INFORMATION_SCHEMA.`,
         rowCount: 0,
         fields: []
-      } satisfies SchemaImportTableInput);
+      } satisfies SchemaImportTableInput };
+    if (existing.type !== parsed.table_type || existing.columns.has(parsed.column_name) ||
+        (parsed.ordinal_position !== null && existing.positions.has(parsed.ordinal_position))) {
+      throw new Error("Invalid BigQuery schema metadata.");
+    }
+    existing.columns.add(parsed.column_name);
+    if (parsed.ordinal_position !== null) existing.positions.add(parsed.ordinal_position);
     const hasPolicyTags = Boolean(parsed.policy_tags);
 
-    existing.fields.push({
+    existing.table.fields.push({
       name: parsed.column_name,
       type: parsed.data_type,
       mode: parsed.is_nullable === "NO" ? "REQUIRED" : "NULLABLE",
-      description: `Column ${parsed.ordinal_position} from ${tableName}.`,
+      description: parsed.ordinal_position === null ? `Pseudo column from ${tableName}.`
+        : `Column ${parsed.ordinal_position} from ${tableName}.`,
       pii: hasPolicyTags ? true : undefined,
       queryable: hasPolicyTags ? false : undefined,
       usedInExamples: false
     });
     tables.set(tableName, existing);
+    if (tables.size > source.tableLimit) throw new Error("Invalid BigQuery schema metadata.");
   }
 
-  return Array.from(tables.values());
+  return Array.from(tables.values(), value => value.table);
 }
 
 function normalizeImportInput(
@@ -203,13 +216,7 @@ function normalizeImportInput(
 ):
   | {
       ok: true;
-      value: {
-        workspace: string;
-        projectId: string;
-        dataset: string;
-        tablePrefix: string;
-        tableLimit: number;
-      };
+      value: SchemaImportSource & { workspace: string };
     }
   | {
       ok: false;
@@ -274,19 +281,21 @@ function normalizeImportInput(
 function parseInformationSchemaRow(
   row: BigQueryQueryRow
 ): InformationSchemaRow | null {
+  if (!row || typeof row !== "object" || !METADATA_FIELDS.every(key => Object.hasOwn(row, key))) return null;
   const tableCatalog = getString(row.table_catalog);
   const tableSchema = getString(row.table_schema);
   const tableName = getString(row.table_name);
   const columnName = getString(row.column_name);
   const dataType = getString(row.data_type);
   const isNullable = getString(row.is_nullable);
+  const tableType = getString(row.table_type);
+  const ordinal = getOrdinalPosition(row.ordinal_position);
+  const policyTags = row.policy_tags;
 
   if (
-    !tableCatalog ||
-    !tableSchema ||
-    !tableName ||
-    !columnName ||
-    !dataType
+    !tableCatalog.trim() || !tableSchema.trim() || !tableName.trim() || !columnName.trim() || !dataType.trim() ||
+    !IMPORT_TABLE_TYPES.includes(tableType) || !["YES", "NO"].includes(isNullable) || ordinal === undefined ||
+    (policyTags !== null && (typeof policyTags !== "string" || (policyTags !== "" && !policyTags.trim())))
   ) {
     return null;
   }
@@ -295,12 +304,12 @@ function parseInformationSchemaRow(
     table_catalog: tableCatalog,
     table_schema: tableSchema,
     table_name: tableName,
-    table_type: getString(row.table_type) || "TABLE",
+    table_type: tableType,
     column_name: columnName,
     data_type: dataType,
     is_nullable: isNullable,
-    ordinal_position: getPositiveNumber(row.ordinal_position),
-    policy_tags: getString(row.policy_tags) || null
+    ordinal_position: ordinal,
+    policy_tags: policyTags
   };
 }
 
@@ -355,8 +364,10 @@ function getString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
-function getPositiveNumber(value: unknown) {
-  const parsed = typeof value === "number" ? value : Number(value);
-
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function getOrdinalPosition(value: unknown): number | null | undefined {
+  // INFORMATION_SCHEMA uses explicit NULL for pseudo columns, never a zero offset.
+  if (value === null) return null;
+  if (typeof value !== "number" && (typeof value !== "string" || !/^[1-9][0-9]*$/.test(value))) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
