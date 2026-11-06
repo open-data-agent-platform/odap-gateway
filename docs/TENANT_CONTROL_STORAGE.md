@@ -82,6 +82,29 @@ so an earlier access object is not a reusable role grant. The primitive validate
 object shape and tenant but is not an issuer, approval engine or execution service.
 The append primitive is not an HTTP write endpoint.
 
+### Control command body admission
+
+The shared JSON reader used by proposal, review/lifecycle, grant, delegation,
+contract, budget, job-preparation and receipt-correction commands enforces each
+route's existing byte limit against the actual stream, regardless of declared
+`Content-Length`. It decodes UTF-8 strictly and requires a complete JSON body.
+A single 15-second deadline starts when body admission begins, after any preceding
+authentication/configuration checks; another chunk does not extend it. Exceeding
+that deadline returns 408 with `{command}_timeout`. Oversize retains 413 with
+`{command}_too_large`; malformed, failed or aborted reads return 400 with
+`invalid_{command}`. These no-store replies do not include stream error details.
+
+Failure requests stream cancellation without waiting for it to settle, and
+releases the reader, abort listener and timer. An already-aborted request is
+rejected, and an abort signal during reading interrupts it. Client-disconnect
+notification depends on the [runtime's request-signal support](https://developers.cloudflare.com/workers/runtime-apis/request/#properties); the current pinned
+Worker configuration does not opt into `enable_request_signal`, so the fixed
+deadline is independent of such notification. This is a body-read bound, not an
+end-to-end database or execution deadline. It does not cancel a command that has
+already passed admission, promise rollback after a lost response, retry a write,
+or replace the existing write-time authority checks. Admin and legacy query
+readers are outside this shared helper's scope.
+
 ### Candidate proposal (local development)
 
 `POST /api/control/{tenant}/proposals` is a cookie-authenticated command for

@@ -37,26 +37,52 @@ const scopedIdFields = { contract_issuance: "delegationId", budget_admission: "c
 type ScopedCommand = keyof typeof scopedIdFields;
 
 export async function readCommandBody(request: Request, maxBytes: number, kind: "proposal" | "contract_request" | "metric_preview" | "delegation" | "delegation_proof" | ScopedCommand | OwnerCommand) {
-  if (Number(request.headers.get("Content-Length")) > maxBytes) return commandError(413, kind + "_too_large");
+  if (request.signal.aborted || Number(request.headers.get("Content-Length")) > maxBytes) {
+    void request.body?.cancel().catch(() => {});
+    return request.signal.aborted ? commandError(400, "invalid_" + kind) : commandError(413, kind + "_too_large");
+  }
   if (!request.body) return commandError(400, "invalid_" + kind);
   const reader = request.body.getReader(), bytes = new Uint8Array(maxBytes);
-  let size = 0;
+  let size = 0, complete = false, cancelled = false;
+  let refusal: Response | undefined;
+  const cancel = () => {
+    if (!cancelled) {
+      cancelled = true;
+      void reader.cancel().catch(() => {});
+    }
+  };
+  let interrupt!: (response: Response) => void;
+  const interrupted = new Promise<ReadableStreamReadResult<Uint8Array>>(resolve => {
+    interrupt = response => {
+      refusal ??= response;
+      resolve({ done: true, value: undefined });
+      cancel();
+    };
+  });
+  const onAbort = () => interrupt(commandError(400, "invalid_" + kind));
+  request.signal.addEventListener("abort", onAbort, { once: true });
+  // One deadline for the whole body, including streams whose cancellation stalls.
+  const timer = setTimeout(() => interrupt(commandError(408, kind + "_timeout")), 15_000);
   try {
     for (;;) {
-      const { value, done } = await reader.read();
+      const { value, done } = await Promise.race([reader.read(), interrupted]);
+      if (refusal) return refusal;
       if (done) break;
       if (value.byteLength > maxBytes - size) {
-        await reader.cancel();
         return commandError(413, kind + "_too_large");
       }
       bytes.set(value, size);
       size += value.byteLength;
     }
     const data: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size)));
+    complete = true;
     return { data };
   } catch {
-    return commandError(400, "invalid_" + kind);
+    return refusal ?? commandError(400, "invalid_" + kind);
   } finally {
+    clearTimeout(timer);
+    request.signal.removeEventListener("abort", onAbort);
+    if (!complete) cancel();
     reader.releaseLock();
   }
 }
