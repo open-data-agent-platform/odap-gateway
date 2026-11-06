@@ -6,6 +6,7 @@ import { createSessionCookie, signAuthPayload } from "../lib/auth";
 import { ensureAdminSchema, updateRunReviewStatus } from "../lib/admin-store";
 import { jobSqlite, jobTransactionalDatabase } from "./fixtures/job-sqlite";
 import worker from "../worker";
+import { withBodyReadHook } from "./fixtures/request-body-hook";
 
 let dir: string, file: string, baseline: string, cookie: string;
 let beforeWrite: (() => Promise<void>) | null = null;
@@ -56,9 +57,9 @@ describe("current authority and atomic legacy run review",() => {
   afterAll(async () => {if (dir) await rm(dir,{recursive:true,force:true});});
 
   it("refuses review after actor demotion during body parsing",async () => {
-    const input = request(), parse = input.json.bind(input);
-    input.json = async () => {await sql("UPDATE users SET role='member' WHERE id='google:actor'");return parse();};
-    const response = await submit(input);
+    const revoke = vi.fn(() => sql("UPDATE users SET role='member' WHERE id='google:actor'"));
+    const response = await submit(withBodyReadHook(request(), revoke));
+    expect(revoke).toHaveBeenCalledOnce();
     expect({status:response.status,...await state()}).toEqual({status:403,...original});
   },20000);
 

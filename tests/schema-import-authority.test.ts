@@ -6,6 +6,7 @@ import { createSessionCookie, signAuthPayload } from "../lib/auth";
 import * as bigquery from "../lib/bigquery";
 import { jobSqlite, jobTransactionalDatabase } from "./fixtures/job-sqlite";
 import worker from "../worker";
+import { withBodyReadHook } from "./fixtures/request-body-hook";
 
 let dir: string, file: string, baseline: string, cookie: string;
 let beforeWrite: (() => Promise<void>) | null = null;
@@ -58,14 +59,13 @@ describe("write-time administrator authority for schema import",() => {
   afterAll(async () => {if (dir) await rm(dir,{recursive:true,force:true});});
 
   it("baseline: refuses an administrator demoted during body parsing",async () => {
-    const input = request(), parse = input.json.bind(input);
     let snapshot!: Buffer;
-    input.json = async () => {
+    const revoke = vi.fn(async () => {
       await sql("UPDATE users SET role='member' WHERE id='google:actor'");
       snapshot = await readFile(file);
-      return parse();
-    };
-    await denied(await submit(input),snapshot);
+    });
+    await denied(await submit(withBodyReadHook(request(), revoke)),snapshot);
+    expect(revoke).toHaveBeenCalledOnce();
   });
 
   it("baseline: refuses an administrator removed while metadata is retrieved",async () => {

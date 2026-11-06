@@ -6,6 +6,7 @@ import { createSessionCookie, signAuthPayload } from "../lib/auth";
 import { ensureAdminSchema, updateAdminUserRole } from "../lib/admin-store";
 import { jobTransactionalDatabase, jobSqlite } from "./fixtures/job-sqlite";
 import worker from "../worker";
+import { withBodyReadHook } from "./fixtures/request-body-hook";
 
 let dir: string, file: string, baseline: string, cookie: string;
 let beforeRoleWrite: (() => Promise<void>) | null = null;
@@ -80,12 +81,9 @@ describe("current authority at the role write",() => {
   },20000);
 
   it("rechecks a demotion committed while the request body is being read",async () => {
-    const input = request(), parse = input.json.bind(input);
-    input.json = async () => {
-      await sql("UPDATE users SET role='member' WHERE id='google:actor'");
-      return parse();
-    };
-    expect((await submit(input)).status).toBe(403);
+    const revoke = vi.fn(() => sql("UPDATE users SET role='member' WHERE id='google:actor'"));
+    expect((await submit(withBodyReadHook(request(), revoke))).status).toBe(403);
+    expect(revoke).toHaveBeenCalledOnce();
     expect(await storedRole()).toEqual({role:"member"});
     expect(await auditCount()).toEqual({n:0});
   },20000);
@@ -111,12 +109,9 @@ describe("current authority at the role write",() => {
   },20000);
 
   it("binds self-demotion protection to subject rather than an outdated email",async () => {
-    const input = request("google:actor","member"), parse = input.json.bind(input);
-    input.json = async () => {
-      await sql("UPDATE users SET email='renamed@example.test' WHERE id='google:actor'");
-      return parse();
-    };
-    const response = await submit(input);
+    const rename = vi.fn(() => sql("UPDATE users SET email='renamed@example.test' WHERE id='google:actor'"));
+    const response = await submit(withBodyReadHook(request("google:actor","member"), rename));
+    expect(rename).toHaveBeenCalledOnce();
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({code:"cannot_demote_self"});
     expect(await storedRole("google:actor")).toEqual({role:"admin"});
