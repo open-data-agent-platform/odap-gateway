@@ -1,6 +1,6 @@
 {
   "name": "odap-gateway",
-  "version": "0.1.0",
+  "version": "0.2.0-preview.1",
   "private": false,
   "description": "Reference implementation of the ODAP Five Musts: a governed gateway for AI agents querying enterprise data, starting with BigQuery.",
   "scripts": {
