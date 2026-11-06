@@ -5,6 +5,7 @@ import {
   type DocsFeedbackEnv
 } from "../../../lib/docs-feedback";
 import type { DocsFeedbackKind } from "../../../lib/docs-content";
+import { readBoundedRequestJson } from "../../../lib/request-json";
 
 type DocsFeedbackContext = {
   request: Request;
@@ -40,7 +41,7 @@ export async function onRequestPost(context: DocsFeedbackContext) {
         code: body.code,
         message: body.message
       },
-      { status: 400 }
+      { status: body.status }
     );
   }
 
@@ -88,29 +89,19 @@ async function readJsonBody(
   request: Request
 ): Promise<
   | { ok: true; value: DocsFeedbackBody }
-  | { ok: false; code: string; message: string }
+  | { ok: false; status: number; code: string; message: string }
 > {
-  try {
-    const value = (await request.json()) as unknown;
-    if (!isRecord(value)) {
-      return {
-        ok: false,
-        code: "invalid_json",
-        message: "Request body must be a JSON object."
-      };
-    }
-
-    return {
-      ok: true,
-      value
-    };
-  } catch {
-    return {
-      ok: false,
-      code: "invalid_json",
-      message: "Request body must be valid JSON."
-    };
+  const body = await readBoundedRequestJson(request, 16 * 1024);
+  if (!body.ok) {
+    if (body.reason === "too_large") return { ok: false, status: 413, code: "feedback_too_large",
+      message: "Feedback request body must be 16384 bytes or less." };
+    if (body.reason === "timeout") return { ok: false, status: 408, code: "feedback_timeout",
+      message: "Feedback request body read timed out." };
+    return { ok: false, status: 400, code: "invalid_json", message: "Request body must be valid JSON." };
   }
+  if (!isRecord(body.value)) return { ok: false, status: 400, code: "invalid_json",
+    message: "Request body must be a JSON object." };
+  return { ok: true, value: body.value };
 }
 
 function getString(value: unknown) {
@@ -118,5 +109,5 @@ function getString(value: unknown) {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

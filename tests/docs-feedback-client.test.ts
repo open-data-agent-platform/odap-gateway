@@ -21,7 +21,7 @@ describe("confirmed docs feedback responses",() => {
       .toEqual({state:"confirmed",feedback:accepted.feedback});
   });
 
-  it.each([201,400,401,403,404,405,500,503])("never accepts HTTP %i even with an apparent success body",async status => {
+  it.each([201,400,401,403,404,405,408,413,500,503])("never accepts HTTP %i even with an apparent success body",async status => {
     expect(await loadDocsFeedback(signal,async () => Response.json(list,{status}))).toEqual({state:"unavailable"});
     expect(await sendDocsFeedback(input,signal,async () => Response.json(accepted,{status}))).toEqual({state:"unconfirmed"});
   });

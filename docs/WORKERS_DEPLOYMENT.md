@@ -234,6 +234,21 @@ there is no preview acceptance. A configured submission must return its inserted
 ID before success is reported; skipped or failed writes fail the request.
 The anti-spam honeypot still discards submissions without storing them.
 
+Public feedback POST bodies are limited to 16 KiB of actual bytes and one
+15-second total read deadline, before honeypot handling, field validation or
+database access. Declared oversize and streamed oversize return 413
+(`feedback_too_large`); a stalled body returns 408 (`feedback_timeout`).
+Malformed JSON, invalid UTF-8, arrays, aborted or unavailable bodies return 400
+(`invalid_json`). Responses are sanitized and no-store. Cancellation is attempted
+without awaiting it, and reader locks, timers and abort listeners are released.
+The existing control command reader shares this implementation with its original
+size caps, error codes and authorization order unchanged. No retries or database
+writes follow a body refusal. This is not a rate limiter, a database execution
+deadline or client-disconnect coverage: the current pinned compatibility does
+not enable [client-disconnect request signals](https://developers.cloudflare.com/workers/runtime-apis/request/#properties).
+The read deadline works without that signal. Admin and legacy query readers are
+outside this change; valid feedback still requires confirmed persistence below.
+
 Existing records, including seed-named records that may have been edited, are
 not automatically deleted, hidden or rewritten. Previously installed examples
 need an authorized content review; this is not a cleanup migration. The separate
