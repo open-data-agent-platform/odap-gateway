@@ -1,6 +1,6 @@
 import type { D1Database } from "./d1";
 import { getSessionFromRequest } from "./auth-request";
-import type { AuthEnv } from "./auth";
+import { isAuthProvider, type AuthEnv } from "./auth";
 import type { AdminStorageEnv } from "./admin-store";
 import { canonicalControlJson, isSemanticRelease, isApprovalContract, isEvidenceReceipt } from "./control-objects";
 
@@ -11,7 +11,9 @@ export type ControlAccess = { db: D1Database; tenantId: string; principalId: str
 
 export async function authorizeControlRequest(request: Request, env: AuthEnv & AdminStorageEnv, tenantId: string) {
   const session = await getSessionFromRequest(request, env);
-  if (!session) return { ok: false as const, status: 401, code: "unauthenticated" };
+  if (!session || !isAuthProvider(session.provider) || typeof session.providerId !== "string" || !session.providerId.trim()) {
+    return { ok: false as const, status: 401, code: "unauthenticated" };
+  }
   const db = env.ODAP_GATEWAY_DB ?? env.DB;
   if (!db) return { ok: false as const, status: 503, code: "control_storage_unavailable" };
   // Bind membership to the immutable provider identity, not email or a client header.
@@ -19,7 +21,7 @@ export async function authorizeControlRequest(request: Request, env: AuthEnv & A
   const member = await db.prepare("SELECT role FROM control_memberships WHERE tenant_id = ? AND principal_id = ? AND active = 1")
     .bind(tenantId, principalId).first<{ role: string }>();
   if (!member || !["reader", "reviewer", "owner"].includes(member.role)) return { ok: false as const, status: 403, code: "tenant_access_denied" };
-  return { ok: true as const, access: { db, tenantId, principalId } };
+  return { ok: true as const, role: member.role, access: { db, tenantId, principalId } };
 }
 
 export async function readControlObject(access: ControlAccess, kind: ControlKind, id: string) {

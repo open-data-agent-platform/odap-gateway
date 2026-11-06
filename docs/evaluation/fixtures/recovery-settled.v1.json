@@ -1,0 +1,98 @@
+{
+  "profile": "odap.gateway.local.settled-bigquery.v1",
+  "release": {
+    "tenantId": "foundry",
+    "schemaVersion": "0.1",
+    "id": "heat-r3",
+    "definitionDigest": "sha256:12a4e3975110611552352b9ef0684819221e6d2f20768fdd9f7c5a1da01c99fa",
+    "sourceRevision": "src-5",
+    "owner": "sol",
+    "state": "released"
+  },
+  "contract": {
+    "tenantId": "foundry",
+    "schemaVersion": "0.1",
+    "id": "read-c9",
+    "semanticReleaseId": "heat-r3",
+    "principalId": "kit",
+    "agentId": "kiln-agent",
+    "actionDigest": "sha256:4e9ff90e724305368a26e2cbd394aa12087696a86d6d0aa25a1398c3fd938768",
+    "policyRevision": "p2",
+    "sourceRevision": "src-5",
+    "target": "firing",
+    "actionType": "data.read",
+    "authority": {
+      "mode": "human",
+      "reference": "review:8"
+    },
+    "reservationId": "reserve-81",
+    "expiresAt": "2026-10-10T11:00:00.000Z",
+    "state": "authorized"
+  },
+  "intent": {
+    "tenantId": "foundry",
+    "intentId": "kiln-81",
+    "actionDigest": "sha256:4e9ff90e724305368a26e2cbd394aa12087696a86d6d0aa25a1398c3fd938768",
+    "contractId": "read-c9",
+    "principalId": "kit",
+    "reservationId": "reserve-81"
+  },
+  "job": {
+    "tenantId": "foundry",
+    "intentId": "kiln-81",
+    "projectId": "fixture-foundry",
+    "location": "EU",
+    "jobId": "odap_557aba5ce83a4e71a137687b38a24d2c1f86028154eff89c5d65563a074e4c52",
+    "actionTag": "babf61d2b2a49739efa15402c144eca9712c42db95d15789",
+    "pendingReceiptId": "pending_odap_557aba5ce83a4e71a137687b38a24d2c1f86028154eff89c5d65563a074e4c52",
+    "maximumBytesBilled": 256,
+    "claimedBy": "sol",
+    "claimedAt": "2026-10-10T10:00:12.000Z"
+  },
+  "pending": {
+    "tenantId": "foundry",
+    "intentId": "kiln-81",
+    "schemaVersion": "0.1",
+    "contractId": "read-c9",
+    "semanticReleaseId": "heat-r3",
+    "id": "pending_odap_557aba5ce83a4e71a137687b38a24d2c1f86028154eff89c5d65563a074e4c52",
+    "outcome": "pending",
+    "recordedAt": "2026-10-10T10:00:10.000Z",
+    "reason": "Synthetic job binding prepared"
+  },
+  "observation": {
+    "tenantId": "foundry",
+    "intentId": "kiln-81",
+    "outcome": "cancelled",
+    "billedBytes": 29,
+    "observedBy": "sol",
+    "observedAt": "2026-10-10T10:00:20.000Z"
+  },
+  "final": {
+    "tenantId": "foundry",
+    "intentId": "kiln-81",
+    "schemaVersion": "0.1",
+    "contractId": "read-c9",
+    "semanticReleaseId": "heat-r3",
+    "id": "final_odap_557aba5ce83a4e71a137687b38a24d2c1f86028154eff89c5d65563a074e4c52",
+    "outcome": "cancelled",
+    "recordedAt": "2026-10-10T10:00:25.000Z",
+    "reason": "Synthetic job charge recorded"
+  },
+  "bill": {
+    "tenantId": "foundry",
+    "intentId": "kiln-81",
+    "receiptId": "final_odap_557aba5ce83a4e71a137687b38a24d2c1f86028154eff89c5d65563a074e4c52",
+    "actualMicroUsd": 6,
+    "reference": "invoice:kiln-81",
+    "actor": "sol",
+    "recordedAt": "2026-10-10T10:00:25.000Z"
+  },
+  "settlement": {
+    "tenantId": "foundry",
+    "intentId": "kiln-81",
+    "receiptId": "final_odap_557aba5ce83a4e71a137687b38a24d2c1f86028154eff89c5d65563a074e4c52",
+    "actualMicroUsd": 6,
+    "actor": "sol"
+  }
+}

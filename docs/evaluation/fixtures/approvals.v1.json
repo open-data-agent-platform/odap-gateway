@@ -1,0 +1,48 @@
+{
+  "scope": {"tenant":"quay","principal":"ren","agent":"plant-reader","policy":"pol-3","source":"src-8","budgetUnits":100,"unitsPerIntent":12},
+  "releases": {
+    "press-count": {"target":"press","metric":"checks","definition":{"aggregate":"COUNT_ROWS","column":null,"table":"press_checks"},"digest":"sha256:cb54722159c274ca77867ee15f71ad77a1e3551543651ac87bf0bd783cd9f734"},
+    "press-load": {"target":"press","metric":"load","definition":{"aggregate":"SUM","column":"load_kg","table":"press_checks"},"digest":"sha256:78e47fcfbd796c62412aabc90a682f5b2d6b075526bc5e548c69dd0d5b1028d5"},
+    "kiln-count": {"target":"kiln","metric":"checks","definition":{"aggregate":"COUNT_ROWS","column":null,"table":"kiln_checks"},"digest":"sha256:8f1a2ca9444a17cf1aec61fd944030fc70eaa1a499e05bf276731d252e46189b"}
+  },
+  "actions": {
+    "press-c4": {"release":"press-count","station":"C4","digest":"sha256:433ecc0c617d0869cd6983bfd7e1e50b4bed2aedf3301e82cb1150fd07dd2109"},
+    "press-c5": {"release":"press-count","station":"C5","digest":"sha256:25a32d6269435f6414cf8ae0cf1a8ad5cb94241c35f1ed79ade18f1debd3e9df"},
+    "load-c4": {"release":"press-load","station":"C4","digest":"sha256:9278c1c66d6d1470834cf21cf838ba04bef0f2bffb4a7d88525864800a891696"},
+    "kiln-c4": {"release":"kiln-count","station":"C4","digest":"sha256:48fe8c1dac2d2a4eb7b20fc1c4fad1e7a5847cc039e1a108dd48c3412675dd71"}
+  },
+  "contracts": {
+    "c-press": {"tenant":"quay","principal":"ren","agent":"plant-reader","state":"issued","action":"press-c4","release":"press-count","authorityRef":"review:17","reservation":"res-4","issuedAt":100,"expiresAt":200},
+    "c-kiln": {"tenant":"quay","principal":"ren","agent":"plant-reader","state":"issued","action":"kiln-c4","release":"kiln-count","authorityRef":"review:19","reservation":"res-9","issuedAt":100,"expiresAt":200},
+    "draft-unbound": {"tenant":"quay","principal":"ren","agent":"plant-reader","state":"proposed","action":"press-c4","release":null,"authorityRef":"review:20","reservation":"res-4","expiresAt":200},
+    "draft-unsigned": {"tenant":"quay","principal":"ren","agent":"plant-reader","state":"proposed","action":"press-c4","release":"press-count","authorityRef":null,"reservation":"res-4","expiresAt":200}
+  },
+  "cases": {
+    "APR-01": {"contract":"draft-unbound","trustedAt":110,"requests":[{"op":"issue"}]},
+    "APR-02": {"contract":"c-press","trustedAt":140,"history":[{"event":"revoked","at":120}],
+      "requests":[{"op":"consume","intent":"i1","action":"press-c4","reservation":"res-4"}]},
+    "APR-03": {"contract":"c-press","trustedAt":140,"requests":[
+      {"op":"consume","intent":"i1","action":"press-c4","reservation":"res-4","group":"g1"},
+      {"op":"consume","intent":"i2","action":"press-c4","reservation":"res-4","group":"g1"}]},
+    "APR-04": {"contract":"c-press","trustedAt":140,"requests":[{"op":"consume","intent":"i1","action":"press-c4","reservation":"res-4"}]},
+    "APR-05": {"contract":"c-press","trustedAt":140,"requests":[{"op":"consume","intent":"i1","action":"press-c5","reservation":"res-4"}]},
+    "APR-06": {"contract":"c-press","trustedAt":140,"requests":[{"op":"consume","intent":"i1","action":"load-c4","reservation":"res-4"}]},
+    "APR-07": {"contract":"c-press","trustedAt":200,"requests":[{"op":"consume","intent":"i1","action":"press-c4","reservation":"res-4"}]},
+    "APR-08": {"contract":"c-press","trustedAt":201,"requests":[
+      {"op":"consume","intent":"i1","action":"press-c4","reservation":"res-4","clientAt":220,"claimedExpiry":240}]},
+    "APR-09": {"contract":"c-press","trustedAt":140,"requests":[{"op":"consume","intent":"i1","action":"press-c4","reservation":"res-9"}]},
+    "APR-10": {"contract":"c-press","trustedAt":141,"history":[
+      {"event":"admitted","intent":"i1","action":"press-c4","reservation":"res-4","at":140},
+      {"event":"client-timeout","intent":"i1","at":141}],
+      "requests":[{"op":"consume","intent":"i1","action":"press-c4","reservation":"res-4"}]},
+    "APR-11": {"contract":"c-press","trustedAt":145,"history":[
+      {"event":"review-draft","supersedes":"review:17","draft":"draft:21","action":"press-c5","at":130}],
+      "requests":[{"op":"inspect-issued","reference":"review:17"}]},
+    "APR-12": {"contract":"c-press","trustedAt":142,"history":[
+      {"event":"admitted","intent":"i1","action":"press-c4","reservation":"res-4","at":140}],
+      "requests":[{"op":"consume","intent":"i2","action":"press-c4","reservation":"res-4"}]},
+    "APR-13": {"contract":"c-press","trustedAt":140,"otherContract":"c-kiln","requests":[{"op":"consume","intent":"i1","action":"kiln-c4","reservation":"res-4"}]},
+    "APR-14": {"contract":"draft-unsigned","trustedAt":110,"requests":[
+      {"op":"issue","definitionDigest":"sha256:cb54722159c274ca77867ee15f71ad77a1e3551543651ac87bf0bd783cd9f734"}]}
+  }
+}

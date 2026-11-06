@@ -1,17 +1,15 @@
 import {
-  STATE_TTL_SECONDS,
   getProviderCredentials,
   isAuthProvider,
-  sanitizeReturnTo,
-  signAuthPayload,
   type AuthEnv,
-  type AuthProvider,
-  type OAuthState
+  type AuthProvider
 } from "../../../../lib/auth";
+import type { AdminStorageEnv } from "../../../../lib/admin-store";
+import { issueOAuthState } from "../../../../lib/oauth-state";
 
 type AuthStartContext = {
   request: Request;
-  env: AuthEnv;
+  env: AuthEnv & AdminStorageEnv;
   params: {
     provider?: string;
   };
@@ -31,25 +29,23 @@ export async function onRequestGet(context: AuthStartContext) {
     return redirectToLogin(url, "auth_not_configured", provider);
   }
 
-  const returnTo = sanitizeReturnTo(url.searchParams.get("returnTo"));
-  const state = await signAuthPayload(
-    {
-      provider,
-      nonce: crypto.randomUUID(),
-      returnTo,
-      expiresAt: Date.now() + STATE_TTL_SECONDS * 1000
-    } satisfies OAuthState,
-    secret
-  );
+  let challenge;
+  try {
+    challenge = await issueOAuthState(context.request, context.env, provider);
+  } catch {
+    return redirectToLogin(url, "oauth_state_unavailable", provider);
+  }
   const callbackUrl = `${url.origin}/api/auth/callback/${provider}`;
   const authorizeUrl = createAuthorizeUrl(
     provider,
     credentials.clientId,
     callbackUrl,
-    state
+    challenge.state
   );
 
-  return Response.redirect(authorizeUrl, 302);
+  return new Response(null, {status: 302, headers: {
+    Location: authorizeUrl, "Set-Cookie": challenge.cookie, "Cache-Control": "no-store"
+  }});
 }
 
 function createAuthorizeUrl(

@@ -55,7 +55,7 @@ export async function onRequestPatch(context: FeatureFlagContext) {
     context.env,
     id,
     rollout,
-    auth.session.email
+    auth.session
   );
 
   if (!result.ok) {

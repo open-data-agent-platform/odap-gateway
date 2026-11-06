@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -42,6 +43,12 @@ export function ApprovalsPage() {
               </span>
             </div>
           </div>
+          <Link href="/contract-request" className="focus-ring block border-b border-white/10 px-5 py-3 text-sm text-sky-300 hover:underline">
+            Look up my request
+          </Link>
+          <Link href="/approval-contract" className="focus-ring block border-b border-white/10 px-5 py-3 text-sm text-sky-300 hover:underline">
+            Inspect approval contract
+          </Link>
           <div className="divide-y divide-white/[0.07]">
             {reviewQueue.map((item) => (
               <button

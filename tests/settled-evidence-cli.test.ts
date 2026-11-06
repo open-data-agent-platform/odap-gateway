@@ -1,24 +1,19 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { buildDetachedVerifier } from "./fixtures/detached-verifier";
 
-const exec = promisify(execFile);
 const bundle = resolve("tests/fixtures/settled-job.json");
 const pin = resolve("tests/pins/settled-job.sha256");
 let dir: string;
 
-function invoke(...args: string[]) {
-  return exec(process.execPath, [join(dir, "scripts/verify-settled-evidence.js"), ...args], { cwd: dir });
-}
+let invoke: Awaited<ReturnType<typeof buildDetachedVerifier>>;
 
 describe("detached file verifier", () => {
   beforeAll(async () => {
     dir = await mkdtemp(join(tmpdir(), "odap-detached-"));
-    await exec(process.execPath, [require.resolve("typescript/bin/tsc"),
-      "-p", "scripts/tsconfig.evidence.json", "--outDir", dir]);
+    invoke = await buildDetachedVerifier(dir);
   }, 30_000);
   afterAll(async () => { await rm(dir, { recursive: true, force: true }); });
 
@@ -42,7 +37,7 @@ describe("detached file verifier", () => {
       code: 1, stdout: "", stderr: expect.stringContaining("checksum mismatch")
     });
   });
-  it("requires four arguments and never supplies its own expected checksum", async () => {
+  it("requires an explicit pin and never supplies its own expected checksum", async () => {
     await expect(invoke(bundle, "t", "i")).rejects.toMatchObject({ code: 2, stdout: "" });
     for (const [label, value, error] of [
       ["malformed", "sha256:short", "Invalid pin"], ["wrong", "sha256:" + "0".repeat(64), "checksum mismatch"]
@@ -54,6 +49,14 @@ describe("detached file verifier", () => {
       });
     }
     await expect(invoke(bundle, "t", "i", join(dir, "absent.sha256"))).rejects.toMatchObject({ code: 1, stdout: "" });
+  });
+  it("never treats a nondelegated bundle as evidence for a named audience", async () => {
+    await expect(invoke(bundle, "t", "i", pin, "--audience", "gateway")).rejects.toMatchObject({
+      code: 1, stdout: "", stderr: expect.stringContaining("scope mismatch")
+    });
+    for (const args of [["--audience"], ["--unknown", "gateway"], ["--audience", " "]]) {
+      await expect(invoke(bundle, "t", "i", pin, ...args)).rejects.toMatchObject({ code: 2, stdout: "" });
+    }
   });
   it("rejects BOM, invalid UTF-8, oversized and malformed files without echoing private input", async () => {
     const valid = await readFile(bundle);

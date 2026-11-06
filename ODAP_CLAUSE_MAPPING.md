@@ -39,7 +39,7 @@ Last reviewed: July 2026 against local v0.1.0 package.
 | Clause | Status | Where / Notes |
 |---|---|---|
 | A4.1 Generation trail | **Partial** | `audit_events` and `query_runs` tables (`db/schema.sql`) record SQL, actor, dry-run metadata, and policy checks; original natural-language prompt capture is not complete. |
-| A4.2 Decision trail | **Implemented** | Approvals, rejections, rollbacks, schema changes, and user changes are logged in `lib/admin-store.ts` and admin functions. |
+| A4.2 Decision trail | **Implemented** | Approvals, rejections, schema changes and user changes are logged in `lib/admin-store.ts` and admin functions. Deployment rollback is unsupported; historical `rollback.queued` entries do not prove execution. |
 | A4.3 Explainability | **Partial** | Generated SQL and dry-run stats are shown; confidence scoring and full validation evidence per answer are not complete. |
 | A4.4 Replayability | **Partial** | Historical runs are reconstructable from D1 records; no one-click replay UI yet. |
 

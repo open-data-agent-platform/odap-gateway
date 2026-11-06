@@ -1,0 +1,34 @@
+{
+  "scope": {"tenant":"foundry","intent":"kiln-81","owners":["sol","vera"]},
+  "retainedPinAt": 26,
+  "records": {
+    "bound":{"at":10,"job":"kiln","reserved":18},
+    "stop":{"at":11,"job":"kiln","actor":"sol"},
+    "claim":{"at":12,"job":"kiln","actor":"sol","maxBytes":256},
+    "cancel-request":{"at":15,"job":"kiln","actor":"sol"},
+    "succeeded":{"at":20,"job":"kiln","state":"succeeded","bytes":47},
+    "failed":{"at":20,"job":"kiln","state":"failed","bytes":null},
+    "cancelled":{"at":20,"job":"kiln","state":"cancelled","bytes":29},
+    "cancelled-no-bytes":{"at":20,"job":"kiln","state":"cancelled","bytes":null},
+    "settlement":{"at":25,"job":"kiln","amount":6,"unit":"micro-USD","invoice":"invoice:kiln-81"}
+  },
+  "cases": {
+    "REC-01":{"stored":["bound","claim"],"attempt":{"at":14,"op":"restart","providerAcknowledgement":null}},
+    "REC-02":{"stored":["bound","claim","cancel-request"],"attempt":{"at":18,"op":"observe","sample":{"job":"kiln","state":"RUNNING"}}},
+    "REC-03":{"stored":["bound","claim","succeeded"],"attempt":{"at":22,"op":"request-cancel","actor":"vera"}},
+    "REC-04":{"stored":["bound","claim","cancelled"],"snapshotAt":21,"attempt":{"at":30,"op":"export-restored","mode":"read-only"}},
+    "REC-05":{"stored":["bound","claim","cancelled","settlement"],"snapshotAt":27,"attempt":{"at":30,"op":"verify-restored","mode":"read-only","tenant":"foundry","intent":"kiln-81","pin":"retained"}},
+    "REC-06":{"stored":["bound","claim","cancelled","settlement"],"attempt":{"at":30,"op":"verify-detached","tenant":"sinter","intent":"kiln-81","pin":"retained"}},
+    "REC-07":{"stored":["bound","claim","cancelled","settlement"],"attempt":{"at":30,"op":"verify-detached","tenant":"foundry","intent":"kiln-81",
+      "edits":[{"path":"final.id","value":"final_unrelated"}]}},
+    "REC-08":{"stored":["bound","claim","cancelled","settlement"],"attempt":{"at":30,"op":"verify-detached","tenant":"foundry","intent":"kiln-81","pin":"retained",
+      "edits":[{"path":"bill.actualMicroUsd","value":16},{"path":"settlement.actualMicroUsd","value":16}]}},
+    "REC-09":{"stored":["bound","claim","cancelled-no-bytes"],"attempt":{"at":23,"op":"observe","sample":{"job":"kiln","state":"DONE","reason":"stopped","bytes":29}}},
+    "REC-10":{"stored":["bound","claim","failed"],"attempt":{"at":23,"op":"observe","sample":{"job":"kiln","state":"DONE","reason":"stopped","bytes":29}}},
+    "REC-11":{"stored":["bound","stop"],"attempt":{"at":13,"op":"restart-dispatch","job":"kiln"}},
+    "REC-12":{"stored":["bound","claim","cancelled"],"attempt":{"at":25,"op":"reconcile-bill","job":"kiln","invoice":"invoice:kiln-81","amount":6,"unit":"micro-USD",
+      "transaction":[{"step":"insert-final-receipt","storage":"uncommitted"},{"step":"update-budget","fault":"write-error"}]}},
+    "REC-13":{"stored":["bound","claim"],"restartAt":14,"attempt":{"at":16,"op":"observe","job":"kiln","httpStatus":404}},
+    "REC-14":{"stored":["bound","claim","cancel-request"],"lostResponseAt":16,"attempt":{"at":17,"op":"request-cancel","actor":"vera"}}
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "extends": "../../scripts/tsconfig.evidence.json",
+  "compilerOptions": { "outDir": "../../dist/tests/coverage-stdio" },
+  "files": ["coverage-stdio-host.ts"]
+}

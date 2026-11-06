@@ -52,7 +52,70 @@ For the internal dispatch authorization gate that follows preparation, see
 submission, final receipt issuance from trusted outcomes, and deployed tenant
 tests are separate work.
 
+## Delegated preparation
+
+Migration 0023 adds a separate owner command for a policy-funded delegated
+intent. Send same-origin signed-session JSON `{"intentId":"..."}` to
+`POST /api/control/{tenant}/job-preparations`. The server's configured
+delegation audience must match. Project, location, action, credentials and
+cost limits are not request parameters.
+
+The database rechecks live delegation, the requesting principal, owner,
+consumed contract, reserved allowance, current target and unexpired pricing
+at the write. A stopped or settled intent is ineligible. The binding records
+the three inputs to the ceiling:
+`min(policy byte limit, floor(reserved micro-USD * 2^40 / micro-USD per TiB))`.
+The existing pending receipt and audit event commit with the binding; no funds
+are reserved again. Historical jobs are not assigned inferred limits.
+
+The first call returns 201; a retry while still eligible returns 200 with the
+same `jobReference`, `receiptId`, `intentId` and `maximumBytesBilled` (a
+decimal string). The Location header points to the tenant's receipt GET.
+After loss of eligibility the command returns 409, even if historical
+evidence exists. A 503 is not evidence that the write failed.
+
+This prepares an identifier, not a BigQuery job. Legacy submission and
+metadata-recovery helpers refuse delegated bindings before adapter or
+credential use. Migration 0023 alone blocks all delegated claims; migration
+0024 adds a distinct [one-time local handoff](DISPATCH_AUTHORIZATION.md#delegated-handoff-offline)
+without wiring a real transport.
+
 ## Terminal observations without a bill
+
+For a **delegated** claim, migration 0025 and
+[`observeDelegatedClaim`](../lib/delegated-job-recovery.ts) use an explicitly
+injected metadata lookup. There is no HTTP route, default observer, token
+source or send operation. The observer receives only the persisted job
+reference. A successful metadata response must match project, region, job ID,
+action label, query type and claimed byte ceiling; a dry run is not execution.
+The stored digest links evidence to the original claim; it is not a signature
+from the warehouse.
+
+Recovery requires a current owner of the tenant and the original audience.
+It remains possible after delegation revocation: an owner is investigating an
+already-claimed action, not asking to execute it. Access is checked again at
+write and readback, including after a nonterminal lookup. A prepared job with
+no confirmed claim is not eligible.
+
+| Observation | What survives a restart |
+|---|---|
+| 404 or pending/running | No new terminal record. Return stronger stored evidence if present; never retry submission. |
+| Matched terminal outcome, bytes unknown | Record the outcome once. Missing, malformed or out-of-range bytes are unknown, not zero. |
+| Same outcome, known bytes | Append the first known count, including explicit zero. Repeats do not change the witness; conflicting counts or outcomes fail. |
+| Unmatched metadata, lookup failure or malformed status | No new evidence or budget changes. |
+
+`readDelegatedRecovery` needs no observer: it returns the original job and
+pending receipt reference plus the strongest verified terminal observation,
+or null for the observation when none exists. This also recovers a committed
+observation after a lost write acknowledgement. Pre-0025 delegated terminal
+rows lacking claim provenance are retained unchanged; this path refuses to
+adopt or overwrite them. Terminal bytes are not a monetary bill, and even a
+successful observation does not release the reservation or rewrite the receipt.
+
+The separate [delegated settlement](COST_SETTLEMENT.md#delegated-job-settlement)
+step requires an attributable final monetary charge, not a byte count.
+
+### Non-delegated recovery
 
 `reconcileTerminalObservation(access, intentId, env)` is an internal operation.
 It checks the immutable job binding, pending receipt and dispatch claim before

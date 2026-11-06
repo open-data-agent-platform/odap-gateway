@@ -104,7 +104,7 @@ export async function onRequestPatch(context: RunReviewContext) {
     context.env,
     id,
     status satisfies QueryRunStatus,
-    auth.session.email
+    auth.session
   );
   if (!result.ok) {
     return jsonResponse(

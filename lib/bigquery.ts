@@ -1,4 +1,5 @@
 import { validateBigQuerySql, type SafetyCheck } from "./copilot-engine";
+import { fetchOAuthJson } from "./oauth-provider-json";
 import {
   estimateDryRun,
   getGateLabel,
@@ -77,17 +78,7 @@ type BigQueryQueryResponse = {
 };
 
 type GoogleTokenResponse = {
-  access_token?: string;
-  error?: string;
-  error_description?: string;
-};
-
-type GoogleApiErrorResponse = {
-  error?: {
-    code?: number;
-    message?: string;
-    status?: string;
-  };
+  access_token?: unknown;
 };
 
 const encoder = new TextEncoder();
@@ -96,6 +87,32 @@ const BYTES_PER_TIB = 1024 ** 4;
 const BIGQUERY_TOKEN_AUDIENCE = "https://oauth2.googleapis.com/token";
 const BIGQUERY_SCOPE = "https://www.googleapis.com/auth/bigquery";
 
+type DryRunTransport =
+  | { mode: "live"; message: string }
+  | { mode: "blocked" | "simulated"; code: string; message: string };
+
+export function resolveDryRunTransport(env: BigQueryEnv): DryRunTransport {
+  const gateway = env.GATEWAY_MODE, preview = env.BIGQUERY_DRY_RUN_MODE;
+  if (gateway !== undefined && gateway !== "demo" && gateway !== "production")
+    return { mode: "blocked", code: "invalid_gateway_mode", message: "Unrecognized gateway mode." };
+  if (preview !== undefined && preview !== "live" && preview !== "simulated")
+    return { mode: "blocked", code: "invalid_dry_run_mode", message: "Unrecognized dry-run mode." };
+  const configured = hasBigQueryCredentials(env);
+  if (gateway === "production" && (!configured || preview === "simulated"))
+    return { mode: "blocked", code: "production_not_configured", message: "Production requires configured live previews." };
+  // No trusted tenant-to-table binding accompanies raw editor SQL. Only an
+  // independently scoped, server-compiled operation could run in production.
+  if (gateway === "production")
+    return { mode: "blocked", code: "production_preview_scope_unbound", message: "The raw SQL preview cannot establish tenant table access." };
+  if (preview === "simulated")
+    return { mode: "simulated", code: "bigquery_simulated_mode", message: "BigQuery dry-run is forced to simulated mode." };
+  if (!configured)
+    return { mode: "simulated", code: "bigquery_not_configured", message: "BigQuery credentials are missing; dry-run uses simulated estimates." };
+  if (gateway === undefined)
+    return { mode: "blocked", code: "gateway_mode_required", message: "Live previews require an explicit gateway mode." };
+  return { mode: "live", message: "Live BigQuery dry-run transport is configured." };
+}
+
 export async function runBigQueryDryRun(
   sql: string,
   env: BigQueryEnv
@@ -103,15 +120,10 @@ export async function runBigQueryDryRun(
   const configured = hasBigQueryCredentials(env);
   const simulated = createSimulatedDryRun(sql, configured);
 
-  if (env.BIGQUERY_DRY_RUN_MODE === "simulated") {
-    return {
-      ...simulated,
-      error: {
-        code: "bigquery_simulated_mode",
-        message: "BigQuery dry-run is forced to simulated mode."
-      }
-    };
-  }
+  const transport = resolveDryRunTransport(env);
+  if (transport.mode === "blocked")
+    return { ...simulated, status: "blocked", gateLabel: getGateLabel("blocked"),
+      error: { code: transport.code, message: transport.message } };
 
   if (hasBlockingPreflight(simulated.checks)) {
     return {
@@ -123,21 +135,14 @@ export async function runBigQueryDryRun(
     };
   }
 
-  if (!configured) {
-    return {
-      ...simulated,
-      error: {
-        code: "bigquery_not_configured",
-        message:
-          "BigQuery service account credentials are not configured; using simulated dry-run."
-      }
-    };
-  }
+  if (transport.mode === "simulated")
+    return { ...simulated, error: { code: transport.code, message: transport.message } };
 
   try {
     const accessToken = await createBigQueryAccessToken(env);
     const response = await fetch(createJobsInsertUrl(env.BIGQUERY_PROJECT_ID), {
       method: "POST",
+      redirect: "manual",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json"
@@ -145,8 +150,8 @@ export async function runBigQueryDryRun(
       body: JSON.stringify(createDryRunJobRequest(sql, env))
     });
 
-    if (!response.ok) {
-      return createFailedLiveDryRun(sql, env, await parseGoogleApiError(response));
+    if (!response.ok || response.redirected) {
+      return createFailedLiveDryRun(sql, env, createGoogleApiError(response));
     }
 
     const job = (await response.json()) as BigQueryJobResponse;
@@ -166,10 +171,10 @@ export async function runBigQueryDryRun(
       checks,
       jobReference: job.jobReference
     };
-  } catch (error) {
+  } catch {
     return createFailedLiveDryRun(sql, env, {
       code: "bigquery_request_failed",
-      message: error instanceof Error ? error.message : "BigQuery request failed."
+      message: "BigQuery request failed."
     });
   }
 }
@@ -178,6 +183,14 @@ export async function runBigQueryQuery(
   sql: string,
   env: BigQueryEnv
 ): Promise<BigQueryQueryResult> {
+  // This legacy queries API has no contract, budget reservation or receipt.
+  if (env.GATEWAY_MODE !== "demo") {
+    return {
+      ok: false,
+      code: "legacy_query_disabled",
+      message: "Legacy schema import is available only in explicit demo mode."
+    };
+  }
   if (!hasBigQueryCredentials(env)) {
     return {
       ok: false,
@@ -191,6 +204,7 @@ export async function runBigQueryQuery(
     const accessToken = await createBigQueryAccessToken(env);
     const response = await fetch(createQueriesUrl(env.BIGQUERY_PROJECT_ID), {
       method: "POST",
+      redirect: "manual",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json"
@@ -198,8 +212,8 @@ export async function runBigQueryQuery(
       body: JSON.stringify(createQueryRequest(sql, env))
     });
 
-    if (!response.ok) {
-      const error = await parseGoogleApiError(response);
+    if (!response.ok || response.redirected) {
+      const error = createGoogleApiError(response);
 
       return {
         ok: false,
@@ -221,8 +235,8 @@ export async function runBigQueryQuery(
     if (query.errors?.length) {
       return {
         ok: false,
-        code: query.errors[0]?.reason ?? "bigquery_query_error",
-        message: query.errors[0]?.message ?? "BigQuery query failed."
+        code: "bigquery_query_error",
+        message: "BigQuery query failed."
       };
     }
 
@@ -232,11 +246,11 @@ export async function runBigQueryQuery(
       totalRows: Number(query.totalRows ?? query.rows?.length ?? 0),
       jobReference: query.jobReference
     };
-  } catch (error) {
+  } catch {
     return {
       ok: false,
       code: "bigquery_query_failed",
-      message: error instanceof Error ? error.message : "BigQuery query failed."
+      message: "BigQuery query failed."
     };
   }
 }
@@ -388,42 +402,41 @@ function createQueryRequest(sql: string, env: BigQueryEnv) {
 }
 
 export async function createBigQueryAccessToken(env: BigQueryEnv) {
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const assertion = await signJwt(
-    {
-      alg: "RS256",
-      typ: "JWT"
-    },
-    {
-      iss: env.BIGQUERY_CLIENT_EMAIL,
-      scope: BIGQUERY_SCOPE,
-      aud: BIGQUERY_TOKEN_AUDIENCE,
-      iat: nowSeconds,
-      exp: nowSeconds + 3600
-    },
-    env.BIGQUERY_PRIVATE_KEY ?? ""
-  );
-  const response = await fetch(BIGQUERY_TOKEN_AUDIENCE, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion
-    })
-  });
-  const tokenResponse = (await response.json()) as GoogleTokenResponse;
-
-  if (!response.ok || !tokenResponse.access_token) {
-    throw new Error(
-      tokenResponse.error_description ??
-        tokenResponse.error ??
-        "Google OAuth token exchange failed."
+  try {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const assertion = await signJwt(
+      {
+        alg: "RS256",
+        typ: "JWT"
+      },
+      {
+        iss: env.BIGQUERY_CLIENT_EMAIL,
+        scope: BIGQUERY_SCOPE,
+        aud: BIGQUERY_TOKEN_AUDIENCE,
+        iat: nowSeconds,
+        exp: nowSeconds + 3600
+      },
+      env.BIGQUERY_PRIVATE_KEY ?? ""
     );
+    const tokenResponse = await fetchOAuthJson(BIGQUERY_TOKEN_AUDIENCE, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        assertion
+      })
+    }) as GoogleTokenResponse | null;
+    const token = tokenResponse?.access_token;
+    if (typeof token !== "string" || !/^[\x21-\x7e]+$/.test(token)) {
+      throw new Error("Invalid access token");
+    }
+    return token;
+  } catch {
+    // Neither upstream errors nor key/parser failures are safe public diagnostics.
+    throw new Error("Google OAuth token exchange failed.");
   }
-
-  return tokenResponse.access_token;
 }
 
 async function signJwt(
@@ -486,20 +499,13 @@ function estimateRuntimeMs(scannedBytes: number) {
   return Math.round(850 + Math.min(scannedMb * 4.5, 45_000));
 }
 
-async function parseGoogleApiError(response: Response) {
-  try {
-    const body = (await response.json()) as GoogleApiErrorResponse;
-
-    return {
-      code: body.error?.status ?? `http_${response.status}`,
-      message: body.error?.message ?? response.statusText
-    };
-  } catch {
-    return {
-      code: `http_${response.status}`,
-      message: response.statusText
-    };
+function createGoogleApiError(response: Response) {
+  // Provider bodies and status text can contain credentials, SQL or private metadata.
+  void response.body?.cancel().catch(() => {});
+  if (response.redirected || (response.status >= 300 && response.status < 400)) {
+    return { code: "bigquery_redirect_refused", message: "BigQuery redirects are not permitted." };
   }
+  return { code: `http_${response.status}`, message: `BigQuery request failed (HTTP ${response.status}).` };
 }
 
 function parseBigQueryRows(query: BigQueryQueryResponse): BigQueryQueryRow[] {

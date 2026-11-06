@@ -1,14 +1,18 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as bigquery from "../lib/bigquery";
+import { reconcileBigQueryBill } from "../lib/bigquery-billing";
 import { readJobCancellation, requestJobCancellation } from "../lib/bigquery-cancellation";
 import { prepareIntentJob } from "../lib/bigquery-job-storage";
 import { readTerminalObservation, reconcileTerminalObservation } from "../lib/bigquery-terminal-observations";
 import type { ControlAccess } from "../lib/control-storage";
 import type { D1Database, D1Value } from "../lib/d1";
+import { exportSettledEvidence } from "../lib/settled-evidence-export";
+import { buildDetachedVerifier } from "./fixtures/detached-verifier";
 import { jobSqlite } from "./fixtures/job-sqlite";
+import { corruptTerminalEnrichment } from "./fixtures/conflicting-terminal";
 
 const env = { BIGQUERY_PROJECT_ID: "demo-project", BIGQUERY_LOCATION: "US",
   BIGQUERY_CLIENT_EMAIL: "fixture@example.test", BIGQUERY_PRIVATE_KEY: "unused-fixture" };
@@ -61,6 +65,66 @@ describe("durable terminal warehouse evidence", { timeout: 20_000 }, () => {
   describe("local post-claim cancellation requests", () => {
     const request = () => requestJobCancellation(access, "i");
     const status = () => readJobCancellation(access, "i");
+    it.each([false,true])("rejects contradictory restored outcomes with prior cancellation request=%s", async requested => {
+      await claim();
+      const original = requested ? (await request()).request : null;
+      await sqlite("run", `INSERT INTO bigquery_terminal_observations
+        (tenant_id,intent_id,outcome,has_bytes,observed_by) VALUES('t','i','cancelled',0,'owner')`);
+      expect(await status()).toMatchObject({ state: "terminal", outcome: "cancelled", request: original });
+      await corruptTerminalEnrichment((q,args) => sqlite("run",q,args), "i");
+      await expect(status()).rejects.toThrow("Conflicting terminal outcomes");
+      await expect(request()).rejects.toThrow("Conflicting terminal outcomes");
+      expect(await sqlite("readonly-first", `SELECT requested_by AS requestedBy, requested_at AS requestedAt
+        FROM bigquery_cancellation_requests WHERE tenant_id='t' AND intent_id='i'`)).toEqual(original);
+      expect(await sqlite("readonly-first", `SELECT reserved_units,spent_units,(SELECT COUNT(*) FROM cost_settlements) AS settlements,
+        (SELECT COUNT(*) FROM bigquery_terminal_observations) AS samples FROM control_budgets WHERE tenant_id='t' AND id='b'`))
+        .toEqual({ reserved_units: 20, spent_units: 0, settlements: 0, samples: 2 });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+    it("verifies a cancelled job with a nonzero bill end to end, without double charging", async () => {
+      await claim();
+      const ledger = () => sqlite("readonly-first", `SELECT reserved_units,spent_units,
+        (SELECT count(*) FROM cost_settlements) AS settlements FROM control_budgets WHERE tenant_id='t' AND id='b'`);
+      const held = { reserved_units: 20, spent_units: 0, settlements: 0 };
+      const requested = await request();
+      expect(requested.state).toBe("requested");
+      expect(await ledger()).toEqual(held);
+      const loadBill = vi.fn(async () => null);
+      expect(await reconcileBigQueryBill(access, "i", loadBill)).toEqual({ state: "pending-terminal" });
+      expect(loadBill).not.toHaveBeenCalled();
+
+      const http = lookup(() => Response.json(resource("47", "stopped")));
+      expect(await record()).toMatchObject({ state: "cancelled", billedBytes: 47 });
+      expect(await status()).toEqual({ ...requested, state: "terminal", outcome: "cancelled" });
+      expect(await reconcileBigQueryBill(access, "i", loadBill)).toEqual({ state: "pending-bill" });
+      expect(await exportSettledEvidence(access, "i")).toBeNull();
+      expect(await ledger()).toEqual(held);
+
+      const finalBill = async () => ({ tenantId: "t", jobReference: identity.jobReference,
+        status: "final", reference: "fixture:cancel-charge", unit: "micro-USD", amount: 7 });
+      const settle = () => reconcileBigQueryBill(access, "i", finalBill);
+      const [first, retry] = await Promise.all([settle(), settle()]);
+      expect(first).toMatchObject({ state: "settled", actualMicroUsd: 7, receipt: { outcome: "cancelled" } });
+      expect(retry).toEqual(first);
+      expect(await request()).toEqual({ ...requested, state: "terminal", outcome: "cancelled" });
+      expect(await ledger()).toEqual({ reserved_units: 0, spent_units: 7, settlements: 1 });
+
+      const bundle = await exportSettledEvidence(access, "i");
+      if (!bundle) throw new Error("Missing settled cancellation evidence");
+      expect(JSON.parse(bundle.json)).toMatchObject({ pending: { outcome: "pending" },
+        job: identity.jobReference, observation: { outcome: "cancelled", billedBytes: 47 },
+        bill: { reference: "fixture:cancel-charge", actualMicroUsd: 7 }, settlement: { actualMicroUsd: 7 } });
+      const bundlePath = join(dir, "cancelled.json"), pinPath = join(dir, "retained.sha256");
+      await writeFile(pinPath, bundle.digest, { flag: "wx" });
+      await writeFile(bundlePath, bundle.json, { flag: "wx" });
+      const verify = await buildDetachedVerifier(join(dir, "verifier"));
+      const { stdout, stderr } = await verify(bundlePath, "t", "i", pinPath);
+      expect(stderr).toBe("");
+      expect(JSON.parse(stdout)).toMatchObject({ consistent: true, issuerAuthenticated: false,
+        outcome: "cancelled", actualMicroUsd: 7, digest: bundle.digest });
+      expect(http).toHaveBeenCalledTimes(1);
+    }, 30_000);
+
     it("records only the first owner despite concurrent requests, retries and replacement", async () => {
       await claim();
       expect(await status()).toEqual({ state: "not-requested", request: null, jobReference: identity.jobReference });
@@ -177,6 +241,7 @@ describe("durable terminal warehouse evidence", { timeout: 20_000 }, () => {
       await expect(sqlite("run", "DELETE FROM bigquery_terminal_observations")).rejects.toThrow("immutable");
       await expect(sqlite("run", "UPDATE bigquery_terminal_observations SET observed_at='changed'")).rejects.toThrow("immutable");
       await sqlite("run", `INSERT OR REPLACE INTO bigquery_terminal_observations
+        (tenant_id,intent_id,outcome,billed_bytes,has_bytes,observed_by,observed_at)
         SELECT tenant_id,intent_id,outcome,billed_bytes,has_bytes,observed_by,'changed' FROM bigquery_terminal_observations`);
       expect(await readTerminalObservation(access, "i")).toEqual(first);
     });

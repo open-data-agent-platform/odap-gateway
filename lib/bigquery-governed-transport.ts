@@ -31,7 +31,8 @@ export async function dispatchBigQueryMetricRead(access: ControlAccess, intentId
       if (typeof token !== "string" || !token || /[^\x21-\x7e]/.test(token)) {
         throw new Error("BigQuery transport authentication unavailable");
       }
-      const request = new Request(url, { method: "POST", redirect: "error", signal: AbortSignal.timeout(15_000),
+      // Workers supports manual redirects; non-success replies stay observation-only.
+      const request = new Request(url, { method: "POST", redirect: "manual", signal: AbortSignal.timeout(15_000),
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ jobReference: ref, configuration: { labels: identity.labels, query: queryConfig } }) });
       return async () => {

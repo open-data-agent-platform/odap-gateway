@@ -11,8 +11,7 @@ import {
 import { DocsFeedbackPanel } from "@/components/docs-feedback-panel";
 import {
   docsFaqs,
-  docsGuides,
-  seedDocsFeedback
+  docsGuides
 } from "@/lib/docs-content";
 import { SOURCE_REPOSITORY_URL } from "@/lib/open-source";
 
@@ -177,7 +176,7 @@ export default function DocsPage() {
             </div>
           </section>
 
-          <DocsFeedbackPanel seedFeedback={seedDocsFeedback} />
+          <DocsFeedbackPanel />
         </div>
       </section>
     </main>

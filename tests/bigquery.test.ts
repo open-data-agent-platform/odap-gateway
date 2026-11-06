@@ -41,6 +41,7 @@ describe("bigquery dry-run client", () => {
   it("blocks destructive SQL before any BigQuery network call", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const preview = await runBigQueryDryRun("DROP TABLE `demo.orders`;", {
+      GATEWAY_MODE: "demo",
       BIGQUERY_PROJECT_ID: "demo-project",
       BIGQUERY_CLIENT_EMAIL: "svc@example.iam.gserviceaccount.com",
       BIGQUERY_PRIVATE_KEY: "not-used-for-blocked-preflight"
@@ -61,8 +62,8 @@ describe("bigquery dry-run client", () => {
     );
   });
 
-  it("requires credentials for metadata queries", async () => {
-    const result = await runBigQueryQuery("SELECT 1", {});
+  it("still requires credentials for metadata queries in explicit demo mode", async () => {
+    const result = await runBigQueryQuery("SELECT 1", { GATEWAY_MODE: "demo" });
 
     expect(result).toMatchObject({
       ok: false,

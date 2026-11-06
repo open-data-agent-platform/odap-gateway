@@ -5,7 +5,6 @@ import {
   getProviderCredentials,
   isAuthProvider,
   signAuthPayload,
-  verifyAuthPayload,
   type AuthEnv,
   type AuthProvider,
   type AuthSession,
@@ -15,6 +14,8 @@ import {
   upsertAuthenticatedUser,
   type AdminStorageEnv
 } from "../../../../lib/admin-store";
+import { consumeOAuthState, clearOAuthCookie } from "../../../../lib/oauth-state";
+import { fetchOAuthJson as fetchJson } from "../../../../lib/oauth-provider-json";
 
 type AuthCallbackContext = {
   request: Request;
@@ -44,12 +45,8 @@ export async function onRequestGet(context: AuthCallbackContext) {
     return redirectToLogin(url, "unsupported_provider");
   }
 
-  if (url.searchParams.get("error")) {
-    return redirectToLogin(url, "oauth_denied", provider);
-  }
-
   const code = url.searchParams.get("code");
-  const stateToken = url.searchParams.get("state");
+  const denied = url.searchParams.has("error");
   const secret = context.env.AUTH_COOKIE_SECRET;
   const credentials = getProviderCredentials(provider, context.env);
 
@@ -61,10 +58,23 @@ export async function onRequestGet(context: AuthCallbackContext) {
     clientSecret: credentials.clientSecret
   };
 
-  const state = await verifyAuthPayload<OAuthState>(stateToken ?? "", secret);
-  if (!code || !state || state.provider !== provider) {
+  if (!code && !denied) return redirectToLogin(url, "invalid_state", provider);
+  let state: OAuthState | null;
+  try {
+    state = await consumeOAuthState(context.request, context.env, provider);
+  } catch {
+    return redirectToLogin(url, "oauth_state_unavailable", provider);
+  }
+  if (!state) {
     return redirectToLogin(url, "invalid_state", provider);
   }
+  const finish = (response: Response) => {
+    const headers = new Headers(response.headers);
+    headers.append("Set-Cookie", clearOAuthCookie(url));
+    headers.set("Cache-Control", "no-store");
+    return new Response(response.body, {status: response.status, headers});
+  };
+  if (denied || !code) return finish(redirectToLogin(url, "oauth_denied", provider));
 
   try {
     const callbackUrl = `${url.origin}/api/auth/callback/${provider}`;
@@ -87,42 +97,40 @@ export async function onRequestGet(context: AuthCallbackContext) {
         context.env,
         sessionPayload
       );
-      if (storedUser.role) {
-        sessionPayload.role = storedUser.role;
+      if (!storedUser.persisted || !storedUser.role) {
+        return finish(redirectToLogin(url, "auth_user_persist_failed", provider));
       }
-    } catch (storageError) {
+      sessionPayload.role = storedUser.role;
+    } catch {
       console.error(
         JSON.stringify({
           event: "auth_user_persist_failed",
-          provider,
-          message:
-            storageError instanceof Error
-              ? storageError.message
-              : "Unknown storage error"
+          provider
         })
       );
+      return finish(redirectToLogin(url, "auth_user_persist_failed", provider));
     }
 
     const session = await signAuthPayload(sessionPayload, secret);
     const destination = new URL(state.returnTo, url.origin);
     destination.searchParams.set("login", "success");
 
-    return new Response(null, {
+    return finish(new Response(null, {
       status: 302,
       headers: {
         Location: destination.toString(),
         "Set-Cookie": createSessionCookie(session, url.protocol === "https:")
       }
-    });
-  } catch (error) {
+    }));
+  } catch {
+    // Provider/parser exceptions can contain token or profile response fragments.
     console.error(
       JSON.stringify({
         event: "oauth_callback_failed",
-        provider,
-        message: error instanceof Error ? error.message : "Unknown error"
+        provider
       })
     );
-    return redirectToLogin(url, "oauth_failed", provider);
+    return finish(redirectToLogin(url, "oauth_failed", provider));
   }
 }
 
@@ -150,11 +158,11 @@ async function fetchGoogleProfile(
     }
   });
   const providerId = getString(profile, "sub");
-  const email = getString(profile, "email");
+  const email = getEmail(profile);
   const avatarUrl = getString(profile, "picture");
 
-  if (!providerId || !email) {
-    throw new Error("Google profile did not include required identity fields");
+  if (!providerId || !email || !isRecord(profile) || profile.email_verified !== true) {
+    throw new Error("Google profile did not include a verified email and identity");
   }
   const name = getString(profile, "name") || email;
 
@@ -190,14 +198,13 @@ async function fetchGithubProfile(
   const profile = await fetchJson("https://api.github.com/user", { headers });
   const login = getString(profile, "login");
   const id = getString(profile, "id") || String(getNumber(profile, "id") ?? "");
-  const email =
-    getString(profile, "email") ??
-    (await fetchGithubPrimaryEmail(accessToken)) ??
-    (login ? `${login}@users.noreply.github.com` : "");
+  // A public profile field (or a constructed noreply address) is not
+  // verification evidence for role bootstrap or account persistence.
+  const email = await fetchGithubPrimaryEmail(accessToken);
   const avatarUrl = getString(profile, "avatar_url");
 
   if (!id || !email) {
-    throw new Error("GitHub profile did not include required identity fields");
+    throw new Error("GitHub profile did not include a verified primary email and identity");
   }
   const name = getString(profile, "name") || login || email;
 
@@ -222,17 +229,14 @@ async function fetchGithubPrimaryEmail(accessToken: string) {
     return undefined;
   }
 
-  const primary = data.find(
+  const primary = data.filter(
     (item) =>
       isRecord(item) &&
       item.primary === true &&
-      item.verified === true &&
-      typeof item.email === "string"
+      item.verified === true
   );
 
-  return isRecord(primary) && typeof primary.email === "string"
-    ? primary.email
-    : undefined;
+  return primary.length === 1 ? getEmail(primary[0]) : undefined;
 }
 
 async function postForm(url: string, form: Record<string, string>) {
@@ -246,17 +250,6 @@ async function postForm(url: string, form: Record<string, string>) {
   });
 }
 
-async function fetchJson(url: string, init: RequestInit) {
-  const response = await fetch(url, init);
-  const data = (await response.json()) as unknown;
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} from ${url}`);
-  }
-
-  return data;
-}
-
 function getString(record: unknown, key: string) {
   if (!isRecord(record)) {
     return undefined;
@@ -264,6 +257,11 @@ function getString(record: unknown, key: string) {
 
   const value = record[key];
   return typeof value === "string" && value ? value : undefined;
+}
+
+function getEmail(record: unknown) {
+  const email = getString(record, "email")?.trim().toLowerCase();
+  return email && !/\s/.test(email) ? email : undefined;
 }
 
 function getNumber(record: unknown, key: string) {

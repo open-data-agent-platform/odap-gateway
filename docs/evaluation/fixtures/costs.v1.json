@@ -1,0 +1,70 @@
+{
+  "ledger": {"tenant":"reed","budget":"operations","unit":"micro-USD","initialOverrun":0},
+  "jobRefs": {
+    "A":{"tenant":"reed","project":"fixture-reed","location":"US","id":"job-a"},
+    "B":{"tenant":"reed","project":"fixture-reed","location":"US","id":"job-b"}
+  },
+  "cases": {
+    "CST-01": {
+      "opening":{"limit":31,"spent":0,"reserved":0},"intents":{},
+      "requests":[{"op":"reserve","intent":"i1","reservation":"r1","units":18,"group":"race"},
+                  {"op":"reserve","intent":"i2","reservation":"r2","units":19,"group":"race"}]
+    },
+    "CST-02": {
+      "opening":{"limit":40,"spent":0,"reserved":24},"intents":{"i1":{"reservation":"r1","held":24,"job":"A","terminal":"succeeded"}},
+      "requests":[{"op":"reconcile","intent":"i1","bill":{"source":"job-invoice","ref":"inv:24","job":"A","status":"final","amount":17,"unit":"micro-USD"}}]
+    },
+    "CST-03": {
+      "opening":{"limit":40,"spent":0,"reserved":10},"intents":{"i1":{"reservation":"r1","held":10,"job":"A","terminal":"cancelled","billedBytes":81}},
+      "requests":[{"op":"reconcile","intent":"i1","bill":null}]
+    },
+    "CST-04": {
+      "opening":{"limit":40,"spent":0,"reserved":10},"intents":{"i1":{"reservation":"r1","held":10,"job":"A","terminal":"cancelled","billedBytes":81}},
+      "requests":[{"op":"reconcile","intent":"i1","bill":{"source":"job-invoice","ref":"inv:3","job":"A","status":"final","amount":3,"unit":"micro-USD"}}]
+    },
+    "CST-05": {
+      "opening":{"limit":40,"spent":0,"reserved":10},"intents":{"i1":{"reservation":"r1","held":10,"job":"A","terminal":"cancelled","billedBytes":81}},
+      "requests":[{"op":"reconcile","intent":"i1","bill":{"source":"job-invoice","ref":"inv:0","job":"A","status":"final","amount":0,"unit":"micro-USD"}}]
+    },
+    "CST-06": {
+      "opening":{"limit":40,"spent":0,"reserved":12},"intents":{"i1":{"reservation":"r1","held":12}},
+      "requests":[{"op":"reserve","intent":"i1","reservation":"r1","units":12}]
+    },
+    "CST-07": {
+      "opening":{"limit":40,"spent":0,"reserved":10},"intents":{"i1":{"reservation":"r1","held":10,"job":"A","terminal":"succeeded"}},
+      "requests":[{"op":"reconcile","intent":"i1","bill":{"source":"job-invoice","ref":"inv:usd","job":"A","status":"final","amount":1,"unit":"USD"}}]
+    },
+    "CST-08": {
+      "opening":{"limit":40,"spent":0,"reserved":10},"intents":{"i1":{"reservation":"r1","held":10,"job":"A","terminal":"succeeded"}},
+      "requests":[{"op":"reconcile","intent":"i1","bill":{"source":"job-invoice","ref":"inv:47","job":"A","status":"final","amount":47,"unit":"micro-USD"}}]
+    },
+    "CST-09": {
+      "opening":{"limit":40,"spent":0,"reserved":10},"intents":{"i1":{"reservation":"r1","held":10,"job":"A","terminal":"succeeded"}},
+      "requests":[{"op":"reconcile","intent":"i1","bill":{"source":"usage-estimate","ref":"est:11","job":"A","status":"estimate","amount":11,"unit":"micro-USD"}}]
+    },
+    "CST-10": {
+      "opening":{"limit":40,"spent":0,"reserved":10},"intents":{"i1":{"reservation":"r1","held":10,"job":"A"}},
+      "rate":{"job":"A","revision":"rate-1","microUsdPerTiB":1048576,"maxJobBytes":65536,"validUntil":200},
+      "requests":[{"op":"compute-cap","intent":"i1","revision":"rate-1","preflightAt":198,"decisionAt":201}]
+    },
+    "CST-11": {
+      "opening":{"limit":22,"spent":0,"reserved":0},"intents":{},
+      "requests":[{"op":"reserve","intent":"i1","reservation":"r1","units":22}]
+    },
+    "CST-12": {
+      "opening":{"limit":40,"spent":13,"reserved":0},"intents":{"i1":{"reservation":"r1","held":0,"job":"A","terminal":"succeeded"}},
+      "posted":[{"intent":"i1","bill":{"source":"job-invoice","ref":"inv:13","job":"A","status":"final","amount":13,"unit":"micro-USD"}}],
+      "requests":[{"op":"reconcile","intent":"i1","bill":{"source":"job-invoice","ref":"inv:13","job":"A","status":"final","amount":13,"unit":"micro-USD"}}]
+    },
+    "CST-13": {
+      "opening":{"limit":40,"spent":13,"reserved":10},"intents":{"i1":{"reservation":"r1","held":0,"job":"A","terminal":"succeeded"},
+        "i2":{"reservation":"r2","held":10,"job":"B","terminal":"succeeded"}},
+      "posted":[{"intent":"i1","bill":{"source":"job-invoice","ref":"inv:13","job":"A","status":"final","amount":13,"unit":"micro-USD"}}],
+      "requests":[{"op":"reconcile","intent":"i2","bill":{"source":"job-invoice","ref":"inv:13","job":"B","status":"final","amount":13,"unit":"micro-USD"}}]
+    },
+    "CST-14": {
+      "opening":{"limit":40,"spent":0,"reserved":10},"intents":{"i1":{"reservation":"r1","held":10,"job":"A","terminal":"succeeded"}},
+      "requests":[{"op":"reconcile","intent":"i1","bill":{"source":"job-invoice","ref":"inv:negative","job":"A","status":"final","amount":-2,"unit":"micro-USD"}}]
+    }
+  }
+}

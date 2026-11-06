@@ -1,8 +1,25 @@
 import { getPhase4Health, getPublicHealth } from "../lib/phase2";
+import { isAdminPageRequest } from "../lib/admin-page-path";
 import { onRequestGet as onControlObjectGet } from "../functions/api/control/[tenant]/[kind]/[id]";
-import { getPublicSession, getSessionRole, type AuthEnv } from "../lib/auth";
+import { onRequestGet as onCorrectionGet, onRequestPost as onCorrectionPost } from "../functions/api/control/[tenant]/receipt-corrections/[id]";
+import { onRequestGet as onEvidenceCoverageGet } from "../functions/api/control/[tenant]/evidence-coverage";
+import { onRequestPost as onProposalPost } from "../functions/api/control/[tenant]/proposals";
+import { onRequestPost as onValidationPost } from "../functions/api/control/[tenant]/validations";
+import { onRequestPost as onApprovalPost } from "../functions/api/control/[tenant]/approvals";
+import { onRequestPost as onPromotionPost } from "../functions/api/control/[tenant]/promotions";
+import { onRequestPost as onWithdrawalPost } from "../functions/api/control/[tenant]/withdrawals";
+import { onRequestPost as onRetirementPost } from "../functions/api/control/[tenant]/retirements";
+import { onRequestPost as onContractRequestPost } from "../functions/api/control/[tenant]/contract-requests";
+import { onRequestPost as onMetricPreviewPost } from "../functions/api/control/[tenant]/metric-previews";
+import { onRequestPost as onHumanGrantPost } from "../functions/api/control/[tenant]/human-grants";
+import { onRequestPost as onHumanGrantReviewPost } from "../functions/api/control/[tenant]/human-grant-reviews";
+import { onRequestPost as onDelegationPost } from "../functions/api/control/[tenant]/delegations";
+import { onRequestPost as onDelegationProofPost } from "../functions/api/control/[tenant]/delegation-proofs";
+import { onRequestPost as onIssuancePost } from "../functions/api/control/[tenant]/contract-issuances";
+import { onRequestPost as onBudgetAdmissionPost } from "../functions/api/control/[tenant]/budget-admissions";
+import { onRequestPost as onJobPreparationPost } from "../functions/api/control/[tenant]/job-preparations";
+import { getPublicSession, type AuthEnv } from "../lib/auth";
 import {
-  getSessionFromRequest,
   jsonResponse,
   requireAdminSession
 } from "../lib/auth-request";
@@ -41,6 +58,7 @@ type WorkerEnv = AuthEnv &
   AdminStorageEnv &
   BigQueryEnv & {
     ASSETS: AssetFetcher;
+    ODAP_DELEGATION_AUDIENCE?: string;
   };
 
 type WorkerContext = {
@@ -110,12 +128,32 @@ async function handleRequest(
     : assetResponse;
 }
 
+const controlCommands = new Map([["proposals", onProposalPost], ["validations", onValidationPost],
+  ["approvals", onApprovalPost], ["promotions", onPromotionPost], ["withdrawals", onWithdrawalPost],
+  ["retirements", onRetirementPost], ["contract-requests", onContractRequestPost], ["human-grants", onHumanGrantPost],
+  ["human-grant-reviews", onHumanGrantReviewPost],
+  ["metric-previews", onMetricPreviewPost],
+  ["delegations", onDelegationPost], ["delegation-proofs", onDelegationProofPost], ["contract-issuances", onIssuancePost],
+  ["budget-admissions", onBudgetAdmissionPost], ["job-preparations", onJobPreparationPost]]);
+
 function matchApiRoute(
   request: Request,
   env: WorkerEnv,
   url: URL
 ): RouteMatch | null {
+  const command = url.pathname.match(/^\/api\/control\/([^/]+)\/([^/]+)$/);
+  if (command) {
+    if (command[2] === "evidence-coverage") return { allowedMethods: ["GET"],
+      handler: () => onEvidenceCoverageGet({ request, env, params: { tenant: command[1] } }) };
+    const post = controlCommands.get(command[2]);
+    if (post) return { allowedMethods: ["POST"], handler: () => post({ request, env, params: { tenant: command[1] } }) };
+  }
   const control = url.pathname.match(/^\/api\/control\/([^/]+)\/([^/]+)\/([^/]+)$/);
+  if (control?.[2] === "receipt-corrections") return {
+    allowedMethods: ["GET", "POST"],
+    handler: () => (request.method === "POST" ? onCorrectionPost : onCorrectionGet)({ request, env,
+      params: { tenant: control[1], id: control[3] } })
+  };
   if (control) return {
     allowedMethods: ["GET"],
     handler: () => onControlObjectGet({ request, env, params: { tenant: control[1], kind: control[2], id: control[3] } })
@@ -327,26 +365,10 @@ function matchApiRoute(
 
 async function authorizeAdminPage(request: Request, env: WorkerEnv) {
   const url = new URL(request.url);
-
-  if (!env.AUTH_COOKIE_SECRET) {
-    return redirectToLogin(url, "auth_not_configured");
-  }
-
-  const session = await getSessionFromRequest(request, env);
-  if (!session) {
-    return redirectToLogin(url, "unauthenticated");
-  }
-
-  if (getSessionRole(session) !== "admin") {
-    return jsonResponse(
-      {
-        ok: false,
-        code: "admin_required",
-        message: "Administrator access is required for /admin.",
-        user: getPublicSession(session)
-      },
-      { status: 403 }
-    );
+  const auth = await requireAdminSession(request, env);
+  if (!auth.ok) {
+    return auth.code === "auth_not_configured" || auth.code === "unauthenticated"
+      ? redirectToLogin(url, auth.code) : auth.response;
   }
 
   return null;
@@ -380,14 +402,6 @@ async function serveStaticAsset(request: Request, env: WorkerEnv) {
   }
 
   return response;
-}
-
-function isAdminPageRequest(pathname: string) {
-  return (
-    pathname === "/admin" ||
-    pathname.startsWith("/admin/") ||
-    pathname.startsWith("/admin.")
-  );
 }
 
 function redirectToLogin(requestUrl: URL, error: string) {

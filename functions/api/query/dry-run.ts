@@ -4,12 +4,13 @@ import {
 } from "../../../lib/auth-request";
 import { type AuthEnv } from "../../../lib/auth";
 import {
+  getAdminDb,
   recordQueryDryRun,
   type AdminStorageEnv
 } from "../../../lib/admin-store";
 import {
   runBigQueryDryRun,
-  hasBigQueryCredentials,
+  resolveDryRunTransport,
   type BigQueryEnv
 } from "../../../lib/bigquery";
 import { estimateDryRun } from "../../../lib/phase2";
@@ -32,16 +33,21 @@ type QueryDryRunBody = {
 const MAX_SQL_LENGTH = 20_000;
 
 export async function onRequestPost(context: QueryDryRunContext) {
-  if (context.env.GATEWAY_MODE && !["demo", "production"].includes(context.env.GATEWAY_MODE)) {
-    return jsonResponse({ ok: false, code: "invalid_gateway_mode" }, { status: 503 });
-  }
+  const transport = resolveDryRunTransport(context.env);
   const session = await getSessionFromRequest(context.request, context.env);
-  if (context.env.GATEWAY_MODE === "production") {
-    if (!session) return jsonResponse({ ok: false, code: "unauthenticated" }, { status: 401 });
-    if (!hasBigQueryCredentials(context.env) || context.env.BIGQUERY_DRY_RUN_MODE === "simulated" ||
-      !(context.env.ODAP_GATEWAY_DB ?? context.env.DB)) {
-      return jsonResponse({ ok: false, code: "production_not_configured" }, { status: 503 });
-    }
+  if (!session && (context.env.GATEWAY_MODE === "production" || transport.mode === "live"))
+    return jsonResponse({ ok: false, code: "unauthenticated" }, { status: 401 });
+  if (context.env.GATEWAY_MODE === "production" && !(context.env.ODAP_GATEWAY_DB ?? context.env.DB))
+    return jsonResponse({ ok: false, code: "production_not_configured" }, { status: 503 });
+  if (transport.mode === "blocked")
+    return jsonResponse({ ok: false, code: transport.code }, { status: transport.code === "production_preview_scope_unbound" ? 403 : 503 });
+  const storage = getAdminDb(context.env);
+  if (storage && typeof storage.db.batch !== "function") {
+    return jsonResponse({
+      ok: false,
+      code: "dry_run_history_transaction_unavailable",
+      message: "Transactional storage is required for dry-run history."
+    }, { status: 503 });
   }
   const body = await readJsonBody(context.request);
   if (!body.ok) {
@@ -91,10 +97,6 @@ export async function onRequestPost(context: QueryDryRunContext) {
     basePreview,
     policyEvaluation
   );
-  if (context.env.GATEWAY_MODE === "production" && (policyEvaluation.blocked || basePreview.mode !== "live" || basePreview.error)) {
-    return jsonResponse({ ok: false, code: policyEvaluation.blocked ? "policy_blocked" : "live_preview_required", preview },
-      { status: policyEvaluation.blocked ? 403 : 503 });
-  }
   const record = await recordQueryDryRun(context.env, {
     workspace,
     queryType,
@@ -107,9 +109,6 @@ export async function onRequestPost(context: QueryDryRunContext) {
     runId: record.id,
     persisted: record.persisted
   };
-  if (context.env.GATEWAY_MODE === "production" && !record.persisted) {
-    return jsonResponse({ ok: false, code: "preview_persistence_failed" }, { status: 503 });
-  }
 
   return jsonResponse({
     ok: true,

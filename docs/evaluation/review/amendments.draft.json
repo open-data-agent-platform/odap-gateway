@@ -1,0 +1,20 @@
+{
+  "status": "author-draft-not-approved",
+  "baselineCommit": "645ba763413a5e7681e0b80b6b0ce66457c902e0",
+  "NUM-16": {
+    "given": "Count inspections where the boolean pass flag is false in [null,false,true,false,null,null].",
+    "appendRow": { "pass": null }
+  },
+  "AUT-01/02": {
+    "session": { "tenant": "reef", "operator": "ari" },
+    "probes": [
+      { "request": { "op": "export", "tenant": "clay", "intent": "lot-7" }, "expectedReceipt": null },
+      { "request": { "op": "export", "tenant": "reef", "intent": "lot-7" }, "expectedReceipt": "f9" }
+    ]
+  },
+  "LIF-06": {
+    "precondition": "The promotion is authorized and the approval and revision remain valid for the race. Establish eligibility under the service's actual role policy first.",
+    "newPersistedReleases": 1,
+    "responseRule": "At least one request succeeds. Every success identifies the same persisted release for the exact tenant, revision and approval; a losing conflict is permitted."
+  }
+}

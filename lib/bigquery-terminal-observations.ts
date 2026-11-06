@@ -2,6 +2,7 @@ import type { BigQueryEnv } from "./bigquery";
 import { observeIntentJob } from "./bigquery-job-recovery";
 import { readPreparedJob } from "./bigquery-job-storage";
 import type { ControlAccess } from "./control-storage";
+import { terminalOutcomesConflict } from "./terminal-outcome-sql";
 
 type TerminalObservation = {
   state: "succeeded" | "failed" | "cancelled";
@@ -11,13 +12,17 @@ type TerminalObservation = {
 };
 
 // No warehouse access: restart recovery can read the strongest durable sample.
-export function readTerminalObservation(access: ControlAccess, intentId: string) {
-  return access.db.prepare(`SELECT o.outcome AS state,o.billed_bytes AS billedBytes,
+export async function readTerminalObservation(access: ControlAccess, intentId: string) {
+  const row = await access.db.prepare(`SELECT ${terminalOutcomesConflict("o")} AS conflict,o.outcome AS state,o.billed_bytes AS billedBytes,
       o.observed_at AS observedAt,o.observed_by AS observedBy
     FROM bigquery_terminal_observations o JOIN control_memberships m ON m.tenant_id=o.tenant_id
     WHERE o.tenant_id=? AND o.intent_id=? AND m.principal_id=? AND m.active=1 AND m.role='owner'
     ORDER BY o.has_bytes DESC LIMIT 1`)
-    .bind(access.tenantId, intentId, access.principalId).first<TerminalObservation>();
+    .bind(access.tenantId, intentId, access.principalId).first<TerminalObservation & { conflict: number }>();
+  if (!row) return null;
+  const { conflict, ...observation } = row;
+  if (conflict) throw new Error("Conflicting terminal outcomes");
+  return observation;
 }
 
 // Internal reconciliation only. Never accepts caller-supplied job evidence.

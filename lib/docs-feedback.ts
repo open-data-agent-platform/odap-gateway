@@ -1,9 +1,10 @@
-import type { D1Database } from "./d1";
-import {
-  seedDocsFeedback,
-  type DocsFeedbackKind,
-  type DocsFeedbackStatus,
-  type PublicDocsFeedback
+import type { D1Database, D1Value } from "./d1";
+import type { AuthSession } from "./auth";
+import { ensureAdminSchema } from "./admin-store";
+import type {
+  DocsFeedbackKind,
+  DocsFeedbackStatus,
+  PublicDocsFeedback
 } from "./docs-content";
 
 export type DocsFeedbackEnv = {
@@ -37,7 +38,7 @@ export type DocsFeedbackMutationResult =
     }
   | {
       ok: false;
-      status: 400 | 404 | 409 | 500;
+      status: 400 | 403 | 404 | 409 | 500 | 503;
       code: string;
       message: string;
     };
@@ -72,7 +73,7 @@ export async function listPublicDocsFeedback(
   const configured = getDocsFeedbackDb(env);
   if (!configured) {
     return {
-      feedback: seedDocsFeedback,
+      feedback: [],
       persisted: false,
       storageBinding: null
     };
@@ -99,10 +100,13 @@ export async function listPublicDocsFeedback(
       LIMIT 20`
     )
     .all<DocsFeedbackRow>();
-  const rows = (response.results ?? []).map(mapDocsFeedbackRow);
+  if (response.success !== true || !Array.isArray(response.results)) {
+    throw new Error("Feedback read not confirmed");
+  }
+  const rows = response.results.map(mapDocsFeedbackRow);
 
   return {
-    feedback: rows.length ? rows : seedDocsFeedback,
+    feedback: rows,
     persisted: true,
     storageBinding: configured.binding
   };
@@ -118,10 +122,7 @@ export async function listAdminDocsFeedback(
   const configured = getDocsFeedbackDb(env);
   if (!configured) {
     return {
-      feedback: seedDocsFeedback.map((feedback) => ({
-        ...feedback,
-        authorEmail: null
-      })),
+      feedback: [],
       persisted: false,
       storageBinding: null
     };
@@ -150,8 +151,11 @@ export async function listAdminDocsFeedback(
     )
     .all<DocsFeedbackRow>();
 
+  if (response.success !== true || !Array.isArray(response.results)) {
+    throw new Error("Feedback read not confirmed");
+  }
   return {
-    feedback: (response.results ?? []).map(mapAdminDocsFeedbackRow),
+    feedback: response.results.map(mapAdminDocsFeedbackRow),
     persisted: true,
     storageBinding: configured.binding
   };
@@ -164,6 +168,16 @@ export async function submitDocsFeedback(
   const validation = validateFeedback(input);
   if (!validation.ok) {
     return validation;
+  }
+
+  const configured = getDocsFeedbackDb(env);
+  if (!configured) {
+    return {
+      ok: false,
+      status: 503,
+      code: "docs_feedback_storage_unavailable",
+      message: "Feedback requires configured database storage. Nothing was submitted."
+    };
   }
 
   const now = new Date().toISOString();
@@ -180,18 +194,8 @@ export async function submitDocsFeedback(
     createdAt: now
   } satisfies PublicDocsFeedback;
 
-  const configured = getDocsFeedbackDb(env);
-  if (!configured) {
-    return {
-      ok: true,
-      feedback,
-      persisted: false,
-      storageBinding: null
-    };
-  }
-
   await ensureDocsFeedbackSchema(configured.db);
-  await configured.db
+  const inserted = await configured.db
     .prepare(
       `INSERT INTO docs_feedback (
         id,
@@ -205,7 +209,7 @@ export async function submitDocsFeedback(
         answered_by,
         answered_at,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
     )
     .bind(
       feedback.id,
@@ -220,7 +224,10 @@ export async function submitDocsFeedback(
       null,
       feedback.createdAt
     )
-    .run();
+    .first<{ id: string }>();
+  if (inserted?.id !== feedback.id) {
+    throw new Error("Feedback submission not confirmed");
+  }
 
   return {
     ok: true,
@@ -234,7 +241,7 @@ export async function updateDocsFeedbackReview(
   env: DocsFeedbackEnv,
   id: string,
   input: DocsFeedbackReviewInput,
-  actorEmail: string
+  actor: Pick<AuthSession, "provider" | "providerId" | "email">
 ): Promise<DocsFeedbackMutationResult> {
   const normalizedId = id.trim();
   if (!normalizedId) {
@@ -269,8 +276,18 @@ export async function updateDocsFeedbackReview(
     };
   }
 
+  if (!configured.db.batch) {
+    return {
+      ok: false,
+      status: 503,
+      code: "docs_feedback_transaction_unavailable",
+      message: "Transactional storage is required for feedback review."
+    };
+  }
+
+  await ensureAdminSchema(configured.db);
   await ensureDocsFeedbackSchema(configured.db);
-  const existing = await getAdminDocsFeedback(configured.db, normalizedId);
+  const existing = await getDocsFeedbackRow(configured.db, normalizedId);
   if (!existing) {
     return {
       ok: false,
@@ -280,57 +297,102 @@ export async function updateDocsFeedbackReview(
     };
   }
 
+  const now = new Date().toISOString();
   const answerChanged = input.answerText !== undefined;
   const answerText = answerChanged
     ? normalizeText(input.answerText ?? "", MAX_ANSWER_LENGTH)
-    : existing.answerText ?? "";
+    : existing.answer_text ?? "";
   const answeredBy = answerChanged
     ? answerText
-      ? actorEmail.toLowerCase()
+      ? actor.email.toLowerCase()
       : ""
-    : existing.answeredBy ?? "";
+    : existing.answered_by ?? "";
   const answeredAt = answerChanged
     ? answerText
-      ? new Date().toISOString()
+      ? now
       : ""
-    : existing.answeredAt ?? "";
+    : existing.answered_at ?? "";
   const status = input.status ?? existing.status;
-
-  await configured.db
-    .prepare(
+  const auditId = crypto.randomUUID();
+  const metadata = {
+    previousStatus: existing.status,
+    previousAnswered: Boolean(existing.answer_text),
+    status,
+    answered: Boolean(answerText),
+    answerChanged: answerText !== (existing.answer_text ?? "")
+  };
+  const guard = `id = ? AND kind = ? AND topic = ? AND author_name = ?
+    AND author_email IS ? AND message = ? AND status = ? AND answer_text IS ?
+    AND answered_by IS ? AND answered_at IS ? AND created_at = ?
+    AND EXISTS (SELECT 1 FROM users AS actor WHERE actor.id = ?
+      AND actor.provider = ? AND actor.provider_id = ? AND actor.role = 'admin' AND actor.email = ?)`;
+  const guardedValues: D1Value[] = [
+    existing.id, existing.kind, existing.topic, existing.author_name, existing.author_email,
+    existing.message, existing.status, existing.answer_text, existing.answered_by,
+    existing.answered_at, existing.created_at,
+    `${actor.provider}:${actor.providerId}`, actor.provider, actor.providerId, actor.email
+  ];
+  const results = await configured.db.batch([
+    configured.db.prepare(
+      `INSERT INTO audit_events (id, actor_email, action, target, metadata_json, created_at)
+      SELECT ?, ?, 'docs_feedback.reviewed', ?, ?, ?
+      WHERE EXISTS (SELECT 1 FROM docs_feedback WHERE ${guard})
+        OR EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+      RETURNING id`
+    ).bind(auditId, actor.email.toLowerCase(), normalizedId, JSON.stringify(metadata), now,
+      ...guardedValues, auditId),
+    configured.db.prepare(
       `UPDATE docs_feedback
       SET
         status = ?,
         answer_text = ?,
         answered_by = ?,
         answered_at = ?
-      WHERE id = ?`
+      WHERE ${guard} AND changes() = 1 AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+      RETURNING id, kind, topic, author_name, author_email, message, status,
+        answer_text, answered_by, answered_at, created_at`
     )
     .bind(
       status,
       answerText || null,
       answerText ? answeredBy : null,
       answerText ? answeredAt : null,
-      normalizedId
-    )
-    .run();
+      ...guardedValues,
+      auditId
+    ),
+    // Roll back a skipped update instead of leaving its audit committed. Never
+    // delete audit history, even if a colliding insertion was itself ignored.
+    configured.db.prepare(
+      `SELECT CASE WHEN changes() = 0 AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+        THEN abs(-9223372036854775808) ELSE 1 END AS confirmed`
+    ).bind(auditId)
+  ]);
+  if (results.length !== 3 || results.some(result => result.success !== true || !Array.isArray(result.results))) {
+    throw new Error("Feedback review transaction not confirmed");
+  }
+  const updated = results[1].results?.[0] as DocsFeedbackRow | undefined;
+  if (!updated) {
+    return {
+      ok: false,
+      status: 403,
+      code: "docs_feedback_review_denied",
+      message: "Administrator authority or the inspected feedback changed. Refresh before retrying."
+    };
+  }
+  if (results[0].results?.length !== 1 || results[2].results?.[0]?.confirmed !== 1) {
+    throw new Error("Feedback review audit not confirmed");
+  }
 
   return {
     ok: true,
-    feedback: {
-      ...existing,
-      status,
-      answerText: answerText || undefined,
-      answeredBy: answerText ? answeredBy : undefined,
-      answeredAt: answerText ? answeredAt : undefined
-    },
+    feedback: mapAdminDocsFeedbackRow(updated),
     persisted: true,
     storageBinding: configured.binding
   };
 }
 
 export async function ensureDocsFeedbackSchema(db: D1Database) {
-  await db
+  const created = await db
     .prepare(
       `CREATE TABLE IF NOT EXISTS docs_feedback (
         id TEXT PRIMARY KEY,
@@ -347,53 +409,40 @@ export async function ensureDocsFeedbackSchema(db: D1Database) {
       )`
     )
     .run();
+  if (created.success !== true) throw new Error("Feedback table creation not confirmed");
 
-  await addColumnIfMissing(db, "ALTER TABLE docs_feedback ADD COLUMN answer_text TEXT");
-  await addColumnIfMissing(db, "ALTER TABLE docs_feedback ADD COLUMN answered_by TEXT");
-  await addColumnIfMissing(db, "ALTER TABLE docs_feedback ADD COLUMN answered_at TEXT");
-
-  await Promise.all(
-    seedDocsFeedback.map((feedback) =>
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO docs_feedback (
-            id,
-            kind,
-            topic,
-            author_name,
-            author_email,
-            message,
-            status,
-            answer_text,
-            answered_by,
-            answered_at,
-            created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          feedback.id,
-          feedback.kind,
-          feedback.topic,
-          feedback.authorName,
-          null,
-          feedback.message,
-          feedback.status,
-          feedback.answerText ?? null,
-          feedback.answeredBy ?? null,
-          feedback.answeredAt ?? null,
-          feedback.createdAt
-        )
-        .run()
-    )
-  );
+  const baseColumns = ["id", "kind", "topic", "author_name", "author_email", "message", "status", "created_at"];
+  const answerColumns = ["answer_text", "answered_by", "answered_at"];
+  const columns = await readDocsFeedbackColumns(db);
+  if (baseColumns.some(name => !columns.has(name))) throw new Error("Feedback base schema not confirmed");
+  const missing = answerColumns.filter(name => !columns.has(name));
+  for (const name of missing) {
+    // Names come only from this fixed list. Any failure, including a concurrent
+    // duplicate addition, stops this request; later requests inspect afresh.
+    const added = await db.prepare(`ALTER TABLE docs_feedback ADD COLUMN ${name} TEXT`).run();
+    if (added.success !== true) throw new Error("Feedback column addition not confirmed");
+  }
+  if (missing.length > 0) {
+    const updated = await readDocsFeedbackColumns(db);
+    if ([...baseColumns, ...answerColumns].some(name => !updated.has(name))) {
+      throw new Error("Feedback schema upgrade not confirmed");
+    }
+  }
 }
 
-async function addColumnIfMissing(db: D1Database, query: string) {
-  try {
-    await db.prepare(query).run();
-  } catch {
-    // Existing D1 databases already have the column; SQLite rejects duplicates.
+async function readDocsFeedbackColumns(db: D1Database): Promise<Set<string>> {
+  const result = await db.prepare("PRAGMA table_info(docs_feedback)").all<{ name: unknown }>();
+  if (result.success !== true || !Array.isArray(result.results) || result.results.length === 0) {
+    throw new Error("Feedback schema inspection not confirmed");
   }
+  const names = new Set<string>();
+  for (const row of result.results) {
+    if (!row || typeof row.name !== "string" || !row.name.trim() || names.has(row.name.toLowerCase())) {
+      throw new Error("Feedback schema inspection not confirmed");
+    }
+    names.add(row.name.toLowerCase());
+  }
+  return names;
 }
 
 function getDocsFeedbackDb(env: DocsFeedbackEnv) {
@@ -508,8 +557,8 @@ function mapAdminDocsFeedbackRow(row: DocsFeedbackRow): AdminDocsFeedback {
   };
 }
 
-async function getAdminDocsFeedback(db: D1Database, id: string) {
-  const row = await db
+async function getDocsFeedbackRow(db: D1Database, id: string) {
+  return db
     .prepare(
       `SELECT
         id,
@@ -528,6 +577,4 @@ async function getAdminDocsFeedback(db: D1Database, id: string) {
     )
     .bind(id)
     .first<DocsFeedbackRow>();
-
-  return row ? mapAdminDocsFeedbackRow(row) : null;
 }

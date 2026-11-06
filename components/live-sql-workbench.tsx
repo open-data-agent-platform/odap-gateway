@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import type { ComponentType } from "react";
 import {
   AlertTriangle,
@@ -28,16 +29,8 @@ import {
   type QueryRunPreview
 } from "@/lib/phase2";
 import { cn } from "@/lib/utils";
-
-type QueryDryRunApiResponse = {
-  ok?: boolean;
-  preview?: QueryRunPreview;
-  runId?: string;
-  persisted?: boolean;
-  storageBinding?: "ODAP_GATEWAY_DB" | "DB" | null;
-  code?: string;
-  message?: string;
-};
+import { requestWorkbenchPreview, type WorkbenchResult } from "@/lib/workbench-preview";
+import { usePrivateInspection } from "./use-private-inspection";
 
 const sampleQuestion =
   "Show weekly revenue and order count for the last 8 weeks, grouped by acquisition channel";
@@ -63,11 +56,11 @@ export function LiveSqlWorkbench({ compact = false }: { compact?: boolean }) {
   const [workspace, setWorkspace] = useState("demo");
   const [queryType, setQueryType] = useState("Revenue rollup");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isDryRunning, setIsDryRunning] = useState(false);
-  const [runPreview, setRunPreview] = useState<QueryRunPreview | null>(null);
-
-  const sql = sqlDraft.trim() ? sqlDraft : fallbackSql;
-  const localEstimate = useMemo(() => estimateDryRun(sql), [sql]);
+  const { view, inspect, clear } = usePrivateInspection<WorkbenchResult>();
+  const isDryRunning = view.state === "loading";
+  const runPreview = view.state === "ready" ? view.preview : null;
+  const sql = sqlDraft;
+  const localEstimate = useMemo(() => sql.trim() ? estimateDryRun(sql) : null, [sql]);
   const checks = runPreview?.checks ?? validateBigQuerySql(sql);
   const usedFields = useMemo(() => extractUsedFields(sql), [sql]);
   const approvedChecks = checks.filter((check) => check.status === "pass").length;
@@ -78,61 +71,14 @@ export function LiveSqlWorkbench({ compact = false }: { compact?: boolean }) {
     window.setTimeout(() => {
       const nextResult = generateBigQuerySql(question);
       setSqlDraft(nextResult.sql ?? fallbackSql);
-      setRunPreview(null);
+      clear();
       setIsGenerating(false);
       showToast("Generated SQL draft");
     }, 420);
   }
 
-  async function dryRunQuery() {
-    if (!sql.trim()) {
-      showToast("Add SQL before dry-run");
-      return;
-    }
-
-    setIsDryRunning(true);
-    try {
-      const response = await fetch("/api/query/dry-run", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          sql,
-          workspace,
-          queryType: queryType.trim() || "SQL dry run"
-        })
-      });
-      const body = (await response.json().catch(() => null)) as
-        | QueryDryRunApiResponse
-        | null;
-
-      if (!response.ok || !body?.preview) {
-        throw new Error(body?.message ?? "Dry-run API request failed.");
-      }
-
-      setRunPreview(body.preview);
-      showToast(getDryRunToast(body.preview));
-    } catch (error) {
-      const preview = {
-        ...estimateDryRun(sql),
-        mode: "simulated",
-        configured: false,
-        error: {
-          code: "frontend_fallback",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Backend dry-run API is unavailable."
-        }
-      } satisfies QueryRunPreview;
-
-      setRunPreview(preview);
-      showToast("Local simulated dry run");
-    } finally {
-      setIsDryRunning(false);
-    }
+  function dryRunQuery() {
+    if (sql.trim()) void inspect(signal => requestWorkbenchPreview({sql,workspace,queryType:queryType.trim() || "SQL dry run"},signal));
   }
 
   return (
@@ -174,7 +120,7 @@ export function LiveSqlWorkbench({ compact = false }: { compact?: boolean }) {
                     value={workspace}
                     onChange={(event) => {
                       setWorkspace(event.currentTarget.value);
-                      setRunPreview(null);
+                      clear();
                     }}
                     className="focus-ring h-10 rounded-lg border border-white/10 bg-[#05070d] px-3 text-sm font-semibold text-slate-100 outline-none"
                   >
@@ -189,7 +135,7 @@ export function LiveSqlWorkbench({ compact = false }: { compact?: boolean }) {
                   Query type
                   <input
                     value={queryType}
-                    onChange={(event) => setQueryType(event.currentTarget.value)}
+                    onChange={(event) => { setQueryType(event.currentTarget.value); clear(); }}
                     className="focus-ring h-10 rounded-lg border border-white/10 bg-[#05070d] px-3 text-sm font-semibold text-slate-100 outline-none placeholder:text-slate-700"
                     placeholder="Revenue rollup"
                   />
@@ -234,7 +180,7 @@ export function LiveSqlWorkbench({ compact = false }: { compact?: boolean }) {
                   title="Reset generated SQL"
                   onClick={() => {
                     setSqlDraft(initialSql || fallbackSql);
-                    setRunPreview(null);
+                    clear();
                   }}
                   className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-md px-2 transition hover:bg-white/[0.06] hover:text-slate-200"
                 >
@@ -245,7 +191,7 @@ export function LiveSqlWorkbench({ compact = false }: { compact?: boolean }) {
                   type="button"
                   title="BigQuery dry-run"
                   onClick={() => void dryRunQuery()}
-                  disabled={isDryRunning}
+                  disabled={isDryRunning || !sql.trim()}
                   className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-md bg-[#34a853]/10 px-2 font-semibold text-[#4ade80] transition hover:bg-[#34a853]/15 disabled:cursor-wait disabled:opacity-70"
                 >
                   {isDryRunning ? (
@@ -262,43 +208,37 @@ export function LiveSqlWorkbench({ compact = false }: { compact?: boolean }) {
               sql={sqlDraft}
               onChange={(value) => {
                 setSqlDraft(value);
-                setRunPreview(null);
+                clear();
               }}
             />
-            <RunGatePreview preview={runPreview} />
+            <RunGatePreview view={view} />
 
             <div className="flex flex-col gap-3 border-t border-white/10 px-5 py-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              {view.state === "idle" && localEstimate && <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                <span className="font-semibold text-slate-300">Draft estimate</span>
                 <InlineMetric
                   icon={Gauge}
                   label="Est. cost"
-                  value={formatCost(
-                    runPreview?.estimatedCostUsd ?? localEstimate.estimatedCostUsd
-                  )}
+                  value={formatCost(localEstimate.estimatedCostUsd)}
                 />
                 <InlineMetric
                   icon={Database}
                   label="Scan"
-                  value={formatBytes(
-                    runPreview?.scannedBytes ?? localEstimate.scannedBytes
-                  )}
+                  value={formatBytes(localEstimate.scannedBytes)}
                 />
                 <InlineMetric
                   icon={Clock3}
                   label="Runtime"
-                  value={`${(
-                    (runPreview?.expectedRuntimeMs ??
-                      localEstimate.expectedRuntimeMs) / 1000
-                  ).toFixed(1)}s`}
+                  value={`${(localEstimate.expectedRuntimeMs / 1000).toFixed(1)}s`}
                 />
-              </div>
+              </div>}
               <span>BigQuery Standard SQL</span>
             </div>
           </section>
         </div>
 
         <aside className="min-w-0 space-y-5">
-          <SafetyChecksPanel checks={checks} />
+          <SafetyChecksPanel checks={checks} source={runPreview ? "Preview checks" : "Draft checks"} />
           <SchemaContext usedFields={usedFields} />
         </aside>
       </div>
@@ -322,6 +262,7 @@ function SqlEditor({
         {lineNumbers.join("\n")}
       </pre>
       <textarea
+        aria-label="Editable SQL"
         value={sql}
         onChange={(event) => onChange(event.currentTarget.value)}
         spellCheck={false}
@@ -332,7 +273,7 @@ function SqlEditor({
   );
 }
 
-function SafetyChecksPanel({ checks }: { checks: QueryRunPreview["checks"] }) {
+function SafetyChecksPanel({ checks, source }: { checks: QueryRunPreview["checks"]; source: string }) {
   const hasWarnings = checks.some((check) => check.status === "warn");
 
   return (
@@ -341,7 +282,7 @@ function SafetyChecksPanel({ checks }: { checks: QueryRunPreview["checks"] }) {
         <div className="flex items-center gap-3">
           <ShieldCheck className="h-5 w-5 text-[#34a853]" />
           <h2 className="text-base font-semibold text-slate-50">
-            Safety Checks
+            {source}
           </h2>
         </div>
         <span
@@ -352,7 +293,7 @@ function SafetyChecksPanel({ checks }: { checks: QueryRunPreview["checks"] }) {
               : "border-[#34a853]/25 bg-[#34a853]/10 text-[#4ade80]"
           )}
         >
-          {hasWarnings ? "Review" : "Ready"}
+          {hasWarnings ? "Warnings" : "No warnings"}
         </span>
       </div>
       <ul className="space-y-3 p-4">
@@ -401,29 +342,34 @@ function SafetyChecksPanel({ checks }: { checks: QueryRunPreview["checks"] }) {
   );
 }
 
-function RunGatePreview({ preview }: { preview: QueryRunPreview | null }) {
-  if (!preview) {
-    return null;
-  }
+const previewMessages = {
+  sign_in: "Sign in to request a dry run.",
+  denied: "Dry run denied.",
+  invalid: "Invalid dry-run request.",
+  unavailable: "Dry-run result unavailable. Retry the request."
+} as const;
 
-  const modeLabel =
-    preview.mode === "live" ? "BigQuery live dry run" : "Simulated dry run";
-  const persistenceLabel = preview.persisted
-    ? `Audit saved as ${preview.runId}`
+function RunGatePreview({ view }: { view: WorkbenchResult | {state:"idle" | "loading"} }) {
+  if (view.state === "idle") return null;
+  if (view.state === "loading") return <p role="status" className="border-t border-white/10 px-5 py-4 text-sm text-slate-300">Requesting dry run...</p>;
+  if (view.state !== "ready") return <div role="alert" className="flex flex-wrap items-center gap-2 border-t border-white/10 px-5 py-4 text-sm text-amber-300">
+    <AlertTriangle className="h-4 w-4" aria-hidden="true" />{previewMessages[view.state]}
+    {view.state === "sign_in" && <Link href="/login?returnTo=%2Fsql" className="focus-ring text-sky-300 underline">Sign in</Link>}
+  </div>;
+  const { preview } = view;
+  const modeLabel = preview.mode === "live" ? "BigQuery dry run" : "Server simulation";
+  const outcomeLabel = preview.status === "needs_approval" ? "Review required" :
+    preview.mode === "live" ? "Dry run passed" : "Simulation complete";
+  const persistenceLabel = preview.auditId
+    ? `Audit saved as ${preview.auditId}`
     : "Audit not persisted";
   const statusClassName = {
     approved: "border-[#34a853]/25 bg-[#34a853]/[0.08] text-[#4ade80]",
     needs_approval: "border-[#fbbc05]/25 bg-[#fbbc05]/[0.08] text-[#facc15]",
-    blocked: "border-[#ea4335]/25 bg-[#ea4335]/[0.08] text-[#f87171]"
   }[preview.status];
-  const jobRef = preview.jobReference?.projectId
-    ? `${preview.jobReference.projectId}${
-        preview.jobReference.location ? ` / ${preview.jobReference.location}` : ""
-      }`
-    : null;
 
   return (
-    <div className="border-t border-white/10 bg-[#070b13] px-5 py-4">
+    <div role="status" className="border-t border-white/10 bg-[#070b13] px-5 py-4">
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
         <div className="flex min-w-0 items-start gap-3">
           <span
@@ -437,7 +383,7 @@ function RunGatePreview({ preview }: { preview: QueryRunPreview | null }) {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-sm font-semibold text-slate-100">
-                Execution Gate
+                {modeLabel}
               </p>
               <span
                 className={cn(
@@ -445,17 +391,15 @@ function RunGatePreview({ preview }: { preview: QueryRunPreview | null }) {
                   statusClassName
                 )}
               >
-                {preview.gateLabel}
+                {outcomeLabel}
               </span>
             </div>
             <p className="mt-1 text-xs leading-5 text-slate-500">
-              {modeLabel} / {persistenceLabel}
-              {jobRef ? ` / ${jobRef}` : ""}
+              {persistenceLabel}{preview.jobRef ? " / " + preview.jobRef : ""}
             </p>
             <p className="mt-1 text-xs leading-5 text-slate-500">
               {preview.referencedTables.join(", ") || "No table detected"} /{" "}
-              {preview.projectedColumns || "unknown"} projected columns
-              {preview.error ? ` / ${preview.error.message}` : ""}
+              {preview.projectedColumns} projected columns
             </p>
           </div>
         </div>
@@ -605,22 +549,6 @@ function fallbackCopy(text: string) {
   textarea.select();
   document.execCommand("copy");
   document.body.removeChild(textarea);
-}
-
-function getDryRunToast(preview: QueryRunPreview) {
-  if (preview.status === "blocked") {
-    return "Run blocked by policy";
-  }
-
-  if (preview.status === "needs_approval") {
-    return preview.persisted
-      ? "Run queued for admin approval"
-      : "Run needs admin approval";
-  }
-
-  return preview.mode === "live"
-    ? "Live BigQuery dry run approved"
-    : "Simulated dry run approved";
 }
 
 function showToast(message: string) {

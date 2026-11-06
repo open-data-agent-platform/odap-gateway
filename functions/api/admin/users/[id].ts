@@ -54,7 +54,7 @@ export async function onRequestPatch(context: AdminUserContext) {
     context.env,
     id,
     body.value.role,
-    auth.session.email
+    auth.session
   );
 
   if (!result.ok) {

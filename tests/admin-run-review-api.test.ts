@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { adminAuthority } from "./fixtures/admin-authority";
 import {
   onRequestGet,
   onRequestPatch
@@ -47,7 +48,7 @@ describe("admin run review API", () => {
     const response = await onRequestPatch({
       request: await createAdminRequest({ status: "needs_approval" }),
       env: {
-        AUTH_COOKIE_SECRET: secret
+        AUTH_COOKIE_SECRET: secret, DB: adminAuthority()
       },
       params: {
         id: "run-1"
@@ -60,7 +61,7 @@ describe("admin run review API", () => {
     });
   });
 
-  it("returns storage_not_configured without D1", async () => {
+  it("cannot verify current authority without D1", async () => {
     const response = await onRequestPatch({
       request: await createAdminRequest({ status: "approved" }),
       env: {
@@ -71,13 +72,13 @@ describe("admin run review API", () => {
       }
     });
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
-      code: "storage_not_configured"
+      code: "admin_authority_unavailable"
     });
   });
 
-  it("returns storage_not_configured for detail reads without D1", async () => {
+  it("cannot authorize detail reads without D1", async () => {
     const response = await onRequestGet({
       request: await createAdminRequest({}, "GET"),
       env: {
@@ -88,9 +89,9 @@ describe("admin run review API", () => {
       }
     });
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
-      code: "storage_not_configured"
+      code: "admin_authority_unavailable"
     });
   });
 });

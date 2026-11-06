@@ -45,6 +45,31 @@ after claiming is ambiguous: **observe the same job, do not resubmit**. Even
 a 404 does not rearm a claim. Post-claim cancellation and abandoned-reservation
 resolution are separate operations.
 
+## Delegated handoff (offline)
+
+After migration 0024, the internal `handoffDelegatedRead` accepts a verified
+operator, delegated subject and audience, intent ID, structured metric action
+and an explicitly injected sender. There is no HTTP route, transport default
+or credential lookup. The legacy BigQuery transport still refuses delegated
+bindings. Historical claims gain no inferred audience or digest.
+
+The compiler uses the stored promoted definition, not SQL from the caller.
+The final conditional insert rechecks live authority, the original
+reservation, project/location, pricing, stop state and the exact snapshots
+used for compilation. SQLite independently recomputes the funded byte cap
+with integer arithmetic. A unique claim binds the operator and the digest
+of the exact serialized job body; SQL and parameter values are not logged
+in the claim. The digest identifies bytes, not warehouse execution.
+
+Only confirmation of that insert permits a single callback. A concurrent
+stop or revocation that wins before the claim prevents the call; after a
+claim neither retracts it. An uncertain storage response never calls the
+sender. If the sender throws, the result is `observation-required` for the
+original job. Neither case rearms the claim, releases funds or replaces the
+pending receipt. `handed-off` means the callback returned, not that any remote
+service accepted a job. [Delegated observation-only recovery](BIGQUERY_JOB_RECOVERY.md#terminal-observations-without-a-bill)
+is a separate offline-tested step and cannot resubmit the job.
+
 ## Stop before dispatch
 
 `stopBeforeDispatch(access, intentId)` is an internal operation for an

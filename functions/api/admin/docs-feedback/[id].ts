@@ -3,10 +3,7 @@ import {
   requireAdminSession
 } from "../../../../lib/auth-request";
 import { type AuthEnv } from "../../../../lib/auth";
-import {
-  recordAuditEvent,
-  type AdminStorageEnv
-} from "../../../../lib/admin-store";
+import type { AdminStorageEnv } from "../../../../lib/admin-store";
 import {
   updateDocsFeedbackReview,
   type DocsFeedbackEnv,
@@ -76,7 +73,7 @@ export async function onRequestPatch(context: DocsFeedbackReviewContext) {
     context.env,
     id,
     input,
-    auth.session.email
+    auth.session
   );
 
   if (!result.ok) {
@@ -89,16 +86,6 @@ export async function onRequestPatch(context: DocsFeedbackReviewContext) {
       { status: result.status }
     );
   }
-
-  await recordAuditEvent(context.env, {
-    actorEmail: auth.session.email,
-    action: "docs_feedback.reviewed",
-    target: result.feedback.id,
-    metadata: {
-      status: result.feedback.status,
-      answered: Boolean(result.feedback.answerText)
-    }
-  });
 
   return jsonResponse({
     ok: true,

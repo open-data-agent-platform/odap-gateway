@@ -12,6 +12,15 @@ export function SiteFooter() {
           <Link href="/sql" className="transition hover:text-slate-200">
             SQL Workspace
           </Link>
+          <Link href="/semantic-review" className="transition hover:text-slate-200">
+            Semantic review
+          </Link>
+          <Link href="/evidence-coverage" className="transition hover:text-slate-200">
+            Evidence coverage
+          </Link>
+          <Link href="/approval-contract" className="transition hover:text-slate-200">
+            Approval contract
+          </Link>
           <a
             href={SOURCE_REPOSITORY_URL}
             target="_blank"

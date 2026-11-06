@@ -8,6 +8,7 @@ import { isEvidenceReceipt } from "../lib/control-objects";
 import type { ControlAccess } from "../lib/control-storage";
 import type { D1Database, D1Value } from "../lib/d1";
 import { jobSqlite } from "./fixtures/job-sqlite";
+import { corruptTerminalEnrichment } from "./fixtures/conflicting-terminal";
 
 let dir: string;
 let dbFile: string;
@@ -58,6 +59,38 @@ describe("final per-job monetary evidence (offline)", { timeout: 20_000 }, () =>
     await prepareClaim();
   });
   afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  it.each(["before", "during-final", "during-null"])("refuses a terminal conflict: %s", async phase => {
+    await sqlite("run", `INSERT INTO bigquery_terminal_observations
+      (tenant_id,intent_id,outcome,has_bytes,observed_by) VALUES('t','i','succeeded',0,'owner')`);
+    const corrupt = () => corruptTerminalEnrichment((q,args) => sqlite("run",q,args), "i");
+    if (phase === "before") await corrupt();
+    const load = vi.fn(async () => {
+      if (phase !== "before") await corrupt();
+      return phase === "during-null" ? null : charge();
+    });
+    await expect.soft(reconcileBigQueryBill(access,"i",load)).rejects.toThrow(/conflicting terminal outcomes/i);
+    expect.soft(load).toHaveBeenCalledTimes(Number(phase !== "before"));
+    if (phase === "before") {
+      await expect(sqlite("run", `INSERT INTO bigquery_billing_evidence
+        (tenant_id,intent_id,receipt_id,evidence_ref,actual_micro_usd,actor)
+        VALUES('t','i',?,'fixture:direct',12,'owner')`, ["final_" + job.identity.jobReference.jobId]))
+        .rejects.toThrow("conflicting terminal outcomes");
+    }
+    expect(await ledger()).toEqual(untouched);
+  });
+
+  it("withholds a prior settlement when terminal evidence changes during a missing-charge retry", async () => {
+    await sqlite("run", `INSERT INTO bigquery_terminal_observations
+      (tenant_id,intent_id,outcome,has_bytes,observed_by) VALUES('t','i','succeeded',0,'owner')`);
+    expect(await reconcile(charge())).toMatchObject({ state: "settled", actualMicroUsd: 12 });
+    const settledLedger = await ledger();
+    await expect(reconcileBigQueryBill(access,"i",async () => {
+      await corruptTerminalEnrichment((q,args) => sqlite("run",q,args), "i");
+      return null;
+    })).rejects.toThrow("Conflicting terminal outcomes");
+    expect(await ledger()).toEqual(settledLedger);
+  });
 
   it("does not ask for a bill before terminal evidence, nor infer cost from measured bytes", async () => {
     const load = vi.fn(async () => null);

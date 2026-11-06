@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - 'codex/gateway-verified-*'
 
 jobs:
   verify:
@@ -16,7 +17,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '24.22.1'
           cache: npm
 
       - name: Install dependencies
@@ -28,8 +29,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
-        run: npm run test
+      - name: Test non-native suites
+        run: npm run test -- --pool=forks --maxWorkers=2 --minWorkers=1 --exclude '**/*-miniflare.test.ts'
+
+      - name: Complete native verification gate
+        run: npm run test:native
 
       - name: Build
         run: npm run build

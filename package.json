@@ -10,6 +10,7 @@
     "lint": "node node_modules/eslint/bin/eslint.js .",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "test": "node node_modules/vitest/vitest.mjs run --environment node",
+    "test:native": "node scripts/native-d1-gate.mjs",
     "evidence:build": "tsc -p scripts/tsconfig.evidence.json",
     "evidence:verify": "node dist/evidence/scripts/verify-settled-evidence.js",
     "ci": "npm run lint && npm run typecheck && npm run test && npm run build",
@@ -30,6 +31,7 @@
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
     "eslint-config-next": "^15.0.0",
+    "miniflare": "4.20260630.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
@@ -37,7 +39,7 @@
     "wrangler": "^4.106.0"
   },
   "engines": {
-    "node": ">=20.11.0"
+    "node": ">=22.0.0"
   },
   "license": "Apache-2.0"
 }

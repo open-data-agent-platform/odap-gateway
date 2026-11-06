@@ -1,0 +1,155 @@
+{
+  "LIF-01": {
+    "catalogs": {"clay":"s1"},
+    "actors": {"sam":{"tenant":"clay","role":"agent","active":true}},
+    "revisions": {
+      "r1": {"tenant":"clay","metric":"turbine starts","state":"candidate","source":"s1","definition":{"table":"turbine_log","unit":"starts"}}
+    },
+    "requests": [
+      {"op":"lookup","actor":"sam","revision":"r1"}
+    ]
+  },
+  "LIF-02": {
+    "catalogs": {"clay":"s1"},
+    "actors": {"sam":{"tenant":"clay","role":"agent","active":true},"mei":{"tenant":"clay","role":"reviewer","active":true}},
+    "revisions": {
+      "r1": {"tenant":"clay","metric":"kiln loads","state":"candidate","source":"s1","definition":{"table":"kiln_log","unit":"loads"}}
+    },
+    "reviews": {"d1":{"actor":"mei","revision":"r1","decision":"rejected"}},
+    "requests": [
+      {"op":"lookup","actor":"sam","revision":"r1"}
+    ]
+  },
+  "LIF-03": {
+    "catalogs": {"clay":"s1"},
+    "actors": {"mei":{"tenant":"clay","role":"reviewer","active":true},"publisher":{"tenant":"clay","role":"owner","active":true}},
+    "revisions": {
+      "rA": {"tenant":"clay","metric":"dock time","state":"candidate","source":"s1","definition":{"table":"dock_clock_v1","unit":"minutes"}},
+      "rB": {"tenant":"clay","metric":"dock time","state":"candidate","source":"s1","definition":{"table":"dock_clock_v2","unit":"minutes"}}
+    },
+    "reviews": {"a1":{"actor":"mei","revision":"rB","decision":"approved"}},
+    "requests": [
+      {"op":"promote","actor":"publisher","revision":"rA","review":"a1"}
+    ]
+  },
+  "LIF-04": {
+    "catalogs": {"clay":"s1"},
+    "actors": {"jo":{"tenant":"clay","role":"owner","active":true}},
+    "revisions": {
+      "r1": {"tenant":"clay","metric":"waste volume","state":"released","source":"s1","definition":{"table":"waste_meter","unit":"liters"}}
+    },
+    "requests": [
+      {"op":"edit","actor":"jo","revision":"r1","definition":{"table":"waste_meter","unit":"gallons"}}
+    ]
+  },
+  "LIF-05": {
+    "catalogs": {"clay":"s1"},
+    "actors": {"sam":{"tenant":"clay","role":"agent","active":true}},
+    "revisions": {
+      "r1": {"tenant":"clay","metric":"parcel count","state":"released","source":"s1","definition":{"table":"parcels","unit":"parcels"}},
+      "r2": {"tenant":"clay","metric":"parcel count","state":"candidate","source":"s1","definition":{"table":"parcel_scans","unit":"parcels"}}
+    },
+    "requests": [
+      {"op":"lookup","actor":"sam","revision":"r1"}
+    ]
+  },
+  "LIF-06": {
+    "catalogs": {"clay":"s1"},
+    "actors": {"mei":{"tenant":"clay","role":"reviewer","active":true},"ari":{"tenant":"clay","role":"reviewer","active":true}},
+    "revisions": {
+      "r1": {"tenant":"clay","metric":"press cycles","state":"candidate","source":"s1","definition":{"table":"cycle_log","unit":"cycles"}}
+    },
+    "reviews": {"a1":{"actor":"mei","revision":"r1","decision":"approved"}},
+    "requests": [
+      {"op":"promote","actor":"mei","revision":"r1","review":"a1","concurrentGroup":"g1"},
+      {"op":"promote","actor":"ari","revision":"r1","review":"a1","concurrentGroup":"g1"}
+    ]
+  },
+  "LIF-07": {
+    "catalogs": {"clay":"s1"},
+    "actors": {"sam":{"tenant":"clay","role":"agent","active":true}},
+    "revisions": {
+      "r1": {"tenant":"clay","metric":"silo mass","state":"deprecated","source":"s1","definition":{"table":"silo_daily","unit":"kg"},"deprecatedAt":3}
+    },
+    "requests": [
+      {"op":"bind","actor":"sam","revision":"r1","digest":"sha256:681c6db65b87a3b8567b7154f92c55292a7aa1057135371dbf0558a034c17177"}
+    ]
+  },
+  "LIF-08": {
+    "catalogs": {"clay":"s1"},
+    "actors": {"jo":{"tenant":"clay","role":"owner","active":true}},
+    "revisions": {
+      "r1": {"tenant":"clay","metric":"batch count","state":"deprecated","source":"s1","definition":{"table":"batch_log","unit":"batches"},"deprecatedAt":5}
+    },
+    "receipts": {"e1":{"tenant":"clay","revision":"r1","issuedAt":4}},
+    "requests": [
+      {"op":"verify-receipt","actor":"jo","receipt":"e1"}
+    ]
+  },
+  "LIF-09": {
+    "catalogs": {"clay":"s1"},
+    "actors": {"sam":{"tenant":"clay","role":"agent","active":true}},
+    "revisions": {
+      "r1": {"tenant":"clay","metric":"stock count","state":"deprecated","source":"s1","definition":{"table":"stock_log","unit":"items"},"deprecatedAt":3},
+      "r2": {"tenant":"clay","metric":"stock count","state":"released","source":"s1","definition":{"table":"stock_events","unit":"items"}}
+    },
+    "contracts": {"c1":{"tenant":"clay","revision":"r1","principal":"sam"}},
+    "requests": [
+      {"op":"bind","actor":"sam","revision":"r1","contract":"c1"}
+    ]
+  },
+  "LIF-10": {
+    "catalogs": {"reef":"s1","clay":"s1"},
+    "actors": {"jo":{"tenant":"reef","role":"owner","active":true}},
+    "revisions": {
+      "reef1": {"tenant":"reef","metric":"returns","state":"released","source":"s1","definition":{"table":"reef_returns","unit":"items"}},
+      "clay1": {"tenant":"clay","metric":"returns","state":"released","source":"s1","definition":{"table":"clay_returns","unit":"items"}}
+    },
+    "requests": [
+      {"op":"deprecate","actor":"jo","revision":"clay1"}
+    ]
+  },
+  "LIF-11": {
+    "catalogs": {"clay":"s2"},
+    "actors": {"sam":{"tenant":"clay","role":"agent","active":true}},
+    "revisions": {
+      "r1": {"tenant":"clay","metric":"heat output","state":"released","source":"s1","definition":{"table":"heat_meter","unit":"kWh"}}
+    },
+    "contracts": {"c1":{"tenant":"clay","revision":"r1","principal":"sam"}},
+    "requests": [
+      {"op":"bind","actor":"sam","revision":"r1","source":"s2","contract":"c1"}
+    ]
+  },
+  "LIF-12": {
+    "catalogs": {"clay":"s1"},
+    "actors": {"jo":{"tenant":"clay","role":"owner","active":true}},
+    "revisions": {
+      "r1": {"tenant":"clay","metric":"line output","state":"released","source":"s1","definition":{"table":"parts_finished","unit":"parts"}}
+    },
+    "requests": [
+      {"op":"import","actor":"jo","newRevision":"r2","proposal":{"tenant":"clay","metric":"line output","state":"candidate","source":"s1","definition":{"table":"parts_loaded","unit":"parts"}}}
+    ]
+  },
+  "LIF-13": {
+    "catalogs": {"clay":"s1"},
+    "actors": {"mei":{"tenant":"clay","role":"reviewer","active":true},"ari":{"tenant":"clay","role":"reviewer","active":false}},
+    "revisions": {
+      "r1": {"tenant":"clay","metric":"valve checks","state":"candidate","source":"s1","definition":{"table":"valve_log","unit":"checks"}}
+    },
+    "reviews": {"a1":{"actor":"mei","revision":"r1","decision":"approved"}},
+    "requests": [
+      {"op":"promote","actor":"ari","revision":"r1","review":"a1"}
+    ]
+  },
+  "LIF-14": {
+    "catalogs": {"clay":"s1"},
+    "actors": {"sam":{"tenant":"clay","role":"agent","active":true}},
+    "revisions": {
+      "r1": {"tenant":"clay","metric":"gate entries","state":"released","source":"s1","definition":{"table":"gate_events","unit":"entries"}},
+      "r2": {"tenant":"clay","metric":"gate entries","state":"candidate","source":"s1","definition":{"table":"gate_ticks","unit":"entries"}}
+    },
+    "requests": [
+      {"op":"lookup","actor":"sam","revision":"r1","source":"s1","digest":"sha256:3a1f70f428300a363bacf8a35b964649a3ceffaa6edebd7da0a41948d45a3f6d"}
+    ]
+  }
+}

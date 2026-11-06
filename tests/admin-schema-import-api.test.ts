@@ -41,9 +41,9 @@ describe("admin schema import API", () => {
       }
     });
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
-      code: "storage_not_configured"
+      code: "admin_authority_unavailable"
     });
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();

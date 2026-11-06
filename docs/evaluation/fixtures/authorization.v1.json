@@ -1,0 +1,77 @@
+{
+  "snapshots": {
+    "evidence": {
+      "memberships": [
+        {"tenant":"clay","user":"iris","role":"owner","active":true},
+        {"tenant":"clay","user":"jo","role":"reader","active":true,"duties":["billing-admin"]},
+        {"tenant":"reef","user":"mei","role":"reader","active":true},
+        {"tenant":"reef","user":"ari","role":"owner","active":true}
+      ],
+      "grants": [],
+      "resources": [
+        {"tenant":"clay","intent":"lot-7","release":"r1","contract":"c1","pendingReceipt":"p7",
+         "job":{"project":"fixture-clay","location":"US","id":"j7"},"terminal":"succeeded","finalReceipt":"f7",
+         "bill":{"reference":"charge:clay-7","amount":17,"receipt":"f7"},"settlement":{"amount":17,"receipt":"f7"}},
+        {"tenant":"reef","intent":"lot-7","release":"r2","contract":"c2","pendingReceipt":"p9",
+         "job":{"project":"fixture-reef","location":"EU","id":"j9"},"terminal":"succeeded","finalReceipt":"f9",
+         "bill":{"reference":"charge:reef-9","amount":9,"receipt":"f9"},"settlement":{"amount":9,"receipt":"f9"}},
+        {"tenant":"clay","intent":"lot-8","release":"r1","contract":"c8","pendingReceipt":"p8",
+         "job":{"project":"fixture-clay","location":"US","id":"j8"},"jobType":"QUERY","actionTag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","maxBytes":512,"priorCancellationRequester":"iris"},
+        {"tenant":"clay","intent":"lot-10","release":"r1","contract":"c10","pendingReceipt":"p10",
+         "job":{"project":"fixture-clay","location":"US","id":"j10"},"terminal":"cancelled"}
+      ]
+    },
+    "dispatch": {
+      "memberships": [
+        {"tenant":"clay","user":"iris","role":"owner","active":true},
+        {"tenant":"clay","user":"sam","role":"reader","active":true},
+        {"tenant":"clay","user":"lee","role":"reader","active":true},
+        {"tenant":"clay","user":"dev","role":"owner","active":false}
+      ],
+      "agents": ["thermal","vibration"],
+      "grants": [
+        {"tenant":"clay","principal":"sam","agent":"thermal","target":"inventory","policy":"p3","action":"data.read"},
+        {"tenant":"clay","principal":"lee","agent":"thermal","target":"inventory","policy":"p3","action":"data.read"}
+      ],
+      "contract": {"id":"c4","tenant":"clay","principal":"sam","agent":"thermal","target":"inventory","release":"r4","policy":"p3","action":"data.read"},
+      "binding": {"intent":"read-4","tenant":"clay","contract":"c4","release":"r4","target":"inventory","project":"fixture-clay","location":"US","maxBytes":512,"existingClaims":0},
+      "currentPolicy": {"tenant":"clay","target":"inventory","revision":"p3"}
+    }
+  },
+  "cases": {
+    "AUT-01": {"snapshot":"evidence","session":{"tenant":"reef","operator":"mei"},
+      "request":{"op":"export","tenant":"clay","intent":"lot-7"}},
+    "AUT-02": {"snapshot":"evidence","session":{"tenant":"clay","operator":"iris"},
+      "request":{"op":"export","tenant":"clay","intent":"lot-7"}},
+    "AUT-03": {"snapshot":"dispatch","session":{"tenant":"clay","operator":"dev","principal":"sam","agent":"thermal"},
+      "request":{"op":"dispatch","tenant":"clay","intent":"read-4","target":"inventory","action":"data.read"}},
+    "AUT-04": {"snapshot":"dispatch","session":{"tenant":"clay","operator":"iris","principal":"lee","agent":"thermal"},
+      "request":{"op":"dispatch","tenant":"clay","intent":"read-4","target":"inventory","action":"data.read"}},
+    "AUT-05": {"snapshot":"evidence","session":{"tenant":"clay","operator":"jo"},
+      "request":{"op":"cancel","tenant":"clay","intent":"lot-8"}},
+    "AUT-06": {"snapshot":"dispatch","session":{"tenant":"clay","operator":"iris","principal":"sam","agent":"vibration"},
+      "request":{"op":"dispatch","tenant":"clay","intent":"read-4","target":"inventory","action":"data.read"}},
+    "AUT-07": {"snapshot":"dispatch","session":{"tenant":"clay","operator":"iris","principal":"sam","agent":"thermal"},
+      "request":{"op":"dispatch","tenant":"clay","intent":"read-4","target":"inventory","action":"data.read","project":"fixture-clai"}},
+    "AUT-08": {"snapshot":"evidence","session":{"tenant":"clay","operator":"iris"},
+      "request":{"op":"observe","tenant":"clay","intent":"lot-8","sample":{"project":"fixture-clay","location":"EU","id":"j8","status":"DONE","jobType":"QUERY","actionTag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","maxBytes":512}}},
+    "AUT-09": {"snapshot":"dispatch","session":{"tenant":"clay","operator":"iris","principal":"sam","agent":"thermal"},
+      "request":{"op":"dispatch","tenant":"clay","intent":"read-4","target":"payroll","action":"data.read"}},
+    "AUT-10": {"snapshot":"dispatch","session":{"tenant":"clay","operator":"iris","principal":"sam","agent":"vibration"},
+      "request":{"op":"dispatch","tenant":"clay","intent":"read-4","target":"inventory","action":"data.read","claimedAgent":"thermal"}},
+    "AUT-11": {"snapshot":"evidence","session":{"tenant":"clay","operator":"iris"},
+      "request":{"op":"reconcile","tenant":"clay","intent":"lot-10","invoice":{"tenant":"clay","reference":"charge:clay-10","amount":4,"unit":"micro-USD","status":"final","job":{"project":"fixture-clay","location":"US","id":"j10"}}},
+      "change":{"when":"during-invoice-lookup","tenant":"clay","user":"iris","active":false}},
+    "AUT-12": {"snapshot":"dispatch","session":{"tenant":"clay","operator":"iris","principal":"sam","agent":"thermal"},
+      "request":{"op":"dispatch","tenant":"clay","intent":"read-4","target":"inventory","action":"data.read"},
+      "change":{"when":"before-final-claim","tenant":"clay","target":"inventory","revision":"p4"}},
+    "AUT-13": {"snapshot":"dispatch","session":{"tenant":"clay","operator":"iris","principal":"sam","agent":"thermal"},
+      "request":{"op":"dispatch","tenant":"clay","intent":"read-4","target":"inventory","action":"data.update"}},
+    "AUT-14": {"snapshot":"evidence","session":{"tenant":"clay","operator":"jo"},
+      "request":{"op":"inventory","tenant":"clay"}},
+    "AUT-15": {"snapshot":"dispatch","session":{"tenant":"clay","operator":"iris","principal":"sam","agent":"thermal"},
+      "request":{"op":"dispatch","tenant":"clay","intent":"read-4","target":"inventory","action":"data.read"}},
+    "AUT-16": {"snapshot":"evidence","session":{"tenant":"reef","operator":"ari"},
+      "request":{"op":"lookup-bill","tenant":"reef","reference":"charge:clay-7"}}
+  }
+}

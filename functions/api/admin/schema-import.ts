@@ -50,7 +50,7 @@ export async function onRequestPost(context: SchemaImportContext) {
   const result = await importBigQuerySchemaCatalog(
     context.env,
     input,
-    auth.session.email
+    auth.session
   );
 
   if (!result.ok) {

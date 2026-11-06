@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { adminAuthority } from "./fixtures/admin-authority";
 import { onRequest } from "../functions/_middleware";
 import {
   createSessionCookie,
@@ -9,9 +10,10 @@ import {
 const secret = "test-secret-that-is-long-enough-for-hmac";
 
 describe("admin middleware", () => {
-  it("redirects unauthenticated admin page requests to login", async () => {
+  it.each(["/admin", "/admin/", "/admin.html", "/admin.txt", "/ad%6din", "/admin%2ehtml"])(
+    "redirects unauthenticated admin asset %s to login", async pathname => {
     const response = await onRequest({
-      request: new Request("https://odap-gateway.local/admin"),
+      request: new Request(`https://odap-gateway.local${pathname}`),
       env: {
         AUTH_COOKIE_SECRET: secret
       },
@@ -50,7 +52,7 @@ describe("admin middleware", () => {
     });
   });
 
-  it("allows admin sessions through to the static page", async () => {
+  it("allows a currently stored admin through to the static page", async () => {
     const cookie = await createCookie({
       provider: "github",
       providerId: "456",
@@ -67,7 +69,7 @@ describe("admin middleware", () => {
         }
       }),
       env: {
-        AUTH_COOKIE_SECRET: secret
+        AUTH_COOKIE_SECRET: secret, DB: adminAuthority("github","456")
       },
       next: async () => new Response("ok")
     });

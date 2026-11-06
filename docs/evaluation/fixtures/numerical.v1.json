@@ -1,0 +1,67 @@
+{
+  "NUM-01": {
+    "rows": [{"toll_cents": 51}, {"toll_cents": -13}, {"toll_cents": 9}],
+    "parameters": []
+  },
+  "NUM-02": {
+    "rows": [{"signed": false}, {"signed": true}, {"signed": true}, {"signed": false}, {"signed": true}],
+    "parameters": [true]
+  },
+  "NUM-03": {
+    "rows": [{"weight_grams": 750}, {"weight_grams": null}, {"weight_grams": 430}],
+    "parameters": []
+  },
+  "NUM-04": {
+    "rows": [{"partition_id": "north", "pulses": 21}, {"partition_id": "south", "pulses": 34}],
+    "parameters": ["west"]
+  },
+  "NUM-05": {
+    "rows": [{"partition_id": "early", "shift": 1}, {"partition_id": "late", "shift": 2}],
+    "parameters": ["overnight"]
+  },
+  "NUM-06": {
+    "rows": [{"correction_cents": -300}, {"correction_cents": 80}, {"correction_cents": -25}],
+    "parameters": []
+  },
+  "NUM-07": {
+    "rows": [{"transfer_cents": -81}, {"transfer_cents": 43}, {"transfer_cents": 38}],
+    "parameters": []
+  },
+  "NUM-08": {
+    "rows": [{"reading": null}, {"reading": null}],
+    "parameters": []
+  },
+  "NUM-09": {
+    "rows": [{"bin": "007", "parts": 12}, {"bin": "7", "parts": 70}, {"bin": "007", "parts": 5}],
+    "parameters": ["007"]
+  },
+  "NUM-10": {
+    "rows": [{"route": "A", "active": false}, {"route": "B", "active": false},
+             {"route": "A", "active": true}, {"route": "A", "active": false}],
+    "parameters": ["A", false]
+  },
+  "NUM-11": {
+    "rows": [{"period": 0, "kwh": 18}, {"period": 1, "kwh": 44}, {"period": 0, "kwh": 27}],
+    "parameters": [0]
+  },
+  "NUM-12": {
+    "rows": [{"batch": "b1", "tickets": 6}, {"batch": "b2", "tickets": 6}, {"batch": "b3", "tickets": 6}],
+    "parameters": []
+  },
+  "NUM-13": {
+    "rows": [{"depot": "East", "cents": null}, {"depot": "East", "cents": null}, {"depot": "West", "cents": 99}],
+    "parameters": ["East"]
+  },
+  "NUM-14": {
+    "rows": [{"classification": "O'Brien"}, {"classification": "OBrien"}, {"classification": "O'Brien"}],
+    "parameters": ["O'Brien"]
+  },
+  "NUM-15": {
+    "rows": [{"bytes": 2147483648}, {"bytes": 37}],
+    "parameters": []
+  },
+  "NUM-16": {
+    "rows": [{"pass": null}, {"pass": false}, {"pass": true}, {"pass": false}, {"pass": null}],
+    "parameters": [false]
+  }
+}

@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -18,17 +19,21 @@ let dir: string, reader: ControlAccess, exported: { json: string; digest: string
 let pending: Awaited<ReturnType<typeof exportSettledEvidence>>;
 const sqlite = (mode: string, sql = "", params: D1Value[] = []) => jobSqlite(join(dir, "test.db"), mode, sql, params);
 
+function database(file: string, readOnly: boolean) {
+  return { prepare: (sql: string) => ({ bind: (...params: D1Value[]) => ({
+    first: () => jobSqlite(file, readOnly ? "readonly-first" : "first", sql, params),
+    run: () => jobSqlite(file, readOnly ? "readonly-first" : "run", sql, params)
+  }) }) } as D1Database;
+}
+
 describe("settled BigQuery evidence", () => {
   beforeAll(async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network disabled"));
     dir = await mkdtemp(join(tmpdir(), "odap-evidence-"));
     await sqlite("setup");
-    const db = (readOnly: boolean) => ({ prepare: (sql: string) => ({ bind: (...params: D1Value[]) => ({
-      first: () => sqlite(readOnly ? "readonly-first" : "first", sql, params),
-      run: () => sqlite(readOnly ? "readonly-first" : "run", sql, params)
-    }) }) }) as D1Database;
-    const writer = { db: db(false), tenantId: scope.tenantId, principalId: "owner" };
-    reader = { ...writer, db: db(true) };
+    const live = join(dir, "test.db");
+    const writer = { db: database(live, false), tenantId: scope.tenantId, principalId: "owner" };
+    reader = { ...writer, db: database(live, true) };
     await prepareIntentJob(writer, "i", { BIGQUERY_PROJECT_ID: "demo-project", BIGQUERY_LOCATION: "US" });
     await sqlite("run", "INSERT INTO dispatch_targets VALUES('t','orders','r','p1','s1','demo-project','US')");
     await sqlite("run", "INSERT INTO dispatch_read_grants VALUES('t','orders','user','agent','p1')");
@@ -42,13 +47,37 @@ describe("settled BigQuery evidence", () => {
     await sqlite("run", `INSERT INTO bigquery_terminal_observations
       (tenant_id,intent_id,outcome,has_bytes,observed_by) VALUES('t','i','cancelled',0,'owner')`);
     pending = await exportSettledEvidence(reader, "i");
+    await sqlite("run", "VACUUM INTO ?", [join(dir, "pending.snapshot")]);
     await reconcileBigQueryBill(writer, "i", async key => ({ ...key, reference: "fixture:charge01",
       unit: "micro-USD", status: "final", amount: 0 }));
     const result = await exportSettledEvidence(reader, "i");
     if (!result) throw new Error("Missing fixture export");
     exported = result;
+    await sqlite("run", "VACUUM INTO ?", [join(dir, "settled.snapshot")]);
   }, 30_000);
   afterAll(async () => { vi.restoreAllMocks(); await rm(dir, { recursive: true, force: true }); });
+
+  it.each(["pending", "settled"] as const)("restores the %s snapshot without inventing or losing final evidence", async phase => {
+    const restored = join(dir, phase + "-restored.db");
+    await copyFile(join(dir, phase + ".snapshot"), restored, constants.COPYFILE_EXCL);
+    const query = (sql: string) => jobSqlite(restored, "readonly-first", sql);
+    expect(await query("PRAGMA integrity_check")).toEqual({ integrity_check: "ok" });
+    expect(await query("PRAGMA foreign_key_check")).toBeNull();
+    const result = await exportSettledEvidence({ ...reader, db: database(restored, true) }, scope.intentId);
+    if (phase === "pending") {
+      expect(result).toBeNull();
+      expect(await query(`SELECT (SELECT count(*) FROM evidence_receipts) AS receipts,
+        (SELECT json_extract(payload,'$.outcome') FROM evidence_receipts) AS outcome,
+        (SELECT count(*) FROM cost_settlements) AS settlements, reserved_units FROM control_budgets`))
+        .toEqual({ receipts: 1, outcome: "pending", settlements: 0, reserved_units: 20 });
+    } else {
+      if (!result) throw new Error("Restored settled evidence missing");
+      expect(result.json).toBe(exported.json);
+      expect(await verifySettledEvidence(result.json, scope, exported.digest)).toMatchObject({
+        digest: exported.digest, consistent: true, issuerAuthenticated: false, outcome: "cancelled", actualMicroUsd: 0
+      });
+    }
+  });
 
   it("reproduces the portable synthetic file from the settled SQLite fixture", async () => {
     const data = JSON.parse(exported.json);
@@ -74,11 +103,22 @@ describe("settled BigQuery evidence", () => {
 
   it("withholds incomplete, missing, cross-tenant and unauthorized records", async () => {
     expect(pending).toBeNull();
+    expect(await exportSettledEvidence(reader, "i", "requires-delegation")).toBeNull();
     expect(await exportSettledEvidence(reader, "missing")).toBeNull();
     expect(await exportSettledEvidence({ ...reader, tenantId: "other" }, "i")).toBeNull();
     expect(await exportSettledEvidence({ ...reader, principalId: "user" }, "i")).toBeNull();
     await sqlite("run", "INSERT INTO control_memberships VALUES('t','inactive','owner',0)");
     expect(await exportSettledEvidence({ ...reader, principalId: "inactive" }, "i")).toBeNull();
+  });
+
+  it("does not apply an active owner grant from a different tenant to a settled export", async () => {
+    await sqlite("run", "INSERT INTO control_tenants VALUES('peer','Peer tenant')");
+    await sqlite("run", "INSERT INTO control_memberships VALUES('peer','user','owner',1)");
+    // Same principal is a reader here and an owner elsewhere. Neither scope
+    // may yield the settled receipt; the actual resource owner still gets it.
+    expect(await exportSettledEvidence({ ...reader, principalId: "user" }, "i")).toBeNull();
+    expect(await exportSettledEvidence({ ...reader, tenantId: "peer", principalId: "user" }, "i")).toBeNull();
+    expect(await exportSettledEvidence(reader, "i")).toEqual(exported);
   });
 
   it.each([

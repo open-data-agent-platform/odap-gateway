@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { observePreparedIntentJob, prepareIntentJob } from "../lib/bigquery-job-storage";
 import { dispatchPreparedMetricRead } from "../lib/dispatch-authority";
 import { stopBeforeDispatch } from "../lib/pre-dispatch-stop";
+import { retireSemanticRelease } from "../lib/semantic-candidate-storage";
 import { dispatchBigQueryMetricRead } from "../lib/bigquery-governed-transport";
 import revenue from "./fixtures/revenue-metric.json";
 import type { ControlAccess } from "../lib/control-storage";
@@ -62,6 +63,18 @@ it("upgrades actual v6 claims without fabricating their historical ceiling", asy
   expect(await sqlite("first", "SELECT count(*) AS samples FROM bigquery_terminal_observations")).toEqual({ samples: 0 });
 }, 20_000);
 
+it("upgrades an existing retirement without assigning an owner, time or new event to the old decision", async () => {
+  dbName = "retired-v16.db";
+  await sqlite("setup-v16");
+  await sqlite("run", "INSERT INTO dispatch_retired_releases VALUES('t','r','historic')");
+  await sqlite("apply-semantic-retirement");
+  expect(await retireSemanticRelease(access, "r", "retry")).toEqual({ status: "legacy_retired" });
+  expect(await sqlite("first", "SELECT reason,retired_by,retired_at FROM dispatch_retired_releases"))
+    .toEqual({ reason: "historic", retired_by: null, retired_at: null });
+  expect(await sqlite("first", "SELECT count(*) AS n FROM control_object_events WHERE object_kind='semantic_release_retirement'"))
+    .toEqual({ n: 0 });
+});
+
 it("does not fall back to a default price or a different revision or region", async () => {
   await prepareDispatchFixture();
   const adapter = { projectId: "demo-project", location: "US", loadDefinition: vi.fn(), prepareRead: vi.fn() };
@@ -107,7 +120,7 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
     const prepared = await prepareIntentJob(access, "i", target);
     t.sendOnce.mockImplementationOnce(async req => {
       expect(req.method).toBe("POST");
-      expect(req.redirect).toBe("error");
+      expect(req.redirect).toBe("manual");
       const url = new URL(req.url);
       expect(url.origin + url.pathname).toBe("https://bigquery.googleapis.com/bigquery/v2/projects/demo-project/jobs");
       expect(req.headers.get("authorization")).toBe("Bearer offline-fixture");
@@ -147,10 +160,14 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
     expect(await sqlite("first", "SELECT count(*) AS n FROM dispatch_claims")).toEqual({ n: 0 });
   });
 
-  it.each(["duplicate", "timeout", "invalid-json", "wrong-id", "wrong-label", "changed-cap"])(
+  it.each(["duplicate", "timeout", "invalid-json", "wrong-id", "wrong-label", "changed-cap",
+    "redirect-301", "redirect-302", "redirect-303", "redirect-307", "redirect-308"])(
     "requires observation and never rearms a claim after %s", async failure => {
       const t = wire();
       t.sendOnce.mockImplementationOnce(async req => {
+        if (failure.startsWith("redirect-")) return new Response("not-json", {
+          status: Number(failure.slice("redirect-".length)), headers: { Location: "https://fixture.invalid/collect" }
+        });
         if (failure === "duplicate") return new Response(null, { status: 409 });
         if (failure === "timeout") throw new Error("timeout");
         if (failure === "invalid-json") return new Response("invalid");
@@ -219,13 +236,49 @@ describe("final dispatch gate", { timeout: 20_000 }, () => {
     ["policy revision", "UPDATE dispatch_targets SET policy_revision='p2'"],
     ["source revision", "UPDATE dispatch_targets SET source_revision='s2'"],
     ["project mapping", "UPDATE dispatch_targets SET project_id='another'"],
-    ["release retirement", "INSERT INTO dispatch_retired_releases VALUES('t','r','superseded')"],
     ["budget overrun", "UPDATE control_budgets SET overrun_units=1"]
   ])("denies changes to %s between preflight and claim", async (_name, sql) => {
     beforeClaim = () => sqlite("run", sql);
     await expect(dispatch()).rejects.toThrow("Dispatch denied");
     expect(submitRead).not.toHaveBeenCalled();
     expect(await sqlite("first", "SELECT count(*) AS n FROM dispatch_claims")).toEqual({ n: 0 });
+  });
+
+  it("blocks a dispatch when the owner retires its release between preflight and the final claim", async () => {
+    beforeClaim = async () => { expect(await retireSemanticRelease(access, "r", "superseded")).toMatchObject({ status: "retired" }); };
+    await expect(dispatch()).rejects.toThrow("Dispatch denied");
+    expect(submitRead).not.toHaveBeenCalled();
+    await expect(sqlite("run", `INSERT INTO dispatch_claims(tenant_id,intent_id,claimed_by,maximum_bytes_billed)
+      VALUES('t','i','owner',1)`)).rejects.toThrow("semantic release retired");
+    expect(await sqlite("first", `SELECT (SELECT count(*) FROM dispatch_claims) AS claims,
+      reserved_units,spent_units FROM control_budgets`)).toEqual({ claims: 0, reserved_units: 20, spent_units: 0 });
+  });
+
+  it("does not cancel a previously claimed handoff, settle its budget or replace the first retirement", async () => {
+    await expect(dispatch()).resolves.toBe("submitted");
+    const first = await retireSemanticRelease(access, "r", "first reason");
+    if (first.status !== "retired") throw new Error("Retirement not recorded");
+    expect(await retireSemanticRelease(access, "r", "replacement")).toEqual({ status: "already_retired", retiredAt: first.retiredAt });
+    expect(await sqlite("first", `SELECT reason,retired_by,retired_at FROM dispatch_retired_releases`))
+      .toEqual({ reason: "first reason", retired_by: "owner", retired_at: first.retiredAt });
+    expect(await sqlite("first", `SELECT (SELECT count(*) FROM dispatch_claims) AS claims,
+      (SELECT count(*) FROM bigquery_cancellation_requests) AS cancellations,
+      (SELECT count(*) FROM control_object_events WHERE object_kind='semantic_release_retirement') AS events,
+      reserved_units,spent_units FROM control_budgets`))
+      .toEqual({ claims: 1, cancellations: 0, events: 1, reserved_units: 20, spent_units: 0 });
+    await expect(dispatch()).rejects.toThrow();
+    expect(submitRead).toHaveBeenCalledTimes(1);
+  });
+
+  it("orders retirement against the actual final dispatch claim on separate connections", async () => {
+    const ready = new Promise<void>(resolve => { beforeClaim = async () => resolve(); });
+    const [handoff, retirement] = await Promise.allSettled([dispatch(), ready.then(() => retireSemanticRelease(access, "r", "race"))]);
+    expect(retirement).toMatchObject({ status: "fulfilled", value: { status: "retired" } });
+    const claimed = handoff.status === "fulfilled";
+    if (!claimed) expect(handoff.reason.message).toContain("Dispatch denied");
+    expect(submitRead).toHaveBeenCalledTimes(Number(claimed));
+    expect(await sqlite("first", `SELECT (SELECT count(*) FROM dispatch_claims) AS claims,
+      (SELECT count(*) FROM dispatch_retired_releases) AS markers`)).toEqual({ claims: Number(claimed), markers: 1 });
   });
 
   it("does not hand off a prepared read when an owner stops it immediately before the final claim", async () => {

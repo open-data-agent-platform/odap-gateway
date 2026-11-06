@@ -11,6 +11,7 @@ import {
   type SchemaImportTableInput,
   type StoreMutationResult
 } from "./admin-store";
+import type { AuthSession } from "./auth";
 
 export type BigQuerySchemaImportInput = {
   workspace: string;
@@ -44,9 +45,10 @@ const MAX_TABLE_LIMIT = 100;
 export async function importBigQuerySchemaCatalog(
   env: AdminStorageEnv & BigQueryEnv,
   input: BigQuerySchemaImportInput,
-  actorEmail: string
+  actor: Pick<AuthSession, "provider" | "providerId" | "email">
 ): Promise<StoreMutationResult<BigQuerySchemaImportResult>> {
-  if (!getAdminDb(env)) {
+  const configured = getAdminDb(env);
+  if (!configured) {
     return {
       ok: false,
       status: 409,
@@ -60,6 +62,16 @@ export async function importBigQuerySchemaCatalog(
     return normalized;
   }
 
+  // Non-demo requests still reach the legacy provider's mode refusal first.
+  if (env.GATEWAY_MODE === "demo" && typeof configured.db.batch !== "function") {
+    return {
+      ok: false,
+      status: 503,
+      code: "schema_import_transaction_unavailable",
+      message: "Transactional storage is required for schema imports."
+    };
+  }
+
   const query = await runBigQueryQuery(
     buildInformationSchemaQuery(normalized.value),
     env
@@ -67,7 +79,7 @@ export async function importBigQuerySchemaCatalog(
   if (!query.ok) {
     return {
       ok: false,
-      status: query.code === "bigquery_not_configured" ? 409 : 500,
+      status: ["legacy_query_disabled", "bigquery_not_configured"].includes(query.code) ? 409 : 500,
       code: query.code,
       message: query.message
     };
@@ -83,7 +95,7 @@ export async function importBigQuerySchemaCatalog(
       workspace: normalized.value.workspace,
       tables
     },
-    actorEmail
+    actor
   );
 
   if (!result.ok) {

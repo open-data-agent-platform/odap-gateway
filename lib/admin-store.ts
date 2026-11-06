@@ -2,6 +2,7 @@ import type { AuthEnv, AuthProvider, AuthSession } from "./auth";
 import { getSessionRole, parseAdminEmails, type AuthRole } from "./auth";
 import {
   hasBigQueryCredentials,
+  resolveDryRunTransport,
   type BigQueryEnv
 } from "./bigquery";
 import {
@@ -9,9 +10,8 @@ import {
   type SchemaField,
   type SchemaTable
 } from "./demo-data";
-import type { D1Database } from "./d1";
+import type { D1Database, D1PreparedStatement, D1Result, D1Value } from "./d1";
 import {
-  estimateDryRun,
   phase2FeatureFlags,
   releaseTracks,
   reviewQueue,
@@ -78,7 +78,7 @@ export type AuthConfigState = {
 
 export type BigQueryConfigState = {
   configured: boolean;
-  mode: "live" | "simulated";
+  mode: "live" | "simulated" | "blocked";
   projectId: string | null;
   location: string | null;
   maxBytesBilled: number | null;
@@ -178,7 +178,7 @@ export type StoreMutationResult<T> =
   | { ok: true; value: T }
   | {
       ok: false;
-      status: 400 | 404 | 409 | 500;
+      status: 400 | 403 | 404 | 409 | 500 | 503;
       code: string;
       message: string;
     };
@@ -443,18 +443,21 @@ export async function upsertAuthenticatedUser(
       role: null
     };
   }
+  if (!configured.db.batch) {
+    throw new Error("Transactional storage is required for login persistence");
+  }
 
   await ensureAdminSchema(configured.db);
   const now = new Date().toISOString();
-  const existing = await getAdminUserByEmail(
-    configured.db,
-    session.email.toLowerCase()
-  );
   const incomingRole = getSessionRole(session);
-  const role = incomingRole === "admin" ? "admin" : existing?.role ?? "member";
+  const userId = createUserId(session.provider, session.providerId);
+  const email = session.email.toLowerCase();
+  const auditId = crypto.randomUUID();
 
-  await configured.db
-    .prepare(
+  // Email can change, but it cannot link subjects or renew a revoked role.
+  // Preserve the stored role in the write itself, including concurrent demotions.
+  const results = await configured.db.batch([
+    configured.db.prepare(
       `INSERT INTO users (
         id,
         provider,
@@ -467,43 +470,61 @@ export async function upsertAuthenticatedUser(
         created_at,
         updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(email) DO UPDATE SET
-        provider = excluded.provider,
-        provider_id = excluded.provider_id,
+      ON CONFLICT(id) DO UPDATE SET
+        email = excluded.email,
         name = excluded.name,
         avatar_url = excluded.avatar_url,
-        role = excluded.role,
         last_login_at = excluded.last_login_at,
-        updated_at = excluded.updated_at`
+        updated_at = excluded.updated_at
+      WHERE users.provider = excluded.provider
+        AND users.provider_id = excluded.provider_id
+      RETURNING role`
     )
     .bind(
-      createUserId(session.provider, session.providerId),
+      userId,
       session.provider,
       session.providerId,
-      session.email.toLowerCase(),
+      email,
       session.name,
       session.avatarUrl ?? null,
-      role,
+      incomingRole,
       now,
       now,
       now
+    ),
+    configured.db.prepare(
+      `INSERT INTO audit_events (id, actor_email, action, target, metadata_json, created_at)
+      SELECT ?, u.email, 'auth.login', u.provider,
+        json_object('role', u.role, 'providerId', u.provider_id), ?
+      FROM users AS u WHERE u.id = ? AND u.provider = ? AND u.provider_id = ?
+        AND u.email = ? AND u.name = ? AND u.avatar_url IS ?
+        AND u.last_login_at = ? AND u.updated_at = ?
+        AND u.role IN ('admin', 'member') AND changes() = 1
+      RETURNING id`
+    ).bind(auditId, now, userId, session.provider, session.providerId,
+      email, session.name, session.avatarUrl ?? null, now, now),
+    // An ignored user or audit write must abort the entire login transaction,
+    // including when an old audit already has the generated ID. Never delete it.
+    configured.db.prepare(
+      `SELECT CASE WHEN changes() <> 1 THEN abs(-9223372036854775808) ELSE 1 END AS confirmed`
     )
-    .run();
-
-  await recordAuditEvent(env, {
-    actorEmail: session.email,
-    action: "auth.login",
-    target: session.provider,
-    metadata: {
-      role,
-      providerId: session.providerId
-    }
-  });
+  ]);
+  if (results.length !== 3 || results.some(result => result.success !== true || !Array.isArray(result.results))) {
+    throw new Error("Login persistence transaction not confirmed");
+  }
+  const stored = results[0].results?.[0] as { role: AuthRole } | undefined;
+  if (!stored || (stored.role !== "admin" && stored.role !== "member")) {
+    throw new Error("Login identity could not be persisted");
+  }
+  if (results[0].results?.length !== 1 || results[1].results?.length !== 1 ||
+      results[2].results?.[0]?.confirmed !== 1) {
+    throw new Error("Login persistence audit not confirmed");
+  }
 
   return {
     persisted: true,
     storageBinding: configured.binding,
-    role
+    role: stored.role
   };
 }
 
@@ -511,7 +532,7 @@ export async function updateAdminUserRole(
   env: AdminStorageEnv,
   id: string,
   role: AuthRole,
-  actorEmail: string
+  actor: Pick<AuthSession, "provider" | "providerId" | "email">
 ): Promise<StoreMutationResult<AdminUserRecord>> {
   if (role !== "admin" && role !== "member") {
     return {
@@ -526,6 +547,14 @@ export async function updateAdminUserRole(
   if (!configured) {
     return storageNotConfigured();
   }
+  if (!configured.db.batch) {
+    return {
+      ok: false,
+      status: 503,
+      code: "admin_role_transaction_unavailable",
+      message: "Transactional storage is required for role updates."
+    };
+  }
 
   await ensureAdminSchema(configured.db);
   const existing = await getAdminUserById(configured.db, id);
@@ -538,10 +567,8 @@ export async function updateAdminUserRole(
     };
   }
 
-  if (
-    existing.email.toLowerCase() === actorEmail.toLowerCase() &&
-    role !== "admin"
-  ) {
+  const actorId = `${actor.provider}:${actor.providerId}`;
+  if (id === actorId && role !== "admin") {
     return {
       ok: false,
       status: 409,
@@ -551,33 +578,77 @@ export async function updateAdminUserRole(
   }
 
   const updatedAt = new Date().toISOString();
-  await configured.db
-    .prepare(
+  const auditId = crypto.randomUUID();
+  // The tentative audit and guarded mutation are never visible separately.
+  const results = await configured.db.batch([
+    configured.db.prepare(
+      `INSERT INTO audit_events (id, actor_email, action, target, metadata_json, created_at)
+      SELECT ?, ?, 'user.role_updated', ?, ?, ?
+      WHERE EXISTS (
+        SELECT 1 FROM users AS target, users AS actor
+        WHERE target.id = ? AND target.role = ? AND target.email = ?
+          AND actor.id = ? AND actor.provider = ? AND actor.provider_id = ?
+          AND actor.role = 'admin' AND actor.email = ?
+      ) OR EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+      RETURNING id`
+    ).bind(auditId, actor.email.toLowerCase(), existing.email,
+      JSON.stringify({previousRole:existing.role,role}), updatedAt,
+      id, existing.role, existing.email, actorId,
+      actor.provider, actor.providerId, actor.email, auditId),
+    configured.db.prepare(
       `UPDATE users
       SET role = ?, updated_at = ?
-      WHERE id = ?`
+      WHERE id = ? AND role = ? AND email = ?
+        AND changes() = 1
+        AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+        AND EXISTS (
+          SELECT 1 FROM users AS actor
+          WHERE actor.id = ? AND actor.provider = ? AND actor.provider_id = ?
+            AND actor.role = 'admin' AND actor.email = ?
+        )
+      RETURNING id, provider, provider_id, email, name, avatar_url, role,
+        last_login_at, created_at, updated_at`
     )
-    .bind(role, updatedAt, id)
-    .run();
+    .bind(
+      role,
+      updatedAt,
+      id,
+      existing.role,
+      existing.email,
+      auditId,
+      actorId,
+      actor.provider,
+      actor.providerId,
+      actor.email
+    ),
+    // Abort the batch if an audit exists without its role update. Deleting a
+    // tentative event is unsafe when a colliding INSERT was itself ignored.
+    configured.db.prepare(
+      `SELECT CASE WHEN changes() = 0 AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+        THEN abs(-9223372036854775808) ELSE 1 END AS confirmed`
+    ).bind(auditId)
+  ]);
+  if (results.length !== 3 || results.some(result => result.success !== true || !Array.isArray(result.results))) {
+    throw new Error("Role update transaction not confirmed");
+  }
+  const updated = results[1].results?.[0] as UserRow | undefined;
 
-  await recordAuditEvent(env, {
-    actorEmail,
-    action: "user.role_updated",
-    target: existing.email,
-    metadata: {
-      previousRole: existing.role,
-      role
-    }
-  });
+  if (!updated) {
+    return {
+      ok: false,
+      status: 403,
+      code: "admin_user_update_denied",
+      message: "Administrator authority or the target user changed. Refresh before retrying."
+    };
+  }
 
-  const updated = await getAdminUserById(configured.db, id);
+  if (results[0].results?.length !== 1 || results[2].results?.[0]?.confirmed !== 1) {
+    throw new Error("Role update audit not confirmed");
+  }
+
   return {
     ok: true,
-    value: updated ?? {
-      ...existing,
-      role,
-      updatedAt
-    }
+    value: mapUserRow(updated)
   };
 }
 
@@ -585,7 +656,7 @@ export async function updateFeatureRollout(
   env: AdminStorageEnv,
   id: string,
   rollout: number,
-  actorEmail: string
+  actor: Pick<AuthSession, "provider" | "providerId" | "email">
 ): Promise<StoreMutationResult<Phase2FeatureFlag>> {
   if (!Number.isInteger(rollout) || rollout < 0 || rollout > 100) {
     return {
@@ -600,6 +671,14 @@ export async function updateFeatureRollout(
   if (!configured) {
     return storageNotConfigured();
   }
+  if (!configured.db.batch) {
+    return {
+      ok: false,
+      status: 503,
+      code: "feature_rollout_transaction_unavailable",
+      message: "Transactional storage is required for feature rollout updates."
+    };
+  }
 
   await ensureAdminSchema(configured.db);
   const existing = await getFeatureFlag(configured.db, id);
@@ -612,69 +691,73 @@ export async function updateFeatureRollout(
     };
   }
 
-  const updatedFlag = {
-    ...existing,
+  const status = getFlagStatus(rollout);
+  const updatedAt = new Date().toISOString();
+  const auditId = crypto.randomUUID();
+  const metadata = {
+    environment: existing.environment,
+    owner: existing.owner,
+    previousRollout: existing.rollout,
+    previousStatus: existing.status,
     rollout,
-    status: getFlagStatus(rollout),
-    updatedAt: new Date().toISOString()
-  } satisfies Phase2FeatureFlag;
-
-  await configured.db
-    .prepare(
+    status
+  };
+  const guard = `id = ? AND name = ? AND description = ? AND status = ?
+    AND environment = ? AND rollout = ? AND owner = ? AND updated_at = ?
+    AND EXISTS (
+      SELECT 1 FROM users AS actor
+      WHERE actor.id = ? AND actor.provider = ? AND actor.provider_id = ?
+        AND actor.role = 'admin' AND actor.email = ?
+    )`;
+  const guardedValues: D1Value[] = [
+    existing.id, existing.name, existing.description, existing.status,
+    existing.environment, existing.rollout, existing.owner, existing.updatedAt,
+    `${actor.provider}:${actor.providerId}`, actor.provider, actor.providerId, actor.email
+  ];
+  // Authorization and the inspected configuration must still match inside the
+  // transaction; neither the tentative audit nor the change is visible alone.
+  const results = await configured.db.batch([
+    configured.db.prepare(
+      `INSERT INTO audit_events (id, actor_email, action, target, metadata_json, created_at)
+      SELECT ?, ?, 'feature_flag.rollout_updated', ?, ?, ?
+      WHERE EXISTS (SELECT 1 FROM feature_flags WHERE ${guard})
+        OR EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+      RETURNING id`
+    ).bind(auditId, actor.email.toLowerCase(), id, JSON.stringify(metadata), updatedAt,
+      ...guardedValues, auditId),
+    configured.db.prepare(
       `UPDATE feature_flags
       SET rollout = ?, status = ?, updated_at = ?
-      WHERE id = ?`
-    )
-    .bind(
-      updatedFlag.rollout,
-      updatedFlag.status,
-      updatedFlag.updatedAt,
-      updatedFlag.id
-    )
-    .run();
-
-  await recordAuditEvent(env, {
-    actorEmail,
-    action: "feature_flag.rollout_updated",
-    target: id,
-    metadata: {
-      rollout,
-      status: updatedFlag.status
-    }
-  });
-
-  return {
-    ok: true,
-    value: updatedFlag
-  };
-}
-
-export async function queueRollback(
-  env: AdminStorageEnv,
-  actorEmail: string
-): Promise<StoreMutationResult<{ queuedAt: string; target: string }>> {
-  const configured = getAdminDb(env);
-  if (!configured) {
-    return storageNotConfigured();
+      WHERE ${guard} AND changes() = 1 AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+      RETURNING id, name, description, status, environment, rollout, owner, updated_at`
+    ).bind(rollout, status, updatedAt, ...guardedValues, auditId),
+    // SQLite integer overflow aborts the whole batch if an event exists but
+    // the update was skipped. Never delete an event: even an ignored colliding
+    // INSERT must not allow cleanup to remove historical audit evidence.
+    configured.db.prepare(
+      `SELECT CASE WHEN changes() = 0 AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+        THEN abs(-9223372036854775808) ELSE 1 END AS confirmed`
+    ).bind(auditId)
+  ]);
+  if (results.length !== 3 || results.some(result => result.success !== true || !Array.isArray(result.results))) {
+    throw new Error("Feature rollout transaction not confirmed");
+  }
+  const updated = results[1].results?.[0] as FeatureFlagRow | undefined;
+  if (!updated) {
+    return {
+      ok: false,
+      status: 403,
+      code: "feature_rollout_update_denied",
+      message: "Administrator authority or the inspected feature flag changed. Refresh before retrying."
+    };
+  }
+  if (results[0].results?.length !== 1 || results[2].results?.[0]?.confirmed !== 1) {
+    throw new Error("Feature rollout audit not confirmed");
   }
 
-  const queuedAt = new Date().toISOString();
-  await recordAuditEvent(env, {
-    actorEmail,
-    action: "rollback.queued",
-    target: "prod-20260620",
-    metadata: {
-      rollbackTarget: "prod-20260620",
-      queuedAt
-    }
-  });
-
   return {
     ok: true,
-    value: {
-      queuedAt,
-      target: "prod-20260620"
-    }
+    value: mapFeatureFlagRow(updated)
   };
 }
 
@@ -682,7 +765,7 @@ export async function updateRunReviewStatus(
   env: AdminStorageEnv,
   id: string,
   status: QueryRunStatus,
-  actorEmail: string
+  actor: Pick<AuthSession, "provider" | "providerId" | "email">
 ): Promise<StoreMutationResult<ReviewQueueItem>> {
   if (status !== "approved" && status !== "blocked") {
     return {
@@ -697,6 +780,14 @@ export async function updateRunReviewStatus(
   if (!configured) {
     return storageNotConfigured();
   }
+  if (!configured.db.batch) {
+    return {
+      ok: false,
+      status: 503,
+      code: "run_review_transaction_unavailable",
+      message: "Transactional storage is required for run review updates."
+    };
+  }
 
   await ensureAdminSchema(configured.db);
   const existing = await getRunReview(configured.db, id);
@@ -709,45 +800,87 @@ export async function updateRunReviewStatus(
     };
   }
 
-  const updated = {
-    ...existing,
-    status,
-    submittedAt: new Date().toISOString()
-  } satisfies ReviewQueueItem;
+  const run = await configured.db.prepare(
+    `SELECT id, workspace, actor_email, sql, status, mode, estimated_cost_usd, scanned_bytes,
+      expected_runtime_ms, referenced_tables_json, checks_json, error_json, created_at, updated_at
+    FROM query_runs WHERE id = ?`
+  ).bind(id).first<QueryRunRow>();
+  if (!run || run.workspace !== existing.workspace || run.status !== existing.status ||
+      run.estimated_cost_usd !== existing.estimated_cost_usd || run.scanned_bytes !== existing.scanned_bytes) {
+    return {
+      ok: false,
+      status: 409,
+      code: "run_review_inconsistent",
+      message: "The review and query records do not match. Reconcile them before reviewing."
+    };
+  }
 
-  await configured.db
-    .prepare(
-      `UPDATE run_reviews
-      SET status = ?, submitted_at = ?
-      WHERE id = ?`
-    )
-    .bind(updated.status, updated.submittedAt, updated.id)
-    .run();
-
-  await configured.db
-    .prepare(
-      `UPDATE query_runs
-      SET status = ?, updated_at = ?
-      WHERE id = ?`
-    )
-    .bind(updated.status, updated.submittedAt, updated.id)
-    .run();
-
-  await recordAuditEvent(env, {
-    actorEmail,
-    action:
-      status === "approved" ? "query.approved" : "query.blocked",
-    target: id,
-    metadata: {
-      workspace: updated.workspace,
-      queryType: updated.queryType,
-      status
-    }
-  });
+  const updatedAt = new Date().toISOString();
+  const auditId = crypto.randomUUID();
+  const action = status === "approved" ? "query.approved" : "query.blocked";
+  const metadata = {workspace:existing.workspace,queryType:existing.query_type,
+    previousStatus:existing.status,status,mode:run.mode,
+    estimatedCostUsd:run.estimated_cost_usd,scannedBytes:run.scanned_bytes};
+  const reviewGuard = `EXISTS (SELECT 1 FROM run_reviews WHERE id = ? AND workspace = ?
+    AND query_type = ? AND status = ? AND estimated_cost_usd = ? AND scanned_bytes = ? AND submitted_at = ?)`;
+  const queryGuard = `EXISTS (SELECT 1 FROM query_runs WHERE id = ? AND workspace = ?
+    AND actor_email IS ? AND sql = ? AND status = ? AND mode = ? AND estimated_cost_usd = ?
+    AND scanned_bytes = ? AND expected_runtime_ms = ? AND referenced_tables_json = ?
+    AND checks_json = ? AND error_json IS ? AND created_at = ? AND updated_at = ?)`;
+  const authorityGuard = `EXISTS (SELECT 1 FROM users AS actor WHERE actor.id = ?
+    AND actor.provider = ? AND actor.provider_id = ? AND actor.role = 'admin' AND actor.email = ?)`;
+  const guard = `${reviewGuard} AND ${queryGuard} AND ${authorityGuard}`;
+  const reviewValues: D1Value[] = [existing.id,existing.workspace,existing.query_type,existing.status,
+    existing.estimated_cost_usd,existing.scanned_bytes,existing.submitted_at];
+  const queryValues = (queryStatus: QueryRunStatus, timestamp: string): D1Value[] => [
+    run.id,run.workspace,run.actor_email,run.sql,queryStatus,run.mode,run.estimated_cost_usd,
+    run.scanned_bytes,run.expected_runtime_ms,run.referenced_tables_json,run.checks_json,
+    run.error_json,run.created_at,timestamp
+  ];
+  const authorityValues = [`${actor.provider}:${actor.providerId}`,actor.provider,actor.providerId,actor.email];
+  const guardedValues = [...reviewValues,...queryValues(run.status,run.updated_at),...authorityValues];
+  const assertion = `SELECT CASE WHEN changes() = 0 AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+    THEN abs(-9223372036854775808) ELSE 1 END AS confirmed`;
+  // Each status update must follow a real write. Assert after each one so an
+  // ignored statement cannot leave a partial review or delete historical audit.
+  const results = await configured.db.batch([
+    configured.db.prepare(
+      `INSERT INTO audit_events (id, actor_email, action, target, metadata_json, created_at)
+      SELECT ?, ?, ?, ?, ?, ? WHERE (${guard}) OR EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+      RETURNING id`
+    ).bind(auditId,actor.email.toLowerCase(),action,id,JSON.stringify(metadata),updatedAt,...guardedValues,auditId),
+    configured.db.prepare(
+      `UPDATE query_runs SET status = ?, updated_at = ? WHERE id = ? AND ${guard}
+        AND changes() = 1 AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?) RETURNING id`
+    ).bind(status,updatedAt,id,...guardedValues,auditId),
+    configured.db.prepare(assertion).bind(auditId),
+    configured.db.prepare(
+      `UPDATE run_reviews SET status = ?, submitted_at = ? WHERE id = ? AND ${guard}
+        AND changes() = 1 AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+      RETURNING id, workspace, query_type, status, estimated_cost_usd, scanned_bytes, submitted_at`
+    ).bind(status,updatedAt,id,...reviewValues,...queryValues(status,updatedAt),...authorityValues,auditId),
+    configured.db.prepare(assertion).bind(auditId)
+  ]);
+  if (results.length !== 5 || results.some(result => result.success !== true || !Array.isArray(result.results))) {
+    throw new Error("Run review transaction not confirmed");
+  }
+  const updated = results[3].results?.[0] as ReviewQueueRow | undefined;
+  if (!updated) {
+    return {
+      ok: false,
+      status: 403,
+      code: "run_review_update_denied",
+      message: "Administrator authority or the inspected run changed. Refresh before retrying."
+    };
+  }
+  if (results[0].results?.length !== 1 || results[1].results?.length !== 1 ||
+      results[2].results?.[0]?.confirmed !== 1 || results[4].results?.[0]?.confirmed !== 1) {
+    throw new Error("Run review audit not confirmed");
+  }
 
   return {
     ok: true,
-    value: updated
+    value: mapReviewQueueRow(updated)
   };
 }
 
@@ -758,7 +891,7 @@ export async function updateSchemaFieldPolicy(
     queryable?: boolean;
     pii?: boolean;
   },
-  actorEmail: string
+  actor: Pick<AuthSession, "provider" | "providerId" | "email">
 ): Promise<StoreMutationResult<SchemaCatalogField>> {
   const patch = {
     queryable:
@@ -779,10 +912,18 @@ export async function updateSchemaFieldPolicy(
   if (!configured) {
     return storageNotConfigured();
   }
+  if (!configured.db.batch) {
+    return {
+      ok: false,
+      status: 503,
+      code: "schema_policy_transaction_unavailable",
+      message: "Transactional storage is required for schema policy updates."
+    };
+  }
 
   await ensureAdminSchema(configured.db);
-  const existing = await getSchemaField(configured.db, id);
-  if (!existing) {
+  const snapshot = await getSchemaFieldRow(configured.db, id);
+  if (!snapshot) {
     return {
       ok: false,
       status: 404,
@@ -791,41 +932,76 @@ export async function updateSchemaFieldPolicy(
     };
   }
 
-  const updated = {
-    ...existing,
-    queryable: patch.queryable ?? existing.queryable,
-    pii: patch.pii ?? existing.pii,
-    updatedAt: new Date().toISOString()
-  } satisfies SchemaCatalogField;
-
-  await configured.db
-    .prepare(
+  const existing = mapSchemaFieldRow(snapshot);
+  const queryable = patch.queryable ?? existing.queryable;
+  const pii = patch.pii ?? existing.pii;
+  const updatedAt = new Date().toISOString();
+  const auditId = crypto.randomUUID();
+  const metadata = {
+    tableId: snapshot.table_id,
+    field: existing.name,
+    previousQueryable: existing.queryable,
+    previousPii: existing.pii,
+    queryable,
+    pii
+  };
+  // Bind the complete inspected field, not just its mutable policy flags.
+  const guard = `id = ? AND table_id = ? AND field_name = ? AND field_type = ?
+    AND mode = ? AND description = ? AND pii = ? AND queryable = ?
+    AND used_in_examples = ? AND updated_at = ?
+    AND EXISTS (
+      SELECT 1 FROM users AS actor
+      WHERE actor.id = ? AND actor.provider = ? AND actor.provider_id = ?
+        AND actor.role = 'admin' AND actor.email = ?
+    )`;
+  const guardedValues: D1Value[] = [
+    snapshot.id, snapshot.table_id, snapshot.field_name, snapshot.field_type,
+    snapshot.mode, snapshot.description, snapshot.pii, snapshot.queryable,
+    snapshot.used_in_examples, snapshot.updated_at,
+    `${actor.provider}:${actor.providerId}`, actor.provider, actor.providerId, actor.email
+  ];
+  const results = await configured.db.batch([
+    configured.db.prepare(
+      `INSERT INTO audit_events (id, actor_email, action, target, metadata_json, created_at)
+      SELECT ?, ?, 'schema_field.policy_updated', ?, ?, ?
+      WHERE EXISTS (SELECT 1 FROM schema_fields WHERE ${guard})
+        OR EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+      RETURNING id`
+    ).bind(auditId, actor.email.toLowerCase(), id, JSON.stringify(metadata), updatedAt,
+      ...guardedValues, auditId),
+    configured.db.prepare(
       `UPDATE schema_fields
       SET queryable = ?, pii = ?, updated_at = ?
-      WHERE id = ?`
-    )
-    .bind(
-      updated.queryable ? 1 : 0,
-      updated.pii ? 1 : 0,
-      updated.updatedAt,
-      updated.id
-    )
-    .run();
-
-  await recordAuditEvent(env, {
-    actorEmail,
-    action: "schema_field.policy_updated",
-    target: id,
-    metadata: {
-      field: existing.name,
-      queryable: updated.queryable,
-      pii: updated.pii
-    }
-  });
+      WHERE ${guard} AND changes() = 1 AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+      RETURNING id, table_id, field_name, field_type, mode, description,
+        pii, queryable, used_in_examples, updated_at`
+    ).bind(queryable ? 1 : 0, pii ? 1 : 0, updatedAt, ...guardedValues, auditId),
+    // The overflow assertion rolls back an unmatched event without deleting
+    // any audit row, including a historical ID whose INSERT was ignored.
+    configured.db.prepare(
+      `SELECT CASE WHEN changes() = 0 AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)
+        THEN abs(-9223372036854775808) ELSE 1 END AS confirmed`
+    ).bind(auditId)
+  ]);
+  if (results.length !== 3 || results.some(result => result.success !== true || !Array.isArray(result.results))) {
+    throw new Error("Schema policy transaction not confirmed");
+  }
+  const updated = results[1].results?.[0] as SchemaFieldRow | undefined;
+  if (!updated) {
+    return {
+      ok: false,
+      status: 403,
+      code: "schema_field_update_denied",
+      message: "Administrator authority or the inspected field changed. Refresh before retrying."
+    };
+  }
+  if (results[0].results?.length !== 1 || results[2].results?.[0]?.confirmed !== 1) {
+    throw new Error("Schema policy audit not confirmed");
+  }
 
   return {
     ok: true,
-    value: updated
+    value: mapSchemaFieldRow(updated)
   };
 }
 
@@ -835,11 +1011,19 @@ export async function importSchemaCatalog(
     workspace: string;
     tables: SchemaImportTableInput[];
   },
-  actorEmail: string
+  actor: Pick<AuthSession, "provider" | "providerId" | "email">
 ): Promise<StoreMutationResult<SchemaImportResult>> {
   const configured = getAdminDb(env);
   if (!configured) {
     return storageNotConfigured();
+  }
+  if (typeof configured.db.batch !== "function") {
+    return {
+      ok: false,
+      status: 503,
+      code: "schema_import_transaction_unavailable",
+      message: "Transactional storage is required for schema imports."
+    };
   }
 
   const workspace = normalizeWorkspace(input.workspace);
@@ -855,7 +1039,27 @@ export async function importSchemaCatalog(
 
   await ensureAdminSchema(configured.db);
   const importedAt = new Date().toISOString();
-  let importedFields = 0;
+  const importedFields = tables.reduce((count, table) => count + table.fields.length, 0);
+  const auditId = crypto.randomUUID();
+  const authorityGuard = `EXISTS (SELECT 1 FROM users AS actor WHERE actor.id = ?
+    AND actor.provider = ? AND actor.provider_id = ? AND actor.role = 'admin' AND actor.email = ?)`;
+  const authorityValues = [`${actor.provider}:${actor.providerId}`, actor.provider, actor.providerId, actor.email];
+  const writeGuard = `${authorityGuard} AND changes() = 1 AND EXISTS (SELECT 1 FROM audit_events WHERE id = ?)`;
+  const assertWrite = () => configured.db.prepare(
+    `SELECT CASE WHEN changes() <> 1 AND
+      (EXISTS (SELECT 1 FROM audit_events WHERE id = ?) OR ${authorityGuard})
+      THEN abs(-9223372036854775808) ELSE 1 END AS confirmed`
+  ).bind(auditId, ...authorityValues);
+  // Only a current canonical administrator may insert the admission audit.
+  // Force historical ID collisions to fail even if authority has been revoked.
+  const statements: D1PreparedStatement[] = [configured.db.prepare(
+    `INSERT INTO audit_events (id, actor_email, action, target, metadata_json, created_at)
+    SELECT ?, ?, 'schema_catalog.imported', ?, ?, ?
+    WHERE ${authorityGuard} OR EXISTS (SELECT 1 FROM audit_events WHERE id = ?) RETURNING id`
+  ).bind(auditId, actor.email.toLowerCase(), workspace,
+    JSON.stringify({importedTables: tables.length, importedFields}), importedAt,
+    ...authorityValues, auditId), assertWrite()];
+  const expectedWrites: Array<Record<string, D1Value>> = [{id: auditId}];
 
   for (const table of tables) {
     const tableName = table.name.trim();
@@ -863,7 +1067,7 @@ export async function importSchemaCatalog(
       (await getSchemaTableId(configured.db, workspace, tableName)) ??
       createImportedSchemaTableId(workspace, tableName);
 
-    await configured.db
+    statements.push(configured.db
       .prepare(
         `INSERT INTO schema_tables (
           id,
@@ -872,11 +1076,13 @@ export async function importSchemaCatalog(
           description,
           row_count,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?)
+        ) SELECT ?, ?, ?, ?, ?, ? WHERE ${writeGuard}
         ON CONFLICT(workspace, table_name) DO UPDATE SET
           description = excluded.description,
           row_count = excluded.row_count,
-          updated_at = excluded.updated_at`
+          updated_at = excluded.updated_at
+        WHERE schema_tables.id = excluded.id
+        RETURNING id`
       )
       .bind(
         tableId,
@@ -884,16 +1090,17 @@ export async function importSchemaCatalog(
         tableName,
         table.description,
         table.rowCount,
-        importedAt
-      )
-      .run();
+        importedAt,
+        ...authorityValues, auditId
+      ), assertWrite());
+    expectedWrites.push({id: tableId});
 
     for (const field of table.fields) {
       const fieldId = `${tableId}-${slugify(field.name)}`;
       const pii = field.pii ?? isSensitiveField(field.name);
       const queryable = field.queryable ?? !pii;
 
-      await configured.db
+      statements.push(configured.db
         .prepare(
           `INSERT INTO schema_fields (
             id,
@@ -906,13 +1113,14 @@ export async function importSchemaCatalog(
             queryable,
             used_in_examples,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${writeGuard}
           ON CONFLICT(table_id, field_name) DO UPDATE SET
             field_type = excluded.field_type,
             mode = excluded.mode,
             description = excluded.description,
             used_in_examples = excluded.used_in_examples,
-            updated_at = excluded.updated_at`
+            updated_at = excluded.updated_at
+          RETURNING id, table_id, field_name`
         )
         .bind(
           fieldId,
@@ -927,22 +1135,44 @@ export async function importSchemaCatalog(
           pii ? 1 : 0,
           queryable ? 1 : 0,
           field.usedInExamples ?? isExampleField(field.name) ? 1 : 0,
-          importedAt
-        )
-        .run();
-      importedFields += 1;
+          importedAt,
+          ...authorityValues, auditId
+        ), assertWrite());
+      expectedWrites.push({table_id: tableId, field_name: field.name});
     }
   }
 
-  await recordAuditEvent(env, {
-    actorEmail,
-    action: "schema_catalog.imported",
-    target: workspace,
-    metadata: {
-      importedTables: tables.length,
-      importedFields
+  // Assert every write inside the transaction: a later successful insert must
+  // not conceal an ignored upsert or a table-ID change since the pre-read.
+  const results = await configured.db.batch(statements);
+  if (!Array.isArray(results) || results.length !== statements.length ||
+      results.some((result, index) => result?.success !== true || !Array.isArray(result.results) ||
+        result.results.length > 1 || (index % 2 === 1 && result.results.length !== 1))) {
+    throw new Error("Schema import transaction not confirmed");
+  }
+  if (results[0].results?.length === 0) {
+    if (results.some((result, index) => index % 2 === 0
+      ? result.results?.length !== 0 : result.results?.[0]?.confirmed !== 1)) {
+      throw new Error("Schema import transaction not confirmed");
     }
-  });
+    return {
+      ok: false,
+      status: 403,
+      code: "schema_import_denied",
+      message: "Administrator authority changed. Refresh before retrying the import."
+    };
+  }
+  if (results.some(result => result.results?.length !== 1)) {
+    throw new Error("Schema import transaction not confirmed");
+  }
+  for (const [index, expected] of expectedWrites.entries()) {
+    const row = results[index * 2].results![0];
+    if (typeof row?.id !== "string" || !row.id ||
+        !Object.entries(expected).every(([key, value]) => row[key] === value) ||
+        results[index * 2 + 1].results?.[0]?.confirmed !== 1) {
+      throw new Error("Schema import write not confirmed");
+    }
+  }
 
   return {
     ok: true,
@@ -974,15 +1204,19 @@ export async function recordQueryDryRun(
       storageBinding: null
     };
   }
+  if (typeof configured.db.batch !== "function") {
+    throw new Error("Transactional storage is required for dry-run history");
+  }
 
   await ensureAdminSchema(configured.db);
   const now = new Date().toISOString();
   const actorEmail = input.actorEmail?.toLowerCase() ?? null;
   const workspace = normalizeWorkspace(input.workspace);
   const queryType = input.queryType.trim() || "SQL dry run";
+  const auditId = crypto.randomUUID();
 
-  await configured.db
-    .prepare(
+  const results = await configured.db.batch([
+    configured.db.prepare(
       `INSERT INTO query_runs (
         id,
         workspace,
@@ -998,7 +1232,7 @@ export async function recordQueryDryRun(
         error_json,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
     )
     .bind(
       id,
@@ -1015,12 +1249,9 @@ export async function recordQueryDryRun(
       input.preview.error ? JSON.stringify(input.preview.error) : null,
       now,
       now
-    )
-    .run();
-
-  await configured.db
-    .prepare(
-      `INSERT OR REPLACE INTO run_reviews (
+    ),
+    configured.db.prepare(
+      `INSERT INTO run_reviews (
         id,
         workspace,
         query_type,
@@ -1028,7 +1259,7 @@ export async function recordQueryDryRun(
         estimated_cost_usd,
         scanned_bytes,
         submitted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ) SELECT ?, ?, ?, ?, ?, ?, ? WHERE changes() = 1 RETURNING id`
     )
     .bind(
       id,
@@ -1038,22 +1269,30 @@ export async function recordQueryDryRun(
       input.preview.estimatedCostUsd,
       input.preview.scannedBytes,
       now
+    ),
+    configured.db.prepare(
+      `INSERT INTO audit_events (id, actor_email, action, target, metadata_json, created_at)
+      SELECT ?, ?, 'query.dry_run', ?, ?, ? WHERE changes() = 1 RETURNING id`
+    ).bind(auditId, actorEmail ?? "anonymous@odap.local", id, JSON.stringify({
+        workspace,
+        queryType,
+        status: input.preview.status,
+        mode: input.preview.mode ?? "simulated",
+        scannedBytes: input.preview.scannedBytes,
+        estimatedCostUsd: input.preview.estimatedCostUsd
+      }), now),
+    // Each insert depends on the preceding write. A skipped insert must roll
+    // back all history, even if a colliding historical ID already exists.
+    configured.db.prepare(
+      `SELECT CASE WHEN changes() <> 1 THEN abs(-9223372036854775808) ELSE 1 END AS confirmed`
     )
-    .run();
-
-  await recordAuditEvent(env, {
-    actorEmail: actorEmail ?? "anonymous@odap.local",
-    action: "query.dry_run",
-    target: id,
-    metadata: {
-      workspace,
-      queryType,
-      status: input.preview.status,
-      mode: input.preview.mode ?? "simulated",
-      scannedBytes: input.preview.scannedBytes,
-      estimatedCostUsd: input.preview.estimatedCostUsd
-    }
-  });
+  ]);
+  if (!Array.isArray(results) || results.length !== 4 ||
+      results.some(result => result?.success !== true || !Array.isArray(result.results) || result.results.length !== 1) ||
+      results[0].results?.[0]?.id !== id || results[1].results?.[0]?.id !== id ||
+      results[2].results?.[0]?.id !== auditId || results[3].results?.[0]?.confirmed !== 1) {
+    throw new Error("Dry-run history transaction not confirmed");
+  }
 
   return {
     id,
@@ -1086,7 +1325,7 @@ export async function recordAuditEvent(
     createdAt: new Date().toISOString()
   } satisfies AuditEvent;
 
-  await configured.db
+  const persisted = await configured.db
     .prepare(
       `INSERT INTO audit_events (
         id,
@@ -1106,136 +1345,104 @@ export async function recordAuditEvent(
       auditEvent.createdAt
     )
     .run();
+  if (persisted.success !== true) {
+    throw new Error("Audit event persistence not confirmed");
+  }
 
   return auditEvent;
 }
 
 export async function ensureAdminSchema(db: D1Database) {
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        provider TEXT NOT NULL,
-        provider_id TEXT NOT NULL,
-        email TEXT NOT NULL UNIQUE,
-        name TEXT NOT NULL,
-        avatar_url TEXT,
-        role TEXT NOT NULL DEFAULT 'member',
-        last_login_at TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )`
-    )
-    .run();
-
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS feature_flags (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        description TEXT NOT NULL,
-        status TEXT NOT NULL,
-        environment TEXT NOT NULL,
-        rollout INTEGER NOT NULL,
-        owner TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )`
-    )
-    .run();
-
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS workspaces (
-        workspace TEXT PRIMARY KEY,
-        owner TEXT NOT NULL,
-        plan TEXT NOT NULL,
-        run_access TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )`
-    )
-    .run();
-
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS run_reviews (
-        id TEXT PRIMARY KEY,
-        workspace TEXT NOT NULL,
-        query_type TEXT NOT NULL,
-        status TEXT NOT NULL,
-        estimated_cost_usd REAL NOT NULL,
-        scanned_bytes INTEGER NOT NULL,
-        submitted_at TEXT NOT NULL
-      )`
-    )
-    .run();
-
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS query_runs (
-        id TEXT PRIMARY KEY,
-        workspace TEXT NOT NULL,
-        actor_email TEXT,
-        sql TEXT NOT NULL,
-        status TEXT NOT NULL,
-        mode TEXT NOT NULL,
-        estimated_cost_usd REAL NOT NULL,
-        scanned_bytes INTEGER NOT NULL,
-        expected_runtime_ms INTEGER NOT NULL,
-        referenced_tables_json TEXT NOT NULL,
-        checks_json TEXT NOT NULL,
-        error_json TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )`
-    )
-    .run();
-
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS audit_events (
-        id TEXT PRIMARY KEY,
-        actor_email TEXT NOT NULL,
-        action TEXT NOT NULL,
-        target TEXT NOT NULL,
-        metadata_json TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )`
-    )
-    .run();
-
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS schema_tables (
-        id TEXT PRIMARY KEY,
-        workspace TEXT NOT NULL,
-        table_name TEXT NOT NULL,
-        description TEXT NOT NULL,
-        row_count INTEGER NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(workspace, table_name)
-      )`
-    )
-    .run();
-
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS schema_fields (
-        id TEXT PRIMARY KEY,
-        table_id TEXT NOT NULL,
-        field_name TEXT NOT NULL,
-        field_type TEXT NOT NULL,
-        mode TEXT NOT NULL,
-        description TEXT NOT NULL,
-        pii INTEGER NOT NULL,
-        queryable INTEGER NOT NULL,
-        used_in_examples INTEGER NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(table_id, field_name)
-      )`
-    )
-    .run();
-
-  await seedAdminDefaults(db);
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      avatar_url TEXT,
+      role TEXT NOT NULL DEFAULT 'member',
+      last_login_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS feature_flags (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      status TEXT NOT NULL,
+      environment TEXT NOT NULL,
+      rollout INTEGER NOT NULL,
+      owner TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS workspaces (
+      workspace TEXT PRIMARY KEY,
+      owner TEXT NOT NULL,
+      plan TEXT NOT NULL,
+      run_access TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS run_reviews (
+      id TEXT PRIMARY KEY,
+      workspace TEXT NOT NULL,
+      query_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      estimated_cost_usd REAL NOT NULL,
+      scanned_bytes INTEGER NOT NULL,
+      submitted_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS query_runs (
+      id TEXT PRIMARY KEY,
+      workspace TEXT NOT NULL,
+      actor_email TEXT,
+      sql TEXT NOT NULL,
+      status TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      estimated_cost_usd REAL NOT NULL,
+      scanned_bytes INTEGER NOT NULL,
+      expected_runtime_ms INTEGER NOT NULL,
+      referenced_tables_json TEXT NOT NULL,
+      checks_json TEXT NOT NULL,
+      error_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS audit_events (
+      id TEXT PRIMARY KEY,
+      actor_email TEXT NOT NULL,
+      action TEXT NOT NULL,
+      target TEXT NOT NULL,
+      metadata_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS schema_tables (
+      id TEXT PRIMARY KEY,
+      workspace TEXT NOT NULL,
+      table_name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      row_count INTEGER NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(workspace, table_name)
+    )`,
+    `CREATE TABLE IF NOT EXISTS schema_fields (
+      id TEXT PRIMARY KEY,
+      table_id TEXT NOT NULL,
+      field_name TEXT NOT NULL,
+      field_type TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      description TEXT NOT NULL,
+      pii INTEGER NOT NULL,
+      queryable INTEGER NOT NULL,
+      used_in_examples INTEGER NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(table_id, field_name)
+    )`
+  ];
+  for (const query of statements) {
+    const result = await db.prepare(query).run();
+    if (result.success !== true) throw new Error("Admin table creation not confirmed");
+  }
 }
 
 function createFallbackAdminState(env: AdminRuntimeEnv): AdminState {
@@ -1289,212 +1496,24 @@ function getAuthConfigState(env: AuthEnv): AuthConfigState {
 
 function getBigQueryConfigState(env: BigQueryEnv): BigQueryConfigState {
   const configured = hasBigQueryCredentials(env);
+  const transport = resolveDryRunTransport(env);
   const maxBytesBilled = parsePositiveNumber(env.BIGQUERY_MAX_BYTES_BILLED);
 
   return {
     configured,
-    mode:
-      configured && env.BIGQUERY_DRY_RUN_MODE !== "simulated"
-        ? "live"
-        : "simulated",
+    mode: transport.mode,
     projectId: env.BIGQUERY_PROJECT_ID ?? null,
     location: env.BIGQUERY_LOCATION ?? null,
     maxBytesBilled,
-    message: configured
-      ? "BigQuery service account credentials are configured for live dry-run."
-      : "BigQuery credentials are missing; dry-run uses simulated estimates."
+    message: transport.message
   };
 }
 
-async function seedAdminDefaults(db: D1Database) {
-  await Promise.all(
-    phase2FeatureFlags.map((flag) =>
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO feature_flags (
-            id,
-            name,
-            description,
-            status,
-            environment,
-            rollout,
-            owner,
-            updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          flag.id,
-          flag.name,
-          flag.description,
-          flag.status,
-          flag.environment,
-          flag.rollout,
-          flag.owner,
-          flag.updatedAt
-        )
-        .run()
-    )
-  );
-
-  await Promise.all(
-    workspaceAllowlist.map((workspace) =>
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO workspaces (
-            workspace,
-            owner,
-            plan,
-            run_access,
-            updated_at
-          ) VALUES (?, ?, ?, ?, ?)`
-        )
-        .bind(
-          workspace.workspace,
-          workspace.owner,
-          workspace.plan,
-          workspace.runAccess,
-          "2026-06-20T00:00:00.000Z"
-        )
-        .run()
-    )
-  );
-
-  const seedCatalog = createSeedSchemaCatalog();
-  await Promise.all(
-    seedCatalog.map((table) =>
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO schema_tables (
-            id,
-            workspace,
-            table_name,
-            description,
-            row_count,
-            updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          table.id,
-          table.workspace,
-          table.name,
-          table.description,
-          table.rowCount,
-          table.updatedAt
-        )
-        .run()
-    )
-  );
-
-  await Promise.all(
-    seedCatalog.flatMap((table) =>
-      table.fields.map((field) =>
-        db
-          .prepare(
-            `INSERT OR IGNORE INTO schema_fields (
-              id,
-              table_id,
-              field_name,
-              field_type,
-              mode,
-              description,
-              pii,
-              queryable,
-              used_in_examples,
-              updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          )
-          .bind(
-            field.id,
-            table.id,
-            field.name,
-            field.type,
-            field.mode,
-            field.description,
-            field.pii ? 1 : 0,
-            field.queryable ? 1 : 0,
-            field.usedInExamples ? 1 : 0,
-            field.updatedAt
-          )
-          .run()
-      )
-    )
-  );
-
-  await Promise.all(
-    reviewQueue.map((item) =>
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO run_reviews (
-            id,
-            workspace,
-            query_type,
-            status,
-            estimated_cost_usd,
-            scanned_bytes,
-            submitted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          item.id,
-          item.workspace,
-          item.queryType,
-          item.status,
-          item.estimatedCostUsd,
-          item.scannedBytes,
-          item.submittedAt
-        )
-        .run()
-    )
-  );
-
-  await Promise.all(
-    reviewQueue.map((item) => {
-      const sql = getSeedRunSql(item.id);
-      const preview = estimateDryRun(sql);
-
-      return db
-        .prepare(
-          `INSERT OR IGNORE INTO query_runs (
-            id,
-            workspace,
-            actor_email,
-            sql,
-            status,
-            mode,
-            estimated_cost_usd,
-            scanned_bytes,
-            expected_runtime_ms,
-            referenced_tables_json,
-            checks_json,
-            error_json,
-            created_at,
-            updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          item.id,
-          item.workspace,
-          "seed@odap.local",
-          sql,
-          item.status,
-          "simulated",
-          item.estimatedCostUsd,
-          item.scannedBytes,
-          preview.expectedRuntimeMs,
-          JSON.stringify(preview.referencedTables),
-          JSON.stringify(preview.checks),
-          item.status === "blocked"
-            ? JSON.stringify({
-                code: "seed_blocked",
-                message: "Seed query is blocked by the safety policy."
-              })
-            : null,
-          item.submittedAt,
-          item.submittedAt
-        )
-        .run();
-    })
-  );
+function confirmedAdminRows<T>(response: D1Result<T>): T[] {
+  if (response?.success !== true || !Array.isArray(response.results)) {
+    throw new Error("Admin read not confirmed");
+  }
+  return response.results;
 }
 
 async function listFeatureFlags(db: D1Database) {
@@ -1506,7 +1525,7 @@ async function listFeatureFlags(db: D1Database) {
     )
     .all<FeatureFlagRow>();
 
-  return (response.results ?? []).map(mapFeatureFlagRow);
+  return confirmedAdminRows(response).map(mapFeatureFlagRow);
 }
 
 async function getFeatureFlag(db: D1Database, id: string) {
@@ -1531,7 +1550,7 @@ async function listWorkspaces(db: D1Database) {
     )
     .all<WorkspaceRow>();
 
-  return (response.results ?? []).map((row) => ({
+  return confirmedAdminRows(response).map((row) => ({
     workspace: row.workspace,
     owner: row.owner,
     plan: row.plan,
@@ -1558,7 +1577,7 @@ async function listAdminUsers(db: D1Database) {
     )
     .all<UserRow>();
 
-  return (response.results ?? []).map(mapUserRow);
+  return confirmedAdminRows(response).map(mapUserRow);
 }
 
 async function getAdminUserById(db: D1Database, id: string) {
@@ -1579,29 +1598,6 @@ async function getAdminUserById(db: D1Database, id: string) {
       WHERE id = ?`
     )
     .bind(id)
-    .first<UserRow>();
-
-  return row ? mapUserRow(row) : null;
-}
-
-async function getAdminUserByEmail(db: D1Database, email: string) {
-  const row = await db
-    .prepare(
-      `SELECT
-        id,
-        provider,
-        provider_id,
-        email,
-        name,
-        avatar_url,
-        role,
-        last_login_at,
-        created_at,
-        updated_at
-      FROM users
-      WHERE email = ?`
-    )
-    .bind(email.toLowerCase())
     .first<UserRow>();
 
   return row ? mapUserRow(row) : null;
@@ -1635,14 +1631,16 @@ async function listSchemaCatalog(db: D1Database) {
       .all<SchemaFieldRow>()
   ]);
 
+  const tables = confirmedAdminRows(tableResponse);
+  const fieldRows = confirmedAdminRows(fieldResponse);
   const fieldsByTable = new Map<string, SchemaCatalogField[]>();
-  for (const row of fieldResponse.results ?? []) {
+  for (const row of fieldRows) {
     const fields = fieldsByTable.get(row.table_id) ?? [];
     fields.push(mapSchemaFieldRow(row));
     fieldsByTable.set(row.table_id, fields);
   }
 
-  return (tableResponse.results ?? []).map((row) => ({
+  return tables.map((row) => ({
     id: row.id,
     workspace: row.workspace,
     name: row.table_name,
@@ -1653,8 +1651,8 @@ async function listSchemaCatalog(db: D1Database) {
   }));
 }
 
-async function getSchemaField(db: D1Database, id: string) {
-  const row = await db
+async function getSchemaFieldRow(db: D1Database, id: string) {
+  return db
     .prepare(
       `SELECT
         id,
@@ -1672,8 +1670,6 @@ async function getSchemaField(db: D1Database, id: string) {
     )
     .bind(id)
     .first<SchemaFieldRow>();
-
-  return row ? mapSchemaFieldRow(row) : null;
 }
 
 async function getSchemaTableId(
@@ -1702,7 +1698,7 @@ async function listReviewQueue(db: D1Database) {
     )
     .all<ReviewQueueRow>();
 
-  return (response.results ?? []).map((row) => ({
+  return confirmedAdminRows(response).map((row) => ({
     id: row.id,
     workspace: row.workspace,
     queryType: row.query_type,
@@ -1714,7 +1710,7 @@ async function listReviewQueue(db: D1Database) {
 }
 
 async function getRunReview(db: D1Database, id: string) {
-  const row = await db
+  return db
     .prepare(
       `SELECT id, workspace, query_type, status, estimated_cost_usd, scanned_bytes, submitted_at
       FROM run_reviews
@@ -1722,18 +1718,18 @@ async function getRunReview(db: D1Database, id: string) {
     )
     .bind(id)
     .first<ReviewQueueRow>();
+}
 
-  return row
-    ? {
-        id: row.id,
-        workspace: row.workspace,
-        queryType: row.query_type,
-        status: row.status,
-        estimatedCostUsd: row.estimated_cost_usd,
-        scannedBytes: row.scanned_bytes,
-        submittedAt: row.submitted_at
-      }
-    : null;
+function mapReviewQueueRow(row: ReviewQueueRow): ReviewQueueItem {
+  return {
+    id: row.id,
+    workspace: row.workspace,
+    queryType: row.query_type,
+    status: row.status,
+    estimatedCostUsd: row.estimated_cost_usd,
+    scannedBytes: row.scanned_bytes,
+    submittedAt: row.submitted_at
+  };
 }
 
 function mapQueryRunRow(row: QueryRunRow): QueryRunDetail {
@@ -1753,26 +1749,6 @@ function mapQueryRunRow(row: QueryRunRow): QueryRunDetail {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
-}
-
-function getSeedRunSql(id: string) {
-  if (id === "run-1026") {
-    return "SELECT campaign_id, session_id FROM `demo.events`;";
-  }
-
-  if (id === "run-1025") {
-    return "DROP TABLE `sandbox.tmp_orders`;";
-  }
-
-  return `SELECT
-  DATE_TRUNC(order_date, WEEK) AS week_start,
-  acquisition_channel,
-  SUM(revenue) AS weekly_revenue,
-  COUNT(*) AS order_count
-FROM \`demo.orders\`
-WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 8 WEEK)
-GROUP BY week_start, acquisition_channel
-ORDER BY week_start DESC;`;
 }
 
 function parseJsonArray<T>(value: string): T[] {
@@ -1809,7 +1785,7 @@ async function listAuditEvents(db: D1Database) {
     )
     .all<AuditEventRow>();
 
-  return (response.results ?? []).map((row) => ({
+  return confirmedAdminRows(response).map((row) => ({
     id: row.id,
     actorEmail: row.actor_email,
     action: row.action,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { adminAuthority } from "./fixtures/admin-authority";
 import { onRequestPatch } from "../functions/api/admin/users/[id]";
 import {
   createSessionCookie,
@@ -35,7 +36,7 @@ describe("admin users API", () => {
         role: "owner"
       }),
       env: {
-        AUTH_COOKIE_SECRET: secret
+        AUTH_COOKIE_SECRET: secret, DB: adminAuthority()
       },
       params: {
         id: "github%3A456"
@@ -61,9 +62,9 @@ describe("admin users API", () => {
       }
     });
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
-      code: "storage_not_configured"
+      code: "admin_authority_unavailable"
     });
   });
 });

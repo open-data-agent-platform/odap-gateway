@@ -1,11 +1,13 @@
 import { readPreparedJob } from "./bigquery-job-storage";
 import type { ControlAccess } from "./control-storage";
+import { terminalOutcomesConflict } from "./terminal-outcome-sql";
 
 type JobReference = Awaited<ReturnType<typeof readPreparedJob>>["identity"]["jobReference"];
 type Outcome = "succeeded" | "failed" | "cancelled";
 
 async function readStatus(access: ControlAccess, intentId: string, jobReference: JobReference) {
   const row = await access.db.prepare(`SELECT r.requested_by,r.requested_at,s.intent_id AS settled,
+      ${terminalOutcomesConflict("c")} AS conflict,
       (SELECT o.outcome FROM bigquery_terminal_observations o
         WHERE o.tenant_id=c.tenant_id AND o.intent_id=c.intent_id LIMIT 1) AS outcome
     FROM dispatch_claims c JOIN bigquery_job_bindings b USING(tenant_id,intent_id)
@@ -14,8 +16,9 @@ async function readStatus(access: ControlAccess, intentId: string, jobReference:
     LEFT JOIN cost_settlements s ON s.tenant_id=c.tenant_id AND s.intent_id=c.intent_id
     WHERE c.tenant_id=? AND c.intent_id=? AND c.maximum_bytes_billed IS NOT NULL AND b.job_id=?`)
     .bind(access.principalId, access.tenantId, intentId, jobReference.jobId)
-    .first<{ requested_by: string | null; requested_at: string | null; settled: string | null; outcome: Outcome | null }>();
+    .first<{ conflict: number; requested_by: string | null; requested_at: string | null; settled: string | null; outcome: Outcome | null }>();
   if (!row) throw new Error("Claimed BigQuery job unavailable");
+  if (row.conflict) throw new Error("Conflicting terminal outcomes");
   const request = row.requested_by !== null && row.requested_at !== null
     ? { requestedBy: row.requested_by, requestedAt: row.requested_at } : null;
   if (row.outcome !== null) return { state: "terminal" as const, jobReference, request, outcome: row.outcome };

@@ -382,7 +382,7 @@ function getReferencedColumnNames(
 ) {
   const stripped = stripSqlLiteralsAndTables(sql);
   const tableParts = new Set(
-    catalog.flatMap((table) => normalizeTableName(table.name).split("."))
+    catalog.flatMap((table) => normalizeTableName(table.name).toLowerCase().split(".").slice(-2))
   );
   const tableAliases = getTableAliases(sql);
   const columnAliases = getAliases(sql);
@@ -507,18 +507,7 @@ function normalizeWorkspace(value: string) {
 }
 
 function normalizeTableName(value: string) {
-  const parts = value
-    .replace(/`/g, "")
-    .trim()
-    .toLowerCase()
-    .split(".")
-    .filter(Boolean);
-
-  if (parts.length >= 2) {
-    return parts.slice(-2).join(".");
-  }
-
-  return parts[0] ?? "";
+  return value.trim().replace(/^`([^`]+)`$/, "$1");
 }
 
 function formatPolicyFields(fields: PolicyField[]) {

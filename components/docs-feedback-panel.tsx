@@ -1,25 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { MessageSquareText, Send, Sparkles } from "lucide-react";
+import { MessageSquareText, RefreshCw, Send, Sparkles } from "lucide-react";
 import type {
   DocsFeedbackKind,
   PublicDocsFeedback
 } from "@/lib/docs-content";
 import { cn } from "@/lib/utils";
+import { loadDocsFeedback, sendDocsFeedback } from "@/lib/docs-feedback-client";
 
 type FeedbackLoadState =
   | { status: "loading" }
-  | { status: "ready"; feedback: PublicDocsFeedback[]; persisted: boolean }
-  | { status: "error"; message: string };
-
-type FeedbackResponse = {
-  ok?: boolean;
-  feedback?: PublicDocsFeedback[] | PublicDocsFeedback | null;
-  persisted?: boolean;
-  message?: string;
-};
+  | { status: "ready"; feedback: PublicDocsFeedback[] }
+  | { status: "error" };
 
 const topics = [
   "Getting started",
@@ -30,11 +24,7 @@ const topics = [
   "Other"
 ];
 
-export function DocsFeedbackPanel({
-  seedFeedback
-}: {
-  seedFeedback: PublicDocsFeedback[];
-}) {
+export function DocsFeedbackPanel() {
   const [loadState, setLoadState] = useState<FeedbackLoadState>({
     status: "loading"
   });
@@ -44,136 +34,51 @@ export function DocsFeedbackPanel({
   const [authorEmail, setAuthorEmail] = useState("");
   const [message, setMessage] = useState("");
   const [company, setCompany] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{status:"success" | "error";message:string} | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [loadKey, setLoadKey] = useState(0);
+  const submission = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    void loadDocsFeedback(controller.signal).then(result => {
+      if (!controller.signal.aborted) setLoadState(result.state === "ready"
+        ? {status:"ready",feedback:result.feedback} : {status:"error"});
+    });
+    return () => controller.abort();
+  }, [loadKey]);
 
-    async function loadFeedback() {
-      try {
-        const response = await fetch("/api/docs/feedback", {
-          cache: "no-store"
-        });
-        const data = (await response.json().catch(() => null)) as
-          | FeedbackResponse
-          | null;
+  useEffect(() => () => submission.current?.abort(), []);
 
-        if (!response.ok || !Array.isArray(data?.feedback)) {
-          throw new Error(data?.message ?? "Docs feedback is unavailable.");
-        }
-
-        if (!cancelled) {
-          setLoadState({
-            status: "ready",
-            feedback: data.feedback,
-            persisted: data.persisted ?? false
-          });
-        }
-      } catch {
-        if (!cancelled) {
-          setLoadState({
-            status: "ready",
-            feedback: seedFeedback,
-            persisted: false
-          });
-        }
-      }
-    }
-
-    void loadFeedback();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [seedFeedback]);
-
-  const visibleFeedback = useMemo(
-    () => (loadState.status === "ready" ? loadState.feedback : seedFeedback),
-    [loadState, seedFeedback]
-  );
+  const visibleFeedback = loadState.status === "ready" ? loadState.feedback : [];
 
   async function submitFeedback(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submission.current) return;
     setNotice(null);
 
     if (message.trim().length < 12) {
-      setNotice("Please add a little more detail before submitting.");
+      setNotice({status:"error",message:"Please add a little more detail before submitting."});
       return;
     }
 
+    const controller = new AbortController();
+    submission.current = controller;
     setSubmitting(true);
-    let localPreviewFallback = false;
     try {
-      const response = await fetch("/api/docs/feedback", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          kind,
-          topic,
-          authorName,
-          authorEmail,
-          message,
-          company
-        })
-      });
-      const data = (await response.json().catch(() => null)) as
-        | FeedbackResponse
-        | null;
-
-      if (!response.ok) {
-        localPreviewFallback = response.status === 404 || response.status === 405;
-        throw new Error(data?.message ?? "Feedback could not be submitted.");
+      const result = await sendDocsFeedback({kind,topic,authorName,authorEmail,message,company},controller.signal);
+      if (controller.signal.aborted) return;
+      if (result.state !== "confirmed") {
+        setNotice({status:"error",message:"Submission could not be confirmed. Your draft is unchanged."});
+        return;
       }
-
-      const feedback = isPublicFeedback(data?.feedback)
-        ? data.feedback
-        : buildLocalFeedback(kind, topic, authorName, message);
-
-      setLoadState((current) => ({
-        status: "ready",
-        feedback: [
-          feedback,
-          ...(current.status === "ready" ? current.feedback : seedFeedback)
-        ],
-        persisted: data?.persisted ?? false
-      }));
       setMessage("");
       setAuthorName("");
       setAuthorEmail("");
-      setNotice(
-        data?.persisted
-          ? "Submitted. It is now pending review."
-          : "Submitted in preview mode. It will need D1 persistence in production."
-      );
-    } catch (error) {
-      if (localPreviewFallback || error instanceof TypeError) {
-        const feedback = buildLocalFeedback(kind, topic, authorName, message);
-
-        setLoadState((current) => ({
-          status: "ready",
-          feedback: [
-            feedback,
-            ...(current.status === "ready" ? current.feedback : seedFeedback)
-          ],
-          persisted: false
-        }));
-        setMessage("");
-        setAuthorName("");
-        setAuthorEmail("");
-        setNotice(
-          "Submitted in local preview mode. API persistence was unavailable."
-        );
-        return;
-      }
-
-      setNotice(
-        error instanceof Error ? error.message : "Feedback could not be submitted."
-      );
+      setNotice({status:"success",message:"Submitted. Pending review."});
     } finally {
-      setSubmitting(false);
+      submission.current = null;
+      if (!controller.signal.aborted) setSubmitting(false);
     }
   }
 
@@ -182,12 +87,18 @@ export function DocsFeedbackPanel({
       id="community"
       className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(360px,0.72fr)]"
     >
-      <div className="rounded-lg border border-[#edeae1]/10 bg-[#111a2e] p-5 sm:p-6">
+      <div className="min-w-0 rounded-lg border border-[#edeae1]/10 bg-[#111a2e] p-5 sm:p-6">
         <div className="flex items-center gap-3">
           <MessageSquareText className="h-5 w-5 text-[#c9a35a]" />
           <h2 className="text-xl font-semibold text-[#edeae1]">
             Community questions
           </h2>
+          <button type="button" title="Reload feedback" aria-label="Reload feedback"
+            disabled={loadState.status === "loading"}
+            onClick={() => {setLoadState({status:"loading"});setLoadKey(key => key+1);}}
+            className="focus-ring ml-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#9aa2b7] hover:text-white disabled:opacity-50">
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          </button>
         </div>
         <p className="mt-3 text-sm leading-7 text-[#9aa2b7]">
           Approved comments and questions from readers. Platform admins review
@@ -197,8 +108,14 @@ export function DocsFeedbackPanel({
           {loadState.status === "loading" ? (
             <div className="p-4 text-sm text-[#9aa2b7]">Loading feedback...</div>
           ) : null}
+          {loadState.status === "error" ? (
+            <p role="alert" className="p-4 text-sm text-[#e4c887]">Feedback is unavailable.</p>
+          ) : null}
+          {loadState.status === "ready" && visibleFeedback.length === 0 ? (
+            <p className="p-4 text-sm text-[#9aa2b7]">No published feedback yet.</p>
+          ) : null}
           {visibleFeedback.map((item) => (
-            <article key={item.id} className="p-4">
+            <article key={item.id} className="min-w-0 p-4 [overflow-wrap:anywhere]">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <span
@@ -245,7 +162,7 @@ export function DocsFeedbackPanel({
 
       <form
         onSubmit={(event) => void submitFeedback(event)}
-        className="rounded-lg border border-[#2b3654] bg-[linear-gradient(180deg,#151f37,#111a2e)] p-5 shadow-[0_24px_64px_rgba(0,0,0,0.28)] sm:p-6"
+        className="min-w-0 rounded-lg border border-[#2b3654] bg-[linear-gradient(180deg,#151f37,#111a2e)] p-5 shadow-[0_24px_64px_rgba(0,0,0,0.28)] sm:p-6"
       >
         <div className="flex items-center gap-3">
           <Sparkles className="h-5 w-5 text-[#7fa6ff]" />
@@ -258,7 +175,7 @@ export function DocsFeedbackPanel({
           Admins review submissions and publish answers in the community list.
         </p>
 
-        <div className="mt-5 grid gap-3">
+        <fieldset disabled={submitting} className="mt-5 grid min-w-0 gap-3">
           <label className="grid gap-2 text-sm font-medium text-[#edeae1]">
             Type
             <select
@@ -294,7 +211,7 @@ export function DocsFeedbackPanel({
                 onChange={(event) => setAuthorName(event.currentTarget.value)}
                 maxLength={80}
                 placeholder="Anonymous"
-                className="h-11 rounded-md border border-[#2b3654] bg-[#090d17] px-3 text-sm text-[#edeae1] outline-none placeholder:text-[#6e7690] focus:border-[#c9a35a]"
+                className="h-11 min-w-0 w-full rounded-md border border-[#2b3654] bg-[#090d17] px-3 text-sm text-[#edeae1] outline-none placeholder:text-[#6e7690] focus:border-[#c9a35a]"
               />
             </label>
             <label className="grid gap-2 text-sm font-medium text-[#edeae1]">
@@ -305,7 +222,7 @@ export function DocsFeedbackPanel({
                 maxLength={160}
                 placeholder="optional"
                 type="email"
-                className="h-11 rounded-md border border-[#2b3654] bg-[#090d17] px-3 text-sm text-[#edeae1] outline-none placeholder:text-[#6e7690] focus:border-[#c9a35a]"
+                className="h-11 min-w-0 w-full rounded-md border border-[#2b3654] bg-[#090d17] px-3 text-sm text-[#edeae1] outline-none placeholder:text-[#6e7690] focus:border-[#c9a35a]"
               />
             </label>
           </div>
@@ -329,11 +246,12 @@ export function DocsFeedbackPanel({
               className="resize-none rounded-md border border-[#2b3654] bg-[#090d17] px-3 py-3 text-sm leading-6 text-[#edeae1] outline-none placeholder:text-[#6e7690] focus:border-[#c9a35a]"
             />
           </label>
-        </div>
+        </fieldset>
 
         {notice ? (
-          <p className="mt-4 rounded-md border border-[#c9a35a]/20 bg-[#c9a35a]/10 px-3 py-2 text-xs leading-5 text-[#e4c887]">
-            {notice}
+          <p role={notice.status === "error" ? "alert" : "status"}
+            className="mt-4 rounded-md border border-[#c9a35a]/20 bg-[#c9a35a]/10 px-3 py-2 text-xs leading-5 text-[#e4c887]">
+            {notice.message}
           </p>
         ) : null}
 
@@ -347,32 +265,6 @@ export function DocsFeedbackPanel({
         </button>
       </form>
     </section>
-  );
-}
-
-function buildLocalFeedback(
-  kind: DocsFeedbackKind,
-  topic: string,
-  authorName: string,
-  message: string
-) {
-  return {
-    id: `local-${Date.now()}`,
-    kind,
-    topic,
-    authorName: authorName.trim() || "Anonymous",
-    message: message.trim(),
-    status: "pending" as const,
-    createdAt: new Date().toISOString()
-  } satisfies PublicDocsFeedback;
-}
-
-function isPublicFeedback(value: unknown): value is PublicDocsFeedback {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "id" in value &&
-    "message" in value
   );
 }
 

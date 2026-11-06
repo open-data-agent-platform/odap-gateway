@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   getAdminState,
   getAdminDb,
-  queueRollback,
   recordQueryDryRun,
   updateAdminUserRole,
   updateSchemaFieldPolicy,
@@ -45,8 +44,9 @@ describe("phase 3 admin store", () => {
     });
   });
 
-  it("exposes live BigQuery dry-run configuration when credentials exist", async () => {
+  it("exposes live BigQuery dry-run configuration only in an explicit mode", async () => {
     const state = await getAdminState({
+      GATEWAY_MODE: "demo",
       BIGQUERY_PROJECT_ID: "demo-project",
       BIGQUERY_CLIENT_EMAIL: "service@example.iam.gserviceaccount.com",
       BIGQUERY_PRIVATE_KEY: "test-pkcs8-placeholder",
@@ -61,6 +61,12 @@ describe("phase 3 admin store", () => {
       location: "US",
       maxBytesBilled: 1048576
     });
+  });
+
+  it("reports a blocked preview transport when credentials exist but no gateway mode is set", async () => {
+    const state = await getAdminState({ BIGQUERY_PROJECT_ID:"fixture-project",
+      BIGQUERY_CLIENT_EMAIL:"fixture@example.test", BIGQUERY_PRIVATE_KEY:"unused-fixture" });
+    expect(state.bigQuery).toMatchObject({configured:true,mode:"blocked"});
   });
 
   it("detects the preferred D1 binding name", () => {
@@ -78,17 +84,8 @@ describe("phase 3 admin store", () => {
       {},
       "bigquery-run-gate",
       25,
-      "owner@example.com"
+      { provider: "google", providerId: "owner", email: "owner@example.com" }
     );
-
-    expect(result).toMatchObject({
-      ok: false,
-      code: "storage_not_configured"
-    });
-  });
-
-  it("rejects rollback mutations without D1 persistence", async () => {
-    const result = await queueRollback({}, "owner@example.com");
 
     expect(result).toMatchObject({
       ok: false,
@@ -117,7 +114,7 @@ describe("phase 3 admin store", () => {
       {},
       "run-1026",
       "approved",
-      "owner@example.com"
+      { provider: "google", providerId: "owner", email: "owner@example.com" }
     );
 
     expect(result).toMatchObject({
@@ -133,7 +130,7 @@ describe("phase 3 admin store", () => {
       {
         queryable: true
       },
-      "owner@example.com"
+      { provider: "google", providerId: "owner", email: "owner@example.com" }
     );
 
     expect(result).toMatchObject({
@@ -147,7 +144,7 @@ describe("phase 3 admin store", () => {
       {},
       "google:123",
       "admin",
-      "owner@example.com"
+      { provider: "google", providerId: "owner", email: "owner@example.com" }
     );
 
     expect(result).toMatchObject({

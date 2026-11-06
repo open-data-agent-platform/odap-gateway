@@ -63,7 +63,7 @@ export async function onRequestPatch(context: SchemaFieldContext) {
     context.env,
     id,
     policy,
-    auth.session.email
+    auth.session
   );
 
   if (!result.ok) {

@@ -1,15 +1,11 @@
-import {
-  getSessionFromRequest,
-  jsonResponse
-} from "../lib/auth-request";
-import {
-  getSessionRole,
-  type AuthEnv
-} from "../lib/auth";
+import { requireAdminSession } from "../lib/auth-request";
+import { isAdminPageRequest } from "../lib/admin-page-path";
+import { type AuthEnv } from "../lib/auth";
+import { type AdminStorageEnv } from "../lib/admin-store";
 
 type PagesMiddlewareContext = {
   request: Request;
-  env: AuthEnv;
+  env: AuthEnv & AdminStorageEnv;
   next: () => Promise<Response>;
 };
 
@@ -20,31 +16,13 @@ export async function onRequest(context: PagesMiddlewareContext) {
     return context.next();
   }
 
-  if (!context.env.AUTH_COOKIE_SECRET) {
-    return redirectToLogin(url, "auth_not_configured");
-  }
-
-  const session = await getSessionFromRequest(context.request, context.env);
-  if (!session) {
-    return redirectToLogin(url, "unauthenticated");
-  }
-
-  if (getSessionRole(session) !== "admin") {
-    return jsonResponse(
-      {
-        ok: false,
-        code: "admin_required",
-        message: "Administrator access is required for /admin."
-      },
-      { status: 403 }
-    );
+  const auth = await requireAdminSession(context.request, context.env);
+  if (!auth.ok) {
+    return auth.code === "auth_not_configured" || auth.code === "unauthenticated"
+      ? redirectToLogin(url, auth.code) : auth.response;
   }
 
   return context.next();
-}
-
-function isAdminPageRequest(pathname: string) {
-  return pathname === "/admin" || pathname.startsWith("/admin/");
 }
 
 function redirectToLogin(requestUrl: URL, error: string) {

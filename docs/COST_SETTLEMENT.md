@@ -49,3 +49,33 @@ billing attribution, adjustments, period rollover and deployed integration
 remain outside its scope. The receipt wire schema is unchanged.
 
 For read-only inspection after settlement, see [settled evidence export](SETTLED_EVIDENCE.md).
+
+## Delegated job settlement
+
+Migration 0026 and [the delegated reconciler](../lib/delegated-billing.ts)
+extend the same ledger to a job claimed for a specific delegation audience.
+Only a current tenant owner can invoke this internal service. It verifies the
+original claim and requires a terminal observation tied to its compiled-body
+digest before it discloses a job reference to the injected billing source.
+Expiry or withdrawal after handoff does not erase an incurred liability.
+
+- No verified terminal observation: `pending-terminal`, no source call.
+- No bill (`null`), or an exactly attributed `pending`, `provisional` or
+  `estimated` record: `pending-bill` unless a verified settlement already
+  exists. The provisional amount is never used.
+- A `final` total: exact tenant, project, location and job ID, a stable
+  evidence reference, unit `micro-USD`, and a nonnegative safe integer amount.
+  Zero is valid only when explicit. A failed or cancelled job can cost money.
+
+The write rechecks the owner, audience, claim, attribution and terminal
+evidence. Billing evidence, the separate final receipt and its audit event,
+budget reservation release, actual spend and excess liability commit together.
+Concurrent exact repeats return the same receipt; a different amount or
+reference conflicts. A source error or a lost acknowledgement is not proof of
+zero cost. Use `readDelegatedBilling` for local inspection without calling a
+billing source. Unattributed pre-upgrade settlements are retained but this
+service refuses to certify or settle them again.
+
+The source is an explicit local test dependency, not a billing provider
+integration. The generic export and coverage formats do not by themselves
+attest delegated billing provenance. No receipt schema or standard changes.

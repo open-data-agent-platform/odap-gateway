@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { adminAuthority } from "./fixtures/admin-authority";
 import { onRequestPatch } from "../functions/api/admin/schema-fields/[id]";
 import {
   createSessionCookie,
@@ -33,7 +34,7 @@ describe("admin schema field API", () => {
     const response = await onRequestPatch({
       request: await createAdminRequest({ label: "ignored" }),
       env: {
-        AUTH_COOKIE_SECRET: secret
+        AUTH_COOKIE_SECRET: secret, DB: adminAuthority()
       },
       params: {
         id: "table-demo-orders-customer-id"
@@ -46,7 +47,7 @@ describe("admin schema field API", () => {
     });
   });
 
-  it("returns storage_not_configured without D1", async () => {
+  it("cannot verify current authority without D1", async () => {
     const response = await onRequestPatch({
       request: await createAdminRequest({ pii: true }),
       env: {
@@ -57,9 +58,9 @@ describe("admin schema field API", () => {
       }
     });
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
-      code: "storage_not_configured"
+      code: "admin_authority_unavailable"
     });
   });
 });

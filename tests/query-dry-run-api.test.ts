@@ -63,6 +63,8 @@ describe("query dry-run API", () => {
   });
 
   it("blocks schema policy violations before BigQuery dry-run", async () => {
+    vi.spyOn(authRequest, "getSessionFromRequest").mockResolvedValue({provider:"google",providerId:"fixture",
+      name:"Fixture",email:"fixture@example.test",expiresAt:Date.now()+60000});
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const response = await onRequestPost({
       request: new Request("https://odap-gateway.local/api/query/dry-run", {
@@ -76,7 +78,8 @@ describe("query dry-run API", () => {
       env: {
         BIGQUERY_PROJECT_ID: "demo-project",
         BIGQUERY_CLIENT_EMAIL: "svc@example.iam.gserviceaccount.com",
-        BIGQUERY_PRIVATE_KEY: "not-used-for-policy-blocked-query"
+        BIGQUERY_PRIVATE_KEY: "not-used-for-policy-blocked-query",
+        GATEWAY_MODE: "demo"
       }
     });
 

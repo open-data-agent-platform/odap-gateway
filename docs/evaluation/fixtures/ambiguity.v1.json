@@ -1,0 +1,116 @@
+{
+  "AMB-01": {
+    "question": "What was our margin in July 2026?",
+    "metrics": [
+      {"ref":"gross_margin@1","state":"released","terms":["gross margin","margin"],"unit":"percent","dimensions":{"month":"required"}},
+      {"ref":"contribution_margin@2","state":"released","terms":["contribution margin","margin"],"unit":"percent","dimensions":{"month":"required"}}
+    ],
+    "dimensions": {"month":{"terms":["month"],"values":["2026-07"]}},
+    "session": {"month":"2026-07"}
+  },
+  "AMB-02": {
+    "question": "As of August 18, 2026, how many loads did we ship last period?",
+    "metrics": [
+      {"ref":"loads_shipped@1","state":"released","terms":["loads shipped"],"unit":"loads","dimensions":{"calendar":"required"}}
+    ],
+    "dimensions": {"calendar":{"terms":["reporting calendar"],"values":["calendar months","retail 4-4-5 periods"]}},
+    "session": {}
+  },
+  "AMB-03": {
+    "question": "What was the percent change in our defect rate in May 2026?",
+    "metrics": [
+      {"ref":"defect_rate_change@1","state":"released","terms":["percent change in defect rate"],"unit":"percent","dimensions":{"month":"required","baseline_month":"required"}}
+    ],
+    "dimensions": {
+      "month":{"terms":["reporting month"],"values":["2026-05"]},
+      "baseline_month":{"terms":["comparison month"],"values":["2026-04","2025-05"]}
+    },
+    "session": {"month":"2026-05"}
+  },
+  "AMB-04": {
+    "question": "What throughput did the plant achieve on August 17, 2026?",
+    "metrics": [
+      {"ref":"unit_throughput@2","state":"released","terms":["throughput","unit throughput"],"unit":"units/hour","dimensions":{"plant":"required","day":"required"}},
+      {"ref":"lot_throughput@1","state":"released","terms":["throughput","lot throughput"],"unit":"lots/hour","dimensions":{"plant":"required","day":"required"}}
+    ],
+    "dimensions": {"plant":{"terms":["plant"],"values":["Kiln"]},"day":{"terms":["production day"],"values":["2026-08-17"]}},
+    "session": {"plant":"Kiln","day":"2026-08-17"}
+  },
+  "AMB-05": {
+    "question": "How much net energy did the test facility consume in June?",
+    "metrics": [
+      {"ref":"gross_energy@1","state":"released","terms":["gross energy consumed"],"unit":"kWh","dimensions":{"month":"required"}}
+    ],
+    "dimensions": {"month":{"terms":["month"],"values":["2026-06"]}},
+    "session": {"month":"2026-06"}
+  },
+  "AMB-06": {
+    "question": "Break down June order count by region.",
+    "metrics": [
+      {"ref":"order_count@1","state":"released","terms":["order count"],"unit":"orders","dimensions":{"month":"required","ship_region":"optional","bill_region":"optional"}}
+    ],
+    "dimensions": {
+      "month":{"terms":["month"],"values":["2026-06"]},
+      "ship_region":{"terms":["shipping region","region"],"values":["Inland","Coast"]},
+      "bill_region":{"terms":["billing region","region"],"values":["Inland","Coast"]}
+    },
+    "session": {"month":"2026-06"}
+  },
+  "AMB-07": {
+    "question": "How many weld inspections did Line 4 complete on August 3?",
+    "metrics": [
+      {"ref":"weld_inspections@1","state":"released","terms":["weld inspections"],"unit":"inspections","dimensions":{"line":"required","day":"required","shift":"required"}}
+    ],
+    "dimensions": {
+      "line":{"terms":["line"],"values":["Line 4"]},
+      "day":{"terms":["day"],"values":["2026-08-03"]},
+      "shift":{"terms":["shift"],"values":["day shift","night shift"]}
+    },
+    "session": {"line":"Line 4","day":"2026-08-03"}
+  },
+  "AMB-08": {
+    "question": "What was customer retention for spring 2026 across our sites?",
+    "metrics": [
+      {"ref":"customer_retention@1","state":"released","terms":["customer retention"],"unit":"percent","dimensions":{"site":"optional","date_range":"required"}}
+    ],
+    "dimensions": {
+      "site":{"terms":["site"],"values":["North Pier (northern hemisphere)","South Pier (southern hemisphere)"]},
+      "date_range":{"terms":["reporting dates"],"values":["2026-03-01/2026-05-31","2026-09-01/2026-11-30"]}
+    },
+    "session": {}
+  },
+  "AMB-09": {
+    "question": "What was the 95th percentile of dispatch latency in June?",
+    "metrics": [
+      {"ref":"dispatch_count@1","state":"released","terms":["dispatch count"],"unit":"dispatches","dimensions":{"month":"required"}}
+    ],
+    "dimensions": {"month":{"terms":["month"],"values":["2026-06"]}},
+    "session": {"month":"2026-06"}
+  },
+  "AMB-10": {
+    "question": "How many helpdesk slips did Cedar handle in July 2026?",
+    "metrics": [
+      {"ref":"ticket_count@3","state":"released","terms":["ticket count","helpdesk slips"],"unit":"tickets","dimensions":{"site":"required","month":"required"}}
+    ],
+    "dimensions": {"site":{"terms":["service site"],"values":["Cedar"]},"month":{"terms":["month"],"values":["2026-07"]}},
+    "session": {"site":"Cedar","month":"2026-07"}
+  },
+  "AMB-11": {
+    "question": "Give me billed distance in kilometers for June 2026.",
+    "metrics": [
+      {"ref":"traveled_distance@1","state":"released","terms":["traveled distance","distance"],"unit":"kilometers","dimensions":{"month":"required"}},
+      {"ref":"billed_distance@2","state":"released","terms":["billed distance","distance"],"unit":"kilometers","dimensions":{"month":"required"}}
+    ],
+    "dimensions": {"month":{"terms":["billing month"],"values":["2026-05","2026-06"]}},
+    "session": {"month":"2026-06"}
+  },
+  "AMB-12": {
+    "question": "What was the ripple index on the press in August?",
+    "metrics": [
+      {"ref":"press_vibration@2","state":"released","terms":["press vibration"],"unit":"mm/s","dimensions":{"month":"required"}},
+      {"ref":"sensor_ripple@1","state":"candidate","terms":["ripple index"],"unit":"index points","dimensions":{"month":"required"}}
+    ],
+    "dimensions": {"month":{"terms":["month"],"values":["2026-08"]}},
+    "session": {"month":"2026-08"}
+  }
+}

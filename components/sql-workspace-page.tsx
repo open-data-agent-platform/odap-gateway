@@ -84,17 +84,17 @@ export function SqlWorkspacePage() {
             <SqlMetric
               label="Open reviews"
               value={String(activeReviewCount)}
-              detail="Reviewer to approver queue"
+              detail="Sample review queue"
             />
             <SqlMetric
               label="Dry-run volume"
               value={formatBytes(reviewedBytes)}
-              detail="Seed audit window"
+              detail="Sample review queue"
             />
             <SqlMetric
               label="Estimated cost"
               value={formatCost(reviewedCost)}
-              detail="Before live execution"
+              detail="Sample review queue"
             />
           </div>
         </div>
@@ -133,7 +133,7 @@ export function SqlWorkspacePage() {
             <div className="flex items-center gap-3">
               <FileCode2 className="h-5 w-5 text-[#a855f7]" />
               <h2 className="text-base font-semibold text-slate-50">
-                Review queue snapshot
+                Sample review queue
               </h2>
             </div>
             <div className="mt-5 overflow-hidden rounded-lg border border-white/[0.08]">
@@ -168,7 +168,7 @@ export function SqlWorkspacePage() {
             <div className="flex items-center gap-3">
               <Clock3 className="h-5 w-5 text-[#fbbc05]" />
               <h2 className="text-base font-semibold text-slate-50">
-                Workspace access
+                Sample workspace access
               </h2>
             </div>
             <div className="mt-5 space-y-3">

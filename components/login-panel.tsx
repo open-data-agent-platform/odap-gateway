@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Github, ShieldCheck } from "lucide-react";
 
 type LoginMessage = {
@@ -12,6 +12,7 @@ type LoginMessage = {
 const errorMessages: Record<string, string> = {
   auth_not_configured: "OAuth credentials are not configured yet.",
   invalid_state: "The sign-in request expired. Please try again.",
+  oauth_state_unavailable: "Sign-in is temporarily unavailable. Please try again later.",
   oauth_denied: "Sign-in was cancelled.",
   oauth_failed: "The provider could not complete sign-in.",
   unsupported_provider: "This sign-in provider is not supported."
@@ -19,10 +20,12 @@ const errorMessages: Record<string, string> = {
 
 export function LoginPanel() {
   const [message, setMessage] = useState<LoginMessage | null>(null);
-  const returnTo = useMemo(() => "/admin", []);
+  const [returnTo, setReturnTo] = useState("/admin");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const destination = params.get("returnTo");
+    if (destination && ["/sql", "/semantic-review", "/evidence-coverage", "/approval-contract", "/contract-request", "/evidence-receipt"].includes(destination)) setReturnTo(destination);
     const error = params.get("error");
 
     if (error) {

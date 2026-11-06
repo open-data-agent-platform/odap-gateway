@@ -7,7 +7,7 @@ import { onRequestPatch as onAdminDocsFeedbackPatch } from "../functions/api/adm
 import { updateDocsFeedbackReview } from "../lib/docs-feedback";
 
 describe("docs feedback API", () => {
-  it("returns seed feedback when D1 is not configured", async () => {
+  it("returns no examples when D1 is not configured", async () => {
     const response = await onRequestGet({
       request: new Request("https://odap-gateway.local/api/docs/feedback"),
       env: {}
@@ -17,17 +17,11 @@ describe("docs feedback API", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       persisted: false,
-      feedback: expect.arrayContaining([
-        expect.objectContaining({
-          id: "seed-docs-question-1",
-          kind: "question",
-          answerText: expect.stringContaining("Dry-run results")
-        })
-      ])
+      feedback: []
     });
   });
 
-  it("accepts valid questions in preview mode", async () => {
+  it("refuses valid questions when persistence is unavailable", async () => {
     const response = await onRequestPost({
       request: new Request("https://odap-gateway.local/api/docs/feedback", {
         method: "POST",
@@ -42,16 +36,10 @@ describe("docs feedback API", () => {
       env: {}
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
-      ok: true,
-      accepted: true,
-      pendingReview: true,
-      persisted: false,
-      feedback: expect.objectContaining({
-        kind: "question",
-        status: "pending"
-      })
+      ok: false,
+      code: "docs_feedback_storage_unavailable"
     });
   });
 
@@ -105,7 +93,7 @@ describe("docs feedback API", () => {
         status: "approved",
         answerText: "This answer has enough detail to publish."
       },
-      "admin@example.com"
+      { provider: "google", providerId: "admin", email: "admin@example.com" }
     );
 
     expect(result).toMatchObject({

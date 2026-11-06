@@ -2,11 +2,8 @@ import {
   jsonResponse,
   requireAdminSession
 } from "../../../lib/auth-request";
-import {
-  queueRollback,
-  type AdminStorageEnv
-} from "../../../lib/admin-store";
 import { type AuthEnv } from "../../../lib/auth";
+import { type AdminStorageEnv } from "../../../lib/admin-store";
 
 type RollbackContext = {
   request: Request;
@@ -19,20 +16,10 @@ export async function onRequestPost(context: RollbackContext) {
     return auth.response;
   }
 
-  const result = await queueRollback(context.env, auth.session.email);
-  if (!result.ok) {
-    return jsonResponse(
-      {
-        ok: false,
-        code: result.code,
-        message: result.message
-      },
-      { status: result.status }
-    );
-  }
-
+  // An audit entry is not an executable deployment rollback.
   return jsonResponse({
-    ok: true,
-    rollback: result.value
-  });
+    ok: false,
+    code: "rollback_not_supported",
+    message: "Deployment rollback is not implemented. No rollback was queued or executed."
+  }, { status: 501 });
 }

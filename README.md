@@ -22,7 +22,7 @@ routed through approval flows when risky, and written to an audit trail.
 - **Schema-aware Text-to-SQL** - generation grounded in approved tables and fields.
 - **Dry-run first, always** - bytes scanned, estimated cost, and runtime are surfaced before execution.
 - **Approval flows** - high-cost or policy-sensitive queries route to reviewers.
-- **Audit trail** - logins, dry-runs, approvals, policy changes, and rollbacks are recorded.
+- **Audit trail** - logins, dry-runs, approvals and policy changes are recorded. Deployment rollback is unsupported; historical rollback audit entries are not evidence of execution.
 - **Role-based access** - OAuth-protected sessions and admin-only governance routes.
 
 ## Standard conformance

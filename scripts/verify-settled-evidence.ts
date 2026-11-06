@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { verifySettledEvidence } from "../lib/settled-evidence";
 
-const usage = "Usage: verify-settled-evidence <bundle.json> <tenant> <intent> <expected.sha256>";
+const usage = "Usage: verify-settled-evidence <bundle.json> <tenant> <intent> <expected.sha256> [--audience <expected-audience>]";
 
 async function readText(path: string, limit: number) {
   const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
@@ -27,16 +27,16 @@ async function main(args: string[]) {
     console.log(usage);
     return;
   }
-  if (args.length !== 4 || args.some(v => !v.trim())) {
+  if (!(args.length === 4 || (args.length === 6 && args[4] === "--audience")) || args.some(v => !v.trim())) {
     console.error(usage);
     process.exitCode = 2;
     return;
   }
-  const [bundle, tenantId, intentId, pinFile] = args;
+  const [bundle, tenantId, intentId, pinFile, , audience] = args;
   const pin = await readText(pinFile, 128);
   if (!/^sha256:[0-9a-f]{64}(?:\r?\n)?$/.test(pin)) throw new Error("Invalid pin");
   const json = await readText(bundle, 4 * 1024 * 1024);
-  const report = await verifySettledEvidence(json, { tenantId, intentId }, pin.trimEnd());
+  const report = await verifySettledEvidence(json, { tenantId, intentId, audience }, pin.trimEnd());
   console.log(JSON.stringify(report));
 }
 

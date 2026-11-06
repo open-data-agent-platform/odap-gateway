@@ -3,7 +3,7 @@ import { runBigQueryDryRun } from "../lib/bigquery";
 import { intentJobIdentity, observeIntentJob } from "../lib/bigquery-job-recovery";
 
 const binding = { tenantId: "tenant", intentId: "intent", actionDigest: "digest", projectId: "demo-project", location: "US" };
-const env = { BIGQUERY_PROJECT_ID: binding.projectId, BIGQUERY_LOCATION: binding.location,
+const env = { GATEWAY_MODE: "demo" as const, BIGQUERY_PROJECT_ID: binding.projectId, BIGQUERY_LOCATION: binding.location,
   BIGQUERY_CLIENT_EMAIL: "fixture@example.test", BIGQUERY_PRIVATE_KEY: "" };
 
 beforeAll(async () => {
@@ -51,7 +51,7 @@ describe("BigQuery wire contract", () => {
     expect(changed.labels).not.toEqual(a.labels);
   });
 
-  it.each([404, 403, 503])("never resubmits after lookup HTTP %i", async status => {
+  it.each([301, 302, 303, 307, 308, 404, 403, 503])("never resubmits after lookup HTTP %i", async status => {
     const http = mockWarehouse({}, status);
     const observation = observeIntentJob(env, binding);
     if (status === 404) await expect(observation).resolves.toEqual({ state: "not-found" });
@@ -61,6 +61,7 @@ describe("BigQuery wire contract", () => {
     expect(String(url)).toContain("/jobs/odap_");
     expect(new URL(String(url)).searchParams.get("location")).toBe("US");
     expect(options?.method ?? "GET").toBe("GET");
+    expect(options?.redirect).toBe("manual");
     expect(options?.body).toBeUndefined();
   });
 

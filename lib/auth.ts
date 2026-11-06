@@ -38,7 +38,7 @@ export function isAuthProvider(value: string): value is AuthProvider {
 }
 
 export function sanitizeReturnTo(value: string | null | undefined) {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u0020\u007f]/.test(value)) {
     return "/";
   }
 
@@ -154,9 +154,17 @@ export function readCookie(cookieHeader: string | null, name: string) {
 
   const cookies = cookieHeader.split(";").map((cookie) => cookie.trim());
   const prefix = `${name}=`;
-  const match = cookies.find((cookie) => cookie.startsWith(prefix));
+  const matches = cookies.filter((cookie) => cookie.startsWith(prefix));
+  if (matches.length !== 1) {
+    return undefined;
+  }
 
-  return match ? decodeURIComponent(match.slice(prefix.length)) : undefined;
+  // Cookie headers are untrusted; malformed or ambiguous values are not identity.
+  try {
+    return decodeURIComponent(matches[0].slice(prefix.length));
+  } catch {
+    return undefined;
+  }
 }
 
 export function createSessionCookie(value: string, secure = true) {
