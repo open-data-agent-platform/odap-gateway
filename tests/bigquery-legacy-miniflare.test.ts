@@ -12,6 +12,7 @@ let mf: Miniflare;
 let status = 200;
 let malformed = false;
 let queryError = false;
+let queryPayload: object | undefined;
 let bodyMode = "normal";
 let activeStream: ReadableStreamDefaultController<Uint8Array> | undefined;
 
@@ -44,6 +45,7 @@ beforeAll(async () => {
         if (malformed) return new NativeResponse("synthetic-private-response");
       }
       if (queryError) return NativeResponse.json({ errors: [{ reason: "synthetic-private-reason", message: "synthetic-private-response" }] });
+      if (queryPayload !== undefined) return NativeResponse.json(queryPayload);
       const payload = JSON.stringify({ statistics: { totalBytesProcessed: "17" }, jobComplete: true, totalRows: "0", rows: [] });
       if (bodyMode === "stall") return new NativeResponse(new ReadableStream<Uint8Array>({
         start(controller) { activeStream = controller; controller.enqueue(new TextEncoder().encode("{")); },
@@ -58,7 +60,7 @@ beforeAll(async () => {
     }
   });
 }, 30000);
-beforeEach(() => { calls.length = 0; status = 200; malformed = false; queryError = false; bodyMode = "normal"; });
+beforeEach(() => { calls.length = 0; status = 200; malformed = false; queryError = false; queryPayload = undefined; bodyMode = "normal"; });
 afterEach(() => { activeStream?.close(); activeStream = undefined; });
 afterAll(async () => { await mf?.dispose(); });
 
@@ -129,5 +131,20 @@ describe.each(["dry-run", "query"] as const)("legacy %s in Workers", operation =
 it("rejects query errors without returning private provider details", async () => {
   queryError = true;
   expect(await run("query")).toEqual({ ok: false, code: "bigquery_query_error", message: "BigQuery query failed." });
+  expect(calls).toHaveLength(2);
+});
+
+it.each([
+  ["missing completion", { totalRows: "0", rows: [] }, "bigquery_query_failed"],
+  ["unfinished job", { jobComplete: false }, "bigquery_query_incomplete"],
+  ["another page", { jobComplete: true, totalRows: "0", rows: [], pageToken: "synthetic-private-token" }, "bigquery_query_incomplete"],
+  ["missing rows", { jobComplete: true, totalRows: "1", rows: [] }, "bigquery_query_failed"],
+  ["invalid count", { jobComplete: true, totalRows: "", rows: [] }, "bigquery_query_failed"],
+  ["missing cell", { jobComplete: true, totalRows: "1", schema: { fields: [{ name: "n" }] }, rows: [{ f: [] }] }, "bigquery_query_failed"]
+] as const)("refuses %s in Workers without pagination or retry", async (_name, payload, code) => {
+  queryPayload = payload;
+  const result = await run("query");
+  expect(result).toMatchObject({ ok: false, code });
+  expect(JSON.stringify(result)).not.toContain("synthetic-private");
   expect(calls).toHaveLength(2);
 });

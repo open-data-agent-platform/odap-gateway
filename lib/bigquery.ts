@@ -67,6 +67,7 @@ type BigQueryQueryResponse = {
     }>;
   }>;
   totalRows?: string;
+  pageToken?: string;
   jobComplete?: boolean;
   jobReference?: {
     projectId?: string;
@@ -221,10 +222,24 @@ export async function runBigQueryQuery(
       };
     }
 
+    if (query.jobComplete !== true ||
+        (query.pageToken !== undefined && typeof query.pageToken !== "string")) {
+      throw new Error("Invalid query completion metadata.");
+    }
+    if (query.pageToken) {
+      return { ok: false, code: "bigquery_query_incomplete",
+        message: "BigQuery schema import requires a complete single-page result." };
+    }
+    const rows = parseBigQueryRows(query);
+    if (typeof query.totalRows !== "string" || !/^(0|[1-9][0-9]*)$/.test(query.totalRows) ||
+        !Number.isSafeInteger(Number(query.totalRows)) || Number(query.totalRows) !== rows.length) {
+      throw new Error("Invalid query row count.");
+    }
+
     return {
       ok: true,
-      rows: parseBigQueryRows(query),
-      totalRows: Number(query.totalRows ?? query.rows?.length ?? 0),
+      rows,
+      totalRows: rows.length,
       jobReference: query.jobReference
     };
   } catch {
@@ -512,21 +527,30 @@ function createGoogleApiError(response: Response) {
 }
 
 function parseBigQueryRows(query: BigQueryQueryResponse): BigQueryQueryRow[] {
-  const fields = query.schema?.fields ?? [];
+  const rows = query.rows === undefined ? [] : query.rows;
+  const fields = query.schema === undefined ? [] : query.schema?.fields;
+  if (!Array.isArray(rows) || !Array.isArray(fields) || (rows.length > 0 && fields.length === 0)) {
+    throw new Error("Invalid query rows or schema.");
+  }
+  const names = fields.map(field => {
+    if (!field || typeof field.name !== "string" || !field.name.trim()) {
+      throw new Error("Invalid query field name.");
+    }
+    return field.name;
+  });
+  if (new Set(names).size !== names.length) throw new Error("Duplicate query field name.");
 
-  return (query.rows ?? []).map((row) => {
-    const record: BigQueryQueryRow = {};
-
-    fields.forEach((field, index) => {
-      const name = field.name;
-      if (!name) {
-        return;
+  return rows.map(row => {
+    if (!row || !Array.isArray(row.f) || row.f.length !== names.length) {
+      throw new Error("Invalid query cells.");
+    }
+    // Do not silently drop duplicate columns or turn missing cells into SQL NULL.
+    return Object.fromEntries(row.f.map((cell, index) => {
+      if (!cell || typeof cell !== "object" || !Object.hasOwn(cell, "v")) {
+        throw new Error("Invalid query cell.");
       }
-
-      record[name] = normalizeBigQueryValue(row.f?.[index]?.v);
-    });
-
-    return record;
+      return [names[index], normalizeBigQueryValue(cell.v)];
+    }));
   });
 }
 

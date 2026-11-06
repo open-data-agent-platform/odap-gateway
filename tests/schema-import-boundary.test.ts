@@ -90,4 +90,22 @@ describe("legacy schema import warehouse boundary", () => {
     expect(result).toMatchObject({ok:false,code:"legacy_query_disabled"});
     expect(calls).toEqual([]);
   });
+  it.each([
+    ["missing completion", { jobComplete: undefined }, "bigquery_query_failed"],
+    ["another page", { pageToken: "synthetic-private-token" }, "bigquery_query_incomplete"],
+    ["missing row", { totalRows: "2" }, "bigquery_query_failed"],
+    ["missing count", { totalRows: undefined }, "bigquery_query_failed"],
+    ["missing cell", { rows: [{ f: [] }] }, "bigquery_query_failed"]
+  ] as const)("refuses %s before catalog I/O", async (_name, patch, code) => {
+    warehouseBody = JSON.stringify({ jobComplete: true, totalRows: "1", schema: { fields: [
+      "table_catalog", "table_schema", "table_name", "table_type", "column_name", "data_type", "is_nullable", "ordinal_position", "policy_tags"
+    ].map(name => ({ name })) }, rows: [{ f: [
+      "fixture-project", "fixture_dataset", "orders", "BASE TABLE", "id", "INT64", "NO", "1", null
+    ].map(v => ({ v })) }], ...patch });
+    const response = await post("demo");
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ ok: false, code });
+    expect(calls).toEqual([tokenUrl, queryUrl]);
+    expect(prepare).not.toHaveBeenCalled();
+  });
 });

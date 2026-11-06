@@ -139,3 +139,28 @@ remain unavailable in production and are not a substitute for governed dispatch.
 Synthetic unit tests cover exact/over-limit bytes, UTF-8, late headers and shared
 deadlines; native Workers tests cover real stalled streams for both helpers. The
 schema-import API tests verify that refused responses cannot reach catalog I/O.
+
+### Complete single-page imports
+
+The demo schema importer does not implement query-result pagination. Google
+[`jobs.query`](https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/jobs/query)
+returns the first page; `totalRows` describes the whole result, and a nonempty
+`pageToken` signals more pages. A successful transport response is therefore not
+enough to authorize catalog persistence.
+
+The query helper requires `jobComplete: true`, an absent or empty string page
+token, and a canonical unsigned decimal `totalRows` within the safe integer range
+that exactly matches the returned row count. Omitted rows are accepted only with
+a confirmed zero count. Nonempty rows require unique, nonempty column names and
+exactly one explicitly present cell value per column. Null values remain null;
+missing cells are not converted to null, duplicate names cannot overwrite cells,
+and prototype-like column names remain ordinary own properties.
+
+Unfinished jobs and additional pages return `bigquery_query_incomplete`; malformed
+completion/count/schema/cell metadata returns the static `bigquery_query_failed`.
+There is no follow-up polling, pagination, retry or partial catalog write. A caller
+must reduce the import scope rather than assume the first page is complete. These
+checks establish response-envelope and row-mapping consistency, not freshness,
+domain-level metadata correctness, warehouse cancellation or production readiness.
+Synthetic transport, Worker API and native Workers regressions exercise refusal
+before catalog I/O; existing positive import transaction tests remain in place.
