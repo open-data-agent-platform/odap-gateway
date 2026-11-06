@@ -125,7 +125,8 @@ describe("durable candidate review, before release", () => {
     expect(await approvalCount()).toEqual({ n: 0 });
   });
 
-  it("rechecks the active named owner even when another tenant has the same owner and revision ID", async () => {
+  it.each(["peer", "reviewer", "second", "demoted", "inactive"] as const)(
+    "rejects %s approval without borrowing the identically named peer revision", async actor => {
     const { definitionDigest } = await proposeSemanticRevision(reviewer, proposal);
     await recordSemanticValidation(owner, "rev", definitionDigest, approval.evidenceRef);
     const input = { ...approval, reviewedDigest: definitionDigest };
@@ -135,13 +136,12 @@ describe("durable candidate review, before release", () => {
     const peerRevision = await proposeSemanticRevision(peer, { ...proposal,
       definitionJson: JSON.stringify({ ...metric, tenantId: "peer" }) });
     await recordSemanticValidation(peer, "rev", peerRevision.definitionDigest, approval.evidenceRef);
-    for (const caller of [peer, reviewer, access("second")]) {
-      await expect(approveSemanticRevision(caller, input)).rejects.toThrow("not recorded");
-    }
-    await sqlite("run", "UPDATE control_memberships SET role='reviewer' WHERE tenant_id='t' AND principal_id='owner'");
-    await expect(approveSemanticRevision(owner, input)).rejects.toThrow("not recorded");
-    await sqlite("run", "UPDATE control_memberships SET role='owner',active=0 WHERE tenant_id='t' AND principal_id='owner'");
-    await expect(approveSemanticRevision(owner, input)).rejects.toThrow("not recorded");
+    if (actor === "demoted")
+      await sqlite("run", "UPDATE control_memberships SET role='reviewer' WHERE tenant_id='t' AND principal_id='owner'");
+    if (actor === "inactive")
+      await sqlite("run", "UPDATE control_memberships SET active=0 WHERE tenant_id='t' AND principal_id='owner'");
+    const caller = actor === "peer" ? peer : actor === "reviewer" ? reviewer : actor === "second" ? access("second") : owner;
+    await expect(approveSemanticRevision(caller, input)).rejects.toThrow("not recorded");
     expect(await approvalCount()).toEqual({ n: 0 });
     await approveSemanticRevision(peer, { ...input, reviewedDigest: peerRevision.definitionDigest });
     expect(await sqlite("readonly-first", "SELECT tenant_id FROM semantic_candidate_approvals")).toEqual({ tenant_id: "peer" });

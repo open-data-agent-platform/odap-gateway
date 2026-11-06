@@ -253,7 +253,19 @@ Administrator role, feature rollout, schema-field policy, run review, feedback
 review and schema-import commands use the same bounded reader, with a 16 KiB
 actual-byte ceiling and one 15-second body deadline. These limits apply only
 after the existing session and current administrator checks, and route-ID checks
-where applicable. Refusal returns 413 (`admin_body_too_large`) or 408
+where applicable. Before reading the body, these six commands also require an
+`Origin` header exactly matching the request URL's origin and an
+`application/json` media type (case-insensitive, with optional parameters).
+Missing, opaque (`null`) or different origins return 403 (`same_origin_required`);
+missing or other media types return 415 (`json_required`). Sibling subdomains,
+different schemes and ports are not the same origin. Forwarded headers and
+`Referer` do not override this check. Browser JSON requests send the origin
+automatically; non-browser cookie clients must supply it explicitly. This does
+not replace session, current-role or write-time authority checks, and does not
+change read-only administrator routes. All refusals are no-store and perform no
+business mutation or provider call.
+
+Body-size or deadline refusal returns 413 (`admin_body_too_large`) or 408
 (`admin_body_timeout`) with no-store responses; no mutation or provider call
 follows it. Malformed JSON, non-object input, invalid UTF-8 and aborted bodies
 return 400 (`invalid_json`, or the existing `invalid_rollout` on feature rollout).

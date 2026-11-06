@@ -158,7 +158,7 @@ describe("schema import acknowledgment boundary",() => {
     const cookie = createSessionCookie(await signAuthPayload({provider:"google",providerId:"actor",role:"admin",
       email:"actor@example.test",name:"Actor",expiresAt:Date.now()+600000},secret));
     const response = await worker.fetch(new Request("https://gateway.test/api/admin/schema-import",{
-      method:"POST",headers:{Cookie:cookie},body:JSON.stringify({workspace:"fixture",dataset:"fixture",projectId:"fixture-project"})
+      method:"POST",headers:{Cookie:cookie,Origin:"https://gateway.test","Content-Type":"application/json"},body:JSON.stringify({workspace:"fixture",dataset:"fixture",projectId:"fixture-project"})
     }),{DB:db,GATEWAY_MODE:"demo",AUTH_COOKIE_SECRET:secret,ASSETS:{fetch:async () => {throw new Error("Unexpected assets");}}},
     {waitUntil:() => undefined});
     const body = await response.json();

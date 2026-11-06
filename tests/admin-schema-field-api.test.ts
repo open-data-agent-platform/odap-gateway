@@ -80,7 +80,9 @@ async function createAdminRequest(body: Record<string, unknown>) {
     {
       method: "PATCH",
       headers: {
-        Cookie: cookie
+        Cookie: cookie,
+        Origin: "https://odap-gateway.local",
+        "Content-Type": "application/json"
       },
       body: JSON.stringify(body)
     }

@@ -24,7 +24,7 @@ const sql = (query: string) => jobSqlite(file,"run",query);
 const flag = () => jobSqlite(file,"readonly-first","SELECT rollout,status FROM feature_flags WHERE id='fixture-flag'");
 const auditCount = () => jobSqlite(file,"readonly-first","SELECT count(*) n FROM audit_events WHERE action='feature_flag.rollout_updated'");
 const request = (rollout: unknown = 100) => new Request("https://gateway.test/api/admin/feature-flags/fixture-flag",{
-  method:"PATCH",headers:{Cookie:cookie,"Content-Type":"application/json"},body:JSON.stringify({rollout})
+  method:"PATCH",headers:{Cookie:cookie,Origin:"https://gateway.test","Content-Type":"application/json"},body:JSON.stringify({rollout})
 });
 const submit = (input = request()) => worker.fetch(input,env,{waitUntil:() => {throw new Error("Unexpected background task");}});
 

@@ -28,10 +28,17 @@ describe("administrator body admission in installed Workers", () => {
           else if (mode === "exact") body = " ".repeat(16368) + '{"role":"owner"}';
           else body = new ReadableStream({ pull(c) { pulls++;
             if (mode === "oversized") c.enqueue(new Uint8Array(16385));
+            if (mode.startsWith("request-")) { c.enqueue(new TextEncoder().encode("{}")); c.close(); }
           }, cancel }, { highWaterMark: 0 });
+          const headers = new Headers({ Cookie: SESSION_COOKIE + "=" + token,
+            Origin: "https://gateway.test", "Content-Type": "application/json" });
+          if (mode === "request-missing-origin") headers.delete("Origin");
+          if (mode === "request-null-origin") headers.set("Origin", "null");
+          if (mode === "request-sibling-origin") headers.set("Origin", "https://other.gateway.test");
+          if (mode === "request-form") headers.set("Content-Type", "text/plain");
           const request = new Request("https://gateway.test/gateway/api/admin/" + path, {
             method: path === "schema-import" ? "POST" : "PATCH", body,
-            headers: { Cookie: SESSION_COOKIE + "=" + token, "Content-Type": "application/json" }
+            headers
           });
           const db = { prepare(sql) { calls++;
             if (sql !== "SELECT role,email FROM users WHERE id=? AND provider=? AND provider_id=?") {
@@ -57,6 +64,15 @@ describe("administrator body admission in installed Workers", () => {
   afterAll(async () => { await mf?.dispose(); });
   const run = async (path: string, mode: string) => (await mf.dispatchFetch(
     "http://localhost/?" + new URLSearchParams({ path, mode }))).json();
+
+  describe.each(routes)("request metadata at %s", path => {
+    it.each(["request-missing-origin", "request-null-origin", "request-sibling-origin", "request-form"])(
+      "refuses %s without consuming the body or reaching business storage", async mode => {
+        expect(await run(path, mode)).toMatchObject({ status: mode === "request-form" ? 415 : 403,
+          body: { code: mode === "request-form" ? "json_required" : "same_origin_required" },
+          calls: 1, mutations: 0, pulls: 0, cancellations: 0, locked: false, cache: "no-store" });
+      });
+  });
 
   it.each(routes)("refuses oversized %s before mutation", async path => {
     expect(await run(path, "oversized")).toMatchObject({ status: 413, body: { code: "admin_body_too_large" },

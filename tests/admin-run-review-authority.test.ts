@@ -28,7 +28,7 @@ const state = async () => ({
 });
 const original = {review:{status:"needs_approval"},run:{status:"needs_approval"},audit:{n:0}};
 const request = (status: unknown = "approved") => new Request("https://gateway.test/api/admin/run-reviews/fixture-run",{
-  method:"PATCH",headers:{Cookie:cookie,"Content-Type":"application/json"},body:JSON.stringify({status})
+  method:"PATCH",headers:{Cookie:cookie,Origin:"https://gateway.test","Content-Type":"application/json"},body:JSON.stringify({status})
 });
 const submit = (input = request()) => worker.fetch(input,env,{waitUntil:() => {throw new Error("Unexpected background task");}});
 

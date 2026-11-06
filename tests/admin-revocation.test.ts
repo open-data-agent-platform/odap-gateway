@@ -19,7 +19,7 @@ const env = {AUTH_COOKIE_SECRET:secret,DB:db,ASSETS:{fetch:assets}};
 const cookie = (id: string, provider: "google" | "github" = "google") => signAuthPayload({provider,providerId:id,
   email:id+"@example.test",name:id,role:"admin",expiresAt:Date.now()+60000},secret).then(t => createSessionCookie(t,true));
 const request = (path: string, token: string, role?: string) => new Request("https://gateway.test"+path,{
-  method:role ? "PATCH" : "GET", headers:{Cookie:token},...(role ? {body:JSON.stringify({role})} : {})
+  method:role ? "PATCH" : "GET", headers:{Cookie:token,...(role ? {Origin:"https://gateway.test","Content-Type":"application/json"} : {})},...(role ? {body:JSON.stringify({role})} : {})
 });
 const fetchLocal = (req: Request, bindings: Parameters<typeof worker.fetch>[1] = env) =>
   worker.fetch(req,bindings,{waitUntil:() => undefined});

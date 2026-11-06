@@ -25,7 +25,7 @@ const metadata = {ok:true as const,totalRows:2,rows:["orders","lines"].map(table
   column_name:"contact",data_type:"STRING",is_nullable:"YES",ordinal_position:1,policy_tags:null
 }))};
 const request = () => new Request("https://gateway.test/api/admin/schema-import",{
-  method:"POST",headers:{Cookie:cookie},body:JSON.stringify({projectId:"fixture-project",dataset:"fixture",workspace:"fixture"})
+  method:"POST",headers:{Cookie:cookie,Origin:"https://gateway.test","Content-Type":"application/json"},body:JSON.stringify({projectId:"fixture-project",dataset:"fixture",workspace:"fixture"})
 });
 const submit = (input = request()) => worker.fetch(input,env,{waitUntil:() => {throw new Error("Unexpected background task");}});
 async function denied(response: Response, snapshot: Buffer) {

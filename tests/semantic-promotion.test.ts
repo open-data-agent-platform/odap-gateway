@@ -173,7 +173,7 @@ describe("local promotion of an approved semantic revision", () => {
       expect(await withdrawalCounts()).toEqual({ withdrawals: 1, events: 1 });
     });
 
-    it("allows only the current approving owner to withdraw or inspect the terminal result", async () => {
+    it("allows only the current approving owner to withdraw an unpublished approval", async () => {
       await sql("run", "INSERT INTO control_tenants VALUES('peer','Peer')");
       await sql("run", "INSERT INTO control_memberships VALUES('peer','owner','owner',1),('t','other','owner',1)");
       const peer = { ...owner, tenantId: "peer" }, other = { ...owner, principalId: "other" };
@@ -185,13 +185,20 @@ describe("local promotion of an approved semantic revision", () => {
       await sql("run", "UPDATE control_memberships SET active=0 WHERE principal_id='owner' AND tenant_id='t'");
       await expect(withdrawSemanticApproval(owner, withdrawal)).rejects.toThrow("unavailable");
       expect(await withdrawalCounts()).toEqual({ withdrawals: 0, events: 0 });
-      await sql("run", "UPDATE control_memberships SET active=1 WHERE principal_id='owner' AND tenant_id='t'");
+    });
+
+    it("rechecks current ownership before revealing an already published result", async () => {
+      await sql("run", "INSERT INTO control_tenants VALUES('peer','Peer')");
+      await sql("run", "INSERT INTO control_memberships VALUES('peer','owner','owner',1),('t','other','owner',1)");
+      const peer = { ...owner, tenantId: "peer" }, other = { ...owner, principalId: "other" };
       await head();
       await promoteSemanticRevision(owner, input);
       await sql("run", "UPDATE control_memberships SET role='reader' WHERE principal_id='owner' AND tenant_id='t'");
       for (const caller of [owner, other, peer]) {
         await expect(withdrawSemanticApproval(caller, withdrawal)).rejects.toThrow("unavailable");
       }
+      expect(await withdrawalCounts()).toEqual({ withdrawals: 0, events: 0 });
+      expect(await counts()).toEqual(one);
     });
 
     it("commits precisely one outcome when withdrawal races publication on independent connections", async () => {

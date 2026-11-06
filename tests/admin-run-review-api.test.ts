@@ -112,7 +112,9 @@ async function createAdminRequest(
   return new Request("https://odap-gateway.local/api/admin/run-reviews/run-1", {
     method,
     headers: {
-      Cookie: cookie
+      Cookie: cookie,
+      Origin: "https://odap-gateway.local",
+      "Content-Type": "application/json"
     },
     body: method === "GET" ? undefined : JSON.stringify(body)
   });

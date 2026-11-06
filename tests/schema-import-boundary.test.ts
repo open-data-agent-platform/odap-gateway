@@ -38,7 +38,7 @@ async function post(mode: string | undefined, role: "admin" | "member" | null = 
   const cookie = role ? createSessionCookie(await signAuthPayload({provider:"google",providerId:"fixture",
     email:"fixture@example.test",name:"Fixture",role,expiresAt:Date.now()+60000},secret),true) : "";
   return worker.fetch(new Request("https://gateway.test/api/admin/schema-import?GATEWAY_MODE=demo",{
-    method:"POST",headers:{Cookie:cookie,"X-Gateway-Mode":"demo"},body:JSON.stringify({
+    method:"POST",headers:{Cookie:cookie,Origin:"https://gateway.test","Content-Type":"application/json","X-Gateway-Mode":"demo"},body:JSON.stringify({
       projectId:"fixture-project",dataset:"fixture_dataset",workspace:"other_tenant",
       GATEWAY_MODE:"demo",contractId:"claimed-contract",reservationId:"claimed-reservation"
     })

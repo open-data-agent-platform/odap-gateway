@@ -26,7 +26,7 @@ const row = () => jobSqlite(file,"readonly-first","SELECT * FROM docs_feedback W
 const auditCount = () => jobSqlite(file,"readonly-first","SELECT count(*) n FROM audit_events WHERE action='docs_feedback.reviewed'");
 const request = (body: Record<string,unknown> = {status:"approved",answerText:"Revised answer."}) =>
   new Request("https://gateway.test/api/admin/docs-feedback/fixture-feedback",{
-    method:"PATCH",headers:{Cookie:cookie,"Content-Type":"application/json"},body:JSON.stringify(body)
+    method:"PATCH",headers:{Cookie:cookie,Origin:"https://gateway.test","Content-Type":"application/json"},body:JSON.stringify(body)
   });
 const submit = (input = request()) => worker.fetch(input,env,{waitUntil:() => {throw new Error("Unexpected background task");}});
 

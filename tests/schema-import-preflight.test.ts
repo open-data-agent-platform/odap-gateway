@@ -51,7 +51,7 @@ function storage(capability: unknown = "healthy") {
 function post(env: BigQueryEnv & {DB?:D1Database;ODAP_GATEWAY_DB?:D1Database},
   signed = cookie, body = JSON.stringify({...input,GATEWAY_MODE:"demo"})) {
   return worker.fetch(new Request("https://gateway.test/api/admin/schema-import?GATEWAY_MODE=demo",{
-    method:"POST",headers:{Cookie:signed,"X-Gateway-Mode":"demo"},body
+    method:"POST",headers:{Cookie:signed,Origin:"https://gateway.test","Content-Type":"application/json","X-Gateway-Mode":"demo"},body
   }),{...env,AUTH_COOKIE_SECRET:secret,ASSETS:{fetch:async () => {throw new Error("Unexpected assets");}}},
   {waitUntil:() => undefined});
 }

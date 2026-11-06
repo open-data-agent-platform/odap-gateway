@@ -6,6 +6,10 @@ type AdminBodyResult =
 
 // Call only after verifying current administrator authority and route identifiers.
 export async function readAdminJsonBody(request: Request): Promise<AdminBodyResult> {
+  if (request.headers.get("Origin") !== new URL(request.url).origin)
+    return { ok: false, status: 403, code: "same_origin_required", message: "A same-origin administrator request is required." };
+  if (request.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase() !== "application/json")
+    return { ok: false, status: 415, code: "json_required", message: "Administrator requests must use application/json." };
   const body = await readBoundedRequestJson(request, 16 * 1024);
   if (!body.ok) {
     if (body.reason === "too_large") return { ok: false, status: 413, code: "admin_body_too_large",

@@ -24,7 +24,7 @@ const policy = () => jobSqlite(file,"readonly-first","SELECT queryable,pii FROM 
 const auditCount = () => jobSqlite(file,"readonly-first","SELECT count(*) n FROM audit_events WHERE action='schema_field.policy_updated'");
 const request = (body: Record<string,unknown> = {queryable:true,pii:false}) => new Request(
   "https://gateway.test/api/admin/schema-fields/sensitive-field",{
-    method:"PATCH",headers:{Cookie:cookie,"Content-Type":"application/json"},body:JSON.stringify(body)
+    method:"PATCH",headers:{Cookie:cookie,Origin:"https://gateway.test","Content-Type":"application/json"},body:JSON.stringify(body)
   });
 const submit = (input = request()) => worker.fetch(input,env,{waitUntil:() => {throw new Error("Unexpected background task");}});
 

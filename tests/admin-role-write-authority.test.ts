@@ -23,7 +23,7 @@ const sql = (query: string) => jobSqlite(file,"run",query);
 const storedRole = (id = "google:target") => jobSqlite(file,"readonly-first","SELECT role FROM users WHERE id=?",[id]);
 const auditCount = () => jobSqlite(file,"readonly-first","SELECT count(*) n FROM audit_events WHERE action='user.role_updated'");
 const request = (id = "google:target",role = "admin") => new Request("https://gateway.test/api/admin/users/"+encodeURIComponent(id),{
-  method:"PATCH",headers:{Cookie:cookie,"Content-Type":"application/json"},body:JSON.stringify({role})
+  method:"PATCH",headers:{Cookie:cookie,Origin:"https://gateway.test","Content-Type":"application/json"},body:JSON.stringify({role})
 });
 const submit = (input = request()) => worker.fetch(input,env,{waitUntil:() => {throw new Error("Unexpected background task");}});
 
