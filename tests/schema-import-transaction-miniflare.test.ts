@@ -4,6 +4,7 @@ import { ensureAdminSchema, importSchemaCatalog, type SchemaImportTableInput } f
 import type { D1Database } from "../lib/d1";
 import { importBigQuerySchemaCatalog } from "../lib/schema-import";
 import * as bigquery from "../lib/bigquery";
+import { evaluateSchemaPolicy } from "../lib/schema-policy";
 
 let mf: Miniflare, db: D1Database;
 const actor = {provider:"google" as const,providerId:"actor",email:"ACTOR@example.test"};
@@ -106,6 +107,94 @@ describe("schema import transaction on installed local D1",() => {
     expect(audits).toHaveLength(2);
     expect(audits).toContainEqual(expect.objectContaining({actor_email:"actor@example.test",action:"schema_catalog.imported",
       target:"fixture",metadata_json:'{"importedTables":2,"importedFields":3}',created_at:result.value.importedAt}));
+  });
+
+  it.each([[0, 1], [1, 1], [0, 0], [1, 0]])(
+    "tightens tagged reimports from pii=%i/queryable=%i and never reopens them after tag removal", async (pii, queryable) => {
+      await db.prepare("UPDATE schema_fields SET pii=?,queryable=? WHERE id='historical-contact'").bind(pii, queryable).run();
+      const metadata = { table_catalog: "fixture-project", table_schema: "fixture", table_name: "orders",
+        table_type: "BASE TABLE", column_name: "contact", data_type: "STRING", is_nullable: "YES", ordinal_position: 1,
+        policy_tags: "projects/fixture/locations/us/taxonomies/1/policyTags/2" };
+      const query = vi.spyOn(bigquery, "runBigQueryQuery")
+        .mockResolvedValueOnce({ ok: true, totalRows: 1, rows: [metadata] })
+        .mockResolvedValueOnce({ ok: true, totalRows: 1, rows: [{ ...metadata, policy_tags: null }] });
+      const request = { workspace: "fixture", dataset: "fixture", projectId: "fixture-project" };
+      const policyInput = { workspace: "fixture", sql: "SELECT contact FROM `fixture.orders`" };
+      expect((await evaluateSchemaPolicy({ DB: db }, policyInput)).blocked).toBe(pii === 1 || queryable === 0);
+      expect(await importBigQuerySchemaCatalog({ DB: db, GATEWAY_MODE: "demo" }, request, actor)).toMatchObject({ ok: true });
+      const restriction = await db.prepare("SELECT id,pii,queryable FROM schema_fields WHERE field_name='contact'").first();
+      expect(restriction).toEqual({ id: "historical-contact", pii: 1, queryable: 0 });
+      const policy = await evaluateSchemaPolicy({ DB: db }, policyInput);
+      expect(policy.blocked).toBe(true);
+      expect(policy.reasons.join(" ")).toContain("fixture.orders.contact is not queryable");
+      const audit = await db.prepare("SELECT metadata_json FROM audit_events WHERE action='schema_catalog.imported'")
+        .first<{ metadata_json: string }>();
+      expect(JSON.parse(audit!.metadata_json)).toEqual({ importedTables: 1, importedFields: 1,
+        requestedRestrictions: [{ table: "fixture.orders", field: "contact", pii: true, queryable: false }] });
+      expect(audit!.metadata_json).not.toContain(metadata.policy_tags);
+      expect(await importBigQuerySchemaCatalog({ DB: db, GATEWAY_MODE: "demo" }, request, actor)).toMatchObject({ ok: true });
+      expect(await db.prepare("SELECT id,pii,queryable FROM schema_fields WHERE field_name='contact'").first()).toEqual(restriction);
+      expect((await evaluateSchemaPolicy({ DB: db }, policyInput)).blocked).toBe(true);
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(await db.prepare("SELECT count(*) n FROM audit_events WHERE action='schema_catalog.imported'").first()).toEqual({ n: 2 });
+    });
+
+  it.each([
+    [{ pii: true }, 1, 1], [{ queryable: false }, 0, 0],
+    [{ pii: false, queryable: true }, 0, 1], [{}, 0, 1]
+  ] satisfies Array<[Partial<SchemaImportTableInput["fields"][number]>, number, number]>)(
+    "applies only explicit restrictions %j without reapplying name heuristics", async (flags, pii, queryable) => {
+      await db.prepare("UPDATE schema_fields SET field_name='email',pii=0,queryable=1 WHERE id='historical-contact'").run();
+      const reimport = structuredClone(input);
+      reimport.tables = [reimport.tables[0]];
+      reimport.tables[0].fields = [{ name: "email", type: "STRING", mode: "NULLABLE", ...flags },
+        { name: "phone", type: "STRING", mode: "NULLABLE" }];
+      expect(await importSchemaCatalog({ DB: db }, reimport, actor)).toMatchObject({ ok: true });
+      expect(await db.prepare("SELECT id,pii,queryable FROM schema_fields WHERE field_name='email'").first())
+        .toEqual({ id: "historical-contact", pii, queryable });
+      expect(await db.prepare("SELECT pii,queryable FROM schema_fields WHERE field_name='phone'").first())
+        .toEqual({ pii: 1, queryable: 0 });
+    });
+
+  it.each(["ABORT", "IGNORE"])("rolls back new restrictions and their audit when a later write uses %s", async mode => {
+    await db.prepare("UPDATE schema_fields SET pii=0,queryable=1 WHERE id='historical-contact'").run();
+    await db.prepare(`CREATE TRIGGER failed_write BEFORE INSERT ON schema_fields WHEN NEW.field_name='line_id'
+      BEGIN SELECT RAISE(${mode}${mode === "ABORT" ? ",'synthetic restriction failure'" : ""}); END`).run();
+    const reimport = structuredClone(input);
+    Object.assign(reimport.tables[0].fields[0], { pii: true, queryable: false });
+    const before = await state();
+    await expect(importSchemaCatalog({ DB: db }, reimport, actor)).rejects.toThrow();
+    expect(await state()).toEqual(before);
+  });
+
+  it("merges restrictions with the current field policy at transaction execution", async () => {
+    await db.prepare("UPDATE schema_fields SET pii=0,queryable=1 WHERE id='historical-contact'").run();
+    const reimport = structuredClone(input);
+    reimport.tables[0].fields[0].pii = true;
+    const batch = vi.fn(async (statements: Parameters<NonNullable<D1Database["batch"]>>[0]) => {
+      await db.prepare("UPDATE schema_fields SET queryable=0 WHERE id='historical-contact'").run();
+      return db.batch!(statements);
+    });
+    expect(await importSchemaCatalog({ DB: { prepare: query => db.prepare(query), batch } }, reimport, actor)).toMatchObject({ ok: true });
+    expect(await db.prepare("SELECT id,pii,queryable FROM schema_fields WHERE field_name='contact'").first())
+      .toEqual({ id: "historical-contact", pii: 1, queryable: 0 });
+    expect(batch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not undo a committed restriction when its acknowledgment is lost", async () => {
+    await db.prepare("UPDATE schema_fields SET pii=0,queryable=1 WHERE id='historical-contact'").run();
+    const reimport = structuredClone(input);
+    Object.assign(reimport.tables[0].fields[0], { pii: true, queryable: false });
+    const batch = vi.fn(async (statements: Parameters<NonNullable<D1Database["batch"]>>[0]) => {
+      await db.batch!(statements);
+      throw new Error("Synthetic lost restriction acknowledgment");
+    });
+    await expect(importSchemaCatalog({ DB: { prepare: query => db.prepare(query), batch } }, reimport, actor))
+      .rejects.toThrow("Synthetic lost restriction acknowledgment");
+    expect(await db.prepare("SELECT pii,queryable FROM schema_fields WHERE field_name='contact'").first())
+      .toEqual({ pii: 1, queryable: 0 });
+    expect(await db.prepare("SELECT count(*) n FROM audit_events WHERE action='schema_catalog.imported'").first()).toEqual({ n: 1 });
+    expect(batch).toHaveBeenCalledTimes(1);
   });
 
   it.each([

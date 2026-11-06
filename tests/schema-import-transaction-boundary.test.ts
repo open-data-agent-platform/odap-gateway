@@ -95,6 +95,27 @@ describe("schema import acknowledgment boundary",() => {
     expect(batch).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    {}, { pii: 0, queryable: 0 }, { pii: true, queryable: 0 },
+    { pii: "1", queryable: 0 }, { pii: 1, queryable: 1 }, { pii: 1, queryable: false }
+  ])("rejects an acknowledgment that does not confirm explicit restrictions %j", async flags => {
+    const restricted = structuredClone(input);
+    Object.assign(restricted.tables[0].fields[0], { pii: true, queryable: false });
+    const results = confirmed();
+    Object.assign(results[4].results![0], flags);
+    const { db, batch } = fixture(results);
+    await expect(importSchemaCatalog({ DB: db }, restricted, actor)).rejects.toThrow("Schema import write not confirmed");
+    expect(batch).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts confirmed restrictions on the preserved historical field", async () => {
+    const restricted = structuredClone(input);
+    Object.assign(restricted.tables[0].fields[0], { pii: true, queryable: false });
+    const results = confirmed();
+    Object.assign(results[4].results![0], { pii: 1, queryable: 0 });
+    expect(await importSchemaCatalog({ DB: fixture(results).db }, restricted, actor)).toMatchObject({ ok: true });
+  });
+
   it("returns denial only when all writes are confirmed empty and assertions are confirmed",async () => {
     const results = confirmed();
     for (const index of [0,2,4]) results[index].results = [];

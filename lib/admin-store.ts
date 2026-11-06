@@ -1040,6 +1040,11 @@ export async function importSchemaCatalog(
   await ensureAdminSchema(configured.db);
   const importedAt = new Date().toISOString();
   const importedFields = tables.reduce((count, table) => count + table.fields.length, 0);
+  const requestedRestrictions = tables.flatMap(table => table.fields
+    .filter(field => field.pii === true || field.queryable === false)
+    .map(field => ({ table: table.name.trim(), field: field.name,
+      ...(field.pii === true ? { pii: true } : {}),
+      ...(field.queryable === false ? { queryable: false } : {}) })));
   const auditId = crypto.randomUUID();
   const authorityGuard = `EXISTS (SELECT 1 FROM users AS actor WHERE actor.id = ?
     AND actor.provider = ? AND actor.provider_id = ? AND actor.role = 'admin' AND actor.email = ?)`;
@@ -1057,7 +1062,8 @@ export async function importSchemaCatalog(
     SELECT ?, ?, 'schema_catalog.imported', ?, ?, ?
     WHERE ${authorityGuard} OR EXISTS (SELECT 1 FROM audit_events WHERE id = ?) RETURNING id`
   ).bind(auditId, actor.email.toLowerCase(), workspace,
-    JSON.stringify({importedTables: tables.length, importedFields}), importedAt,
+    JSON.stringify({ importedTables: tables.length, importedFields,
+      ...(requestedRestrictions.length ? { requestedRestrictions } : {}) }), importedAt,
     ...authorityValues, auditId), assertWrite()];
   const expectedWrites: Array<Record<string, D1Value>> = [{id: auditId}];
 
@@ -1118,9 +1124,11 @@ export async function importSchemaCatalog(
             field_type = excluded.field_type,
             mode = excluded.mode,
             description = excluded.description,
+            pii = CASE WHEN ? = 1 THEN 1 ELSE schema_fields.pii END,
+            queryable = CASE WHEN ? = 1 THEN 0 ELSE schema_fields.queryable END,
             used_in_examples = excluded.used_in_examples,
             updated_at = excluded.updated_at
-          RETURNING id, table_id, field_name`
+          RETURNING id, table_id, field_name, pii, queryable`
         )
         .bind(
           fieldId,
@@ -1136,9 +1144,14 @@ export async function importSchemaCatalog(
           queryable ? 1 : 0,
           field.usedInExamples ?? isExampleField(field.name) ? 1 : 0,
           importedAt,
-          ...authorityValues, auditId
+          ...authorityValues, auditId,
+          // Only explicit restrictions may change an existing field's policy.
+          field.pii === true ? 1 : 0,
+          field.queryable === false ? 1 : 0
         ), assertWrite());
-      expectedWrites.push({table_id: tableId, field_name: field.name});
+      expectedWrites.push({ table_id: tableId, field_name: field.name,
+        ...(field.pii === true ? { pii: 1 } : {}),
+        ...(field.queryable === false ? { queryable: 0 } : {}) });
     }
   }
 

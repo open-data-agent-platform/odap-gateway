@@ -436,8 +436,24 @@ own initialization or catalog writes. It does not fall back to another binding.
 All imported tables, fields and the audit event run in one batch. Failed or
 ignored writes, ID collisions and a table-ID change since the lookup abort the
 whole import. Confirmed matching write results are required for success. Existing
-field IDs, PII/queryable policy and fields omitted from reimport remain intact.
+field IDs and fields omitted from reimport remain intact. Reimport preserves
+existing restrictions and applies any explicit `pii=true` or `queryable=false`
+restriction to an included field inside the same transaction. Less restrictive
+inputs and absent/removed policy tags do not clear an existing restriction.
+Name-based sensitivity defaults still apply to new fields, but do not override
+an existing field's policy on reimport. Changing a restriction explicitly remains
+a separate administrator policy operation, not an import side effect.
 Import counts describe processed inputs, not the number of newly created rows.
+
+When restrictions are supplied, the import audit's `requestedRestrictions` lists
+the table/field and restrictive flags submitted in that batch. It describes the
+request, not an old/new policy diff or a claim that every listed field changed.
+Raw upstream policy-tag resource names are not added to this audit. The writer
+requires returned field acknowledgments to confirm the requested restrictive
+flags before reporting success. A missing or inconsistent acknowledgment fails
+without a retry or compensating write; the transaction may already have committed.
+This does not provide a background freshness check or synchronize later source
+changes without a new import. The production importer remains disabled.
 
 The explicit-demo wrapper also checks callable batch support after input
 validation but before token exchange, metadata querying or catalog initialization.

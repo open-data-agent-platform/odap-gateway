@@ -82,6 +82,20 @@ describe("atomic schema import storage",() => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("persists explicit restrictions with their import audit on a previously queryable field", async () => {
+    await sql("UPDATE schema_fields SET pii=0,queryable=1 WHERE id='historical-contact'");
+    const restricted = structuredClone(input);
+    Object.assign(restricted.tables[0].fields[0], { pii: true, queryable: false });
+    expect(await importSchemaCatalog({ DB: db }, restricted, actor)).toMatchObject({ ok: true });
+    expect(await jobSqlite(file, "readonly-first", "SELECT id,pii,queryable FROM schema_fields WHERE field_name='contact'"))
+      .toEqual({ id: "historical-contact", pii: 1, queryable: 0 });
+    const audit: { metadata_json: string } = await jobSqlite(file, "readonly-first",
+      "SELECT metadata_json FROM audit_events WHERE action='schema_catalog.imported'");
+    expect(JSON.parse(audit.metadata_json)).toEqual({ importedTables: 2, importedFields: 3,
+      requestedRestrictions: [{ table: "fixture.orders", field: "contact", pii: true, queryable: false }] });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["BEFORE INSERT ON schema_tables","ABORT"],["BEFORE UPDATE ON schema_tables","ABORT"],
     ["BEFORE INSERT ON schema_fields","ABORT"],["BEFORE UPDATE ON schema_fields","ABORT"],
