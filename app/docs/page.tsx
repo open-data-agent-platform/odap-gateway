@@ -21,7 +21,7 @@ import { SOURCE_REPOSITORY_URL } from "@/lib/open-source";
 export const metadata: Metadata = {
   title: "Docs",
   description:
-    "Open Data Agent Platform user guides, FAQs, comments, and questions for schema-aware SQL generation and governed dry-runs."
+    "ODAP Gateway preview limitations, demo SQL drafting, structured metric previews, FAQs, and community questions."
 };
 
 export default function DocsPage() {

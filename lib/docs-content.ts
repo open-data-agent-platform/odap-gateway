@@ -29,35 +29,35 @@ export type PublicDocsFeedback = {
 export const docsGuides: DocsGuide[] = [
   {
     id: "first-query",
-    title: "Generate your first SQL query",
+    title: "Inspect a demo SQL draft",
     summary:
-      "Use the workbench to turn a plain-English business question into schema-aware BigQuery SQL.",
+      "The workbench uses local rule-based drafting and a bundled sample schema, not a general-purpose model or a live tenant catalog.",
     steps: [
-      "Open Tools and describe the business question in plain English.",
-      "Review the generated SQL, referenced tables, and highlighted schema fields.",
-      "Run a dry-run check before copying or sending the query for approval."
+      "Open Tools to inspect a draft for a supported sample question.",
+      "Review the SQL and sample fields; the draft is not evidence of access to your warehouse.",
+      "Copying a draft is not an execution approval. Raw SQL dry-runs remain disabled in production."
     ]
   },
   {
     id: "schema-catalog",
-    title: "Manage schema context",
+    title: "Review legacy schema policy",
     summary:
-      "Keep generated SQL aligned with approved datasets, queryable fields, and PII policy.",
+      "Legacy queryable and PII flags are separate from tenant-scoped Semantic Releases and Approval Contracts.",
     steps: [
-      "Sign in as an admin and open the Schema Catalog panel.",
-      "Mark fields as queryable when they are safe for generated SQL.",
-      "Flag PII fields so future execution policies can block risky selections."
+      "A configured administrator can inspect stored catalog fields and their queryable and PII flags.",
+      "The legacy BigQuery schema importer is disabled in production; credentials do not enable it.",
+      "Changing a field flag does not publish a Semantic Release or grant permission to execute a query."
     ]
   },
   {
     id: "dry-run-review",
-    title: "Review dry-run results",
+    title: "Interpret demo preview records",
     summary:
-      "Use cost, scan volume, runtime, and safety checks before any production execution path.",
+      "On an isolated demo deployment, distinguish local estimates from provider dry-run responses and persisted review records.",
     steps: [
-      "Submit a query from the workbench or inspect a queued run in Admin.",
-      "Review scan bytes, estimated cost, referenced tables, and safety checks.",
-      "Approve safe runs or block queries that need rewrite or schema changes."
+      "Check the result mode and persistence status. A simulation is not a warehouse observation.",
+      "Scan and cost estimates are not final billing; displayed runtime estimates are not measured query execution time.",
+      "Legacy approve/block review does not issue an Approval Contract and does not dispatch a BigQuery job."
     ]
   }
 ];
@@ -71,7 +71,17 @@ export const docsFaqs: DocsFaq[] = [
   {
     question: "Can the site execute live BigQuery jobs?",
     answer:
-      "The current production path supports live BigQuery dry-runs when a service account is configured. Real execution remains gated for a later phase."
+      "The editor's raw SQL dry-runs are disabled in production. Adding service-account credentials does not enable them, and the editor does not dispatch executable BigQuery jobs. Live dry-runs exist only for explicitly configured, isolated demo deployments. Do not switch a production deployment to demo mode. The separate release-bound adapter requires its own authority, budget and operational setup; local tests do not establish a production integration."
+  },
+  {
+    question: "What does a structured metric preview confirm?",
+    answer:
+      "It checks current tenant membership and compiles a supported metric against an eligible Semantic Release. This compilation does not contact BigQuery, does not estimate warehouse cost, and does not authorize execution. A later operation must separately satisfy its Approval Contract, current authority and budget checks."
+  },
+  {
+    question: "Does the preview mean Gateway acceptance is complete?",
+    answer:
+      "No. A deployed preview and passing engineering tests are not formal Gateway acceptance. Independent client integrations, external pilot acceptance and separately held-out evaluation still need evidence. OAuth and administrator access also require explicit setup; deployment alone does not configure them."
   },
   {
     question: "Where do user comments and questions go?",

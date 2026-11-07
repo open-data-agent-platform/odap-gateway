@@ -2,14 +2,15 @@
   <img src="assets/demo.gif" alt="ODAP Gateway workflow overview: natural language to governed BigQuery SQL with pre-execution cost estimate and approval flow" width="820">
 </p>
 
-<p align="center"><em>Workflow overview using demo data. A real operation recording is planned for v0.1.1.</em></p>
+<p align="center"><em>Illustrative workflow using demo data, not a recording of production execution.</em></p>
 
 # ODAP Gateway
 
 **A reference implementation of the [ODAP Five Musts](https://github.com/open-data-agent-platform/awesome-odap/blob/main/RUBRIC.md): a governed gateway for AI agents querying enterprise data. Starting with BigQuery, done deeply.**
 
-Every query is schema-grounded, cost-estimated via dry-run **before** execution,
-routed through approval flows when risky, and written to an audit trail.
+**Preview 0.2.0-preview.1.** This release contains local and authenticated
+control workflows; it is not a completed Gateway acceptance or a configured
+production warehouse integration. APIs remain subject to change.
 
 > ODAP (Open Data Agent Platform) is an open, CC0 standard: when an AI agent
 > touches enterprise data, it must pass through a gateway that is **Open,
@@ -19,11 +20,19 @@ routed through approval flows when risky, and written to an audit trail.
 
 ## What it does
 
-- **Schema-aware Text-to-SQL** - generation grounded in approved tables and fields.
-- **Dry-run first, always** - bytes scanned, estimated cost, and runtime are surfaced before execution.
-- **Approval flows** - high-cost or policy-sensitive queries route to reviewers.
-- **Audit trail** - logins, dry-runs, approvals and policy changes are recorded. Deployment rollback is unsupported; historical rollback audit entries are not evidence of execution.
-- **Role-based access** - OAuth-protected sessions and admin-only governance routes.
+- **Demo SQL drafting** - local rules use a bundled sample schema, not a general-purpose model or live tenant catalog.
+- **Structured metric previews** - compile against eligible, tenant-scoped Semantic Releases. Compilation is not a warehouse dry-run, cost estimate or execution grant.
+- **Governed objects** - authenticated APIs and review interfaces manage Semantic Releases, Approval Contracts and Evidence Receipts. Legacy approve/block records do not issue contracts or dispatch jobs.
+- **Evidence and recovery** - local adapter tests cover budget admission, handoff, terminal observation, settlement and export verification. Independent integration and pilot evidence are still required.
+- **Role-based access** - configured OAuth identities, current administrator authority and tenant membership checks protect their respective routes. Deployment alone does not configure login or enroll an administrator.
+
+The raw SQL editor's production dry-run path and the legacy production schema
+importer are disabled, including when service-account credentials are present.
+Do not switch production to demo mode to bypass these refusals. Demo estimates
+are not actual billing or measured execution time. The separate release-bound
+adapter needs its own authority, budget and operational configuration.
+See [deployment boundaries](docs/WORKERS_DEPLOYMENT.md) and
+[Gateway documentation](https://googlesql.com/gateway/docs).
 
 ## Standard conformance
 
@@ -52,12 +61,13 @@ credentials for sign-in. See `docs/AUTH_SETUP.md`.
 
 ## Status
 
-Experimental development: a [local semantic registry prototype](docs/SEMANTIC_REGISTRY_PROTOTYPE.md)
-supports candidate review, owner approval, immutable release IDs, and query
-binding records. It is a CLI experiment with trusted operator inputs, not a
-production authorization service or NVIDIA integration.
-
-**Early-stage reference implementation (v0.1.x). APIs subject to change.**
+The [local CLI prototype](docs/SEMANTIC_REGISTRY_PROTOTYPE.md) remains a separate
+trusted-operator experiment. The [tenant control service](docs/TENANT_CONTROL_STORAGE.md)
+adds authenticated storage and API paths; neither is evidence of a completed
+NVIDIA integration or external pilot. A running preview, visible fixtures and
+test counts do not constitute formal scoring, independent review or acceptance.
+Deployment rollback is unsupported; historical rollback audit entries are not
+evidence that a deployment occurred.
 
 ## Contributing and challenging
 
