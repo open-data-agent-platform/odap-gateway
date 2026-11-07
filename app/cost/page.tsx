@@ -8,8 +8,8 @@ export const metadata: Metadata = {
   description:
     "Dry-run cost estimates, team budgets, risk routing, and SQL audit logs for Open Data Agent Platform.",
   robots: {
-    index: false,
-    follow: false
+    index: true,
+    follow: true
   }
 };
 

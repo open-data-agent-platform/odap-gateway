@@ -8,8 +8,8 @@ export const metadata: Metadata = {
   description:
     "View SQL lifecycle details, versions, comments, approval history, cost logs, and execution logs.",
   robots: {
-    index: false,
-    follow: false
+    index: true,
+    follow: true
   }
 };
 

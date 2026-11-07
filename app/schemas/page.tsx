@@ -8,8 +8,8 @@ export const metadata: Metadata = {
   description:
     "Browse BigQuery projects, datasets, tables, columns, PII tags, and sample SQL queries.",
   robots: {
-    index: false,
-    follow: false
+    index: true,
+    follow: true
   }
 };
 

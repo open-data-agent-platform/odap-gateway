@@ -8,8 +8,8 @@ export const metadata: Metadata = {
   description:
     "Configure Open Data Agent Platform governance policies for SELECT *, LIMIT, PII fields, schema access, and dry-run execution gates.",
   robots: {
-    index: false,
-    follow: false
+    index: true,
+    follow: true
   }
 };
 

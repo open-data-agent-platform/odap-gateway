@@ -8,8 +8,8 @@ export const metadata: Metadata = {
   description:
     "Review high-risk SQL, dry-run costs, policy violations, and approval decisions.",
   robots: {
-    index: false,
-    follow: false
+    index: true,
+    follow: true
   }
 };
 

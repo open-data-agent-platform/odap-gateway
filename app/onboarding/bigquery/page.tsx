@@ -8,8 +8,8 @@ export const metadata: Metadata = {
   description:
     "Connect a BigQuery project, test credentials, and start schema sync for Open Data Agent Platform.",
   robots: {
-    index: false,
-    follow: false
+    index: true,
+    follow: true
   }
 };
 

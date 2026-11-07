@@ -11,6 +11,7 @@ import {
 import { DocsFeedbackPanel } from "@/components/docs-feedback-panel";
 import { MainSiteBar } from "@/components/main-site-bar";
 import { SiteFooter } from "@/components/site-footer";
+import { gatewayPath } from "@/lib/gateway-path";
 import {
   docsFaqs,
   docsGuides
@@ -29,19 +30,19 @@ export default function DocsPage() {
       <header className="sticky top-0 z-40 border-b border-[#edeae1]/10 bg-[#090d17]/90 backdrop-blur-xl">
         <MainSiteBar />
         <div className="mx-auto flex h-16 max-w-[1180px] items-center justify-between gap-2 px-4 sm:gap-4 sm:px-8">
-          <Link href="/" className="flex items-center gap-2 text-[#edeae1]">
+          <a href={gatewayPath("/")} className="flex items-center gap-2 text-[#edeae1]">
             <span className="glow-border flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#4285f4] via-[#a855f7] to-[#34a853] text-white shadow-[0_0_24px_rgba(66,133,244,0.28)]">
               <DatabaseZap className="h-4 w-4" aria-hidden="true" />
             </span>
             <span className="text-sm font-semibold sm:text-base">ODAP Gateway</span>
-          </Link>
+          </a>
           <nav className="flex items-center gap-2 text-xs font-semibold">
-            <Link
-              href="/"
+            <a
+              href={gatewayPath("/")}
               className="focus-ring hidden h-9 items-center rounded-md border border-[#2b3654] px-3 text-[#edeae1] transition hover:border-[#9aa2b7] sm:inline-flex"
             >
               Home
-            </Link>
+            </a>
             <Link
               href="/tools"
               className="focus-ring inline-flex h-9 items-center rounded-md bg-[#c9a35a] px-3 text-[#090d17] transition hover:bg-[#e4c887]"

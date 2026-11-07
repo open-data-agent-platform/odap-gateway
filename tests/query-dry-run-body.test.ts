@@ -125,12 +125,17 @@ describe("dry-run body admission", () => {
     vi.useFakeTimers();
     const db = trap(), abort = new AbortController();
     let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let started!: () => void;
+    const reading = new Promise<void>(resolve => { started = resolve; });
     const cancel = vi.fn(() => new Promise<void>(() => {}));
-    const body = new ReadableStream<Uint8Array>({ start(c) { controller = c; }, cancel });
+    const body = new ReadableStream<Uint8Array>({ start(c) { controller = c; }, pull() { started(); }, cancel },
+      { highWaterMark: 0 });
     let settled = false;
     const pending = post(request(body, abort.signal), db, {}).then(value => { settled = true; return value; });
     try {
-      await vi.advanceTimersByTimeAsync(0);
+      // Native WebCrypto is not advanced by fake timers; wait for authenticated body admission.
+      await reading;
+      expect(vi.getTimerCount()).toBe(1);
       if (mode === "abort") abort.abort(new Error("synthetic-private-abort"));
       else {
         await vi.advanceTimersByTimeAsync(14000);
@@ -146,6 +151,46 @@ describe("dry-run body admission", () => {
       expect(db.prepare).not.toHaveBeenCalled();
       expect(db.batch).not.toHaveBeenCalled();
     } finally { if (!cancel.mock.calls.length) controller.close(); await pending; }
+  });
+
+  it("starts the body deadline only after delayed native session verification completes", async () => {
+    vi.useFakeTimers();
+    let release!: () => void, verifying!: () => void, started!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const authentication = new Promise<void>(resolve => { verifying = resolve; });
+    const reading = new Promise<void>(resolve => { started = resolve; });
+    const sign = crypto.subtle.sign.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle, "sign").mockImplementation(async (...args) => {
+      verifying();
+      await blocked;
+      return sign(...args);
+    });
+    const db = trap(), cancel = vi.fn(() => new Promise<void>(() => {}));
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const pull = vi.fn(() => { started(); });
+    const body = new ReadableStream<Uint8Array>({ start(c) { controller = c; }, pull, cancel }, { highWaterMark: 0 });
+    let settled = false;
+    const pending = post(request(body), db, {}).then(value => { settled = true; return value; });
+    try {
+      await authentication;
+      await vi.advanceTimersByTimeAsync(14000);
+      expect(pull).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(settled).toBe(false);
+      release();
+      await reading;
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(14999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      await refusal(await pending, 408, "dry_run_body_timeout");
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(body.locked).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(db.prepare).not.toHaveBeenCalled();
+      expect(db.batch).not.toHaveBeenCalled();
+    } finally { release(); if (!cancel.mock.calls.length) controller.close(); await pending; }
   });
 
   it.each([

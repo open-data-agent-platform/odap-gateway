@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Bell, Database, DatabaseZap } from "lucide-react";
 import { AccountMenu } from "@/components/account-menu";
 import { MainSiteBar } from "@/components/main-site-bar";
+import { gatewayPath } from "@/lib/gateway-path";
 import { SOURCE_REPOSITORY_URL } from "@/lib/open-source";
 import { cn } from "@/lib/utils";
 
@@ -37,14 +38,14 @@ export function SiteHeader({ active = "query" }: { active?: NavKey }) {
       <MainSiteBar />
       <div className="mx-auto flex h-14 max-w-[1480px] items-center justify-between px-4 sm:px-6 lg:px-8">
         <div className="flex min-w-0 items-center gap-5">
-          <Link href="/" className="flex shrink-0 items-center gap-2 text-slate-50">
+          <a href={gatewayPath("/")} className="flex shrink-0 items-center gap-2 text-slate-50">
             <span className="glow-border flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#4285f4] via-[#a855f7] to-[#34a853] text-white shadow-[0_0_24px_rgba(66,133,244,0.28)]">
               <DatabaseZap className="h-4 w-4" aria-hidden="true" />
             </span>
             <span className="text-base font-semibold tracking-normal">
               ODAP Gateway
             </span>
-          </Link>
+          </a>
 
           <nav className="hidden items-center gap-1 xl:flex" aria-label="Primary">
             {navItems.map((item) => {

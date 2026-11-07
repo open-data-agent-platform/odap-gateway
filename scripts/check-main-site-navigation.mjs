@@ -44,6 +44,10 @@ try {
     });
     const page = await context.newPage();
     page.on("pageerror", error => errors.push(error.message));
+    page.on("response", response => {
+      if (!new URL(response.url()).pathname.startsWith("/gateway/api/") && response.status() >= 400)
+        errors.push(`HTTP ${response.status()}: ${response.url()}`);
+    });
     for (const path of ["/gateway", "/gateway/login", "/gateway/docs", "/gateway/sql"]) {
       const response = await page.goto("https://googlesql.com" + path, { waitUntil: "networkidle" });
       assert.equal(response.status(), 200, path);
@@ -73,10 +77,17 @@ try {
       await page.getByRole("link", { name: "Gateway", exact: true }).click();
       await page.waitForURL("https://googlesql.com/gateway");
       await page.waitForLoadState("networkidle");
+      await page.goto("https://googlesql.com" + path, { waitUntil: "networkidle" });
+      const brand = page.locator("header").getByRole("link", { name: "ODAP Gateway", exact: true });
+      const home = page.waitForResponse(r => r.url() === "https://googlesql.com/gateway" && r.request().isNavigationRequest());
+      await brand.click();
+      assert.equal((await home).status(), 200);
+      await page.waitForLoadState("networkidle");
+      await page.goto("https://googlesql.com" + path, { waitUntil: "networkidle" });
       await page.locator("footer").getByRole("link", { name: "Back to main site", exact: true }).click();
       await page.waitForURL("https://googlesql.com/");
       assert.equal(mainDocuments.length, count + 2);
-      results.push({ width, path, headerKeyboardReturn: true, footerReturn: true, roundTrip: true });
+      results.push({ width, path, headerKeyboardReturn: true, footerReturn: true, roundTrip: true, gatewayHomeDocument: true });
     }
     await context.close();
   }

@@ -10,8 +10,8 @@ export const metadata: Metadata = {
   description:
     "A local reference implementation of the Open Data Agent Platform Five Musts for governed BigQuery dry-runs, approvals, audit trails, and schema policy.",
   robots: {
-    index: false,
-    follow: false
+    index: true,
+    follow: true
   }
 };
 
