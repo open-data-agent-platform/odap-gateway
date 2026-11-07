@@ -58,6 +58,9 @@ cover recorded holds/bills and their audit links, with unknown costs explicit.
 The [offline cost restore comparison](COST_RESTORE.md) reconciles recorded SQL
 and auxiliary budget counters and compares retained snapshot inventories without
 authorizing retries or writing repairs.
+The internal [combined budget reconciliation read](BUDGET_RECONCILIATION.md)
+checks current owner membership and reads SQL/model/tool counters in one snapshot;
+it is not yet exposed by production routes.
 The existing BigQuery settled-evidence profile and coverage inventory remain
 SQL-job-specific. Neither profile establishes total workflow cost. Provider
 adapters, authoritative billing capture, partial-bill accumulation, complete
