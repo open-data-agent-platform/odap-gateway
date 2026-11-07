@@ -4,6 +4,7 @@ import { gatewayPath, internalGatewayPath } from "../lib/gateway-path";
 import { onRequestGet as onControlObjectGet } from "../functions/api/control/[tenant]/[kind]/[id]";
 import { onRequestGet as onCorrectionGet, onRequestPost as onCorrectionPost } from "../functions/api/control/[tenant]/receipt-corrections/[id]";
 import { onRequestGet as onEvidenceCoverageGet } from "../functions/api/control/[tenant]/evidence-coverage";
+import { onRequestGet as onBudgetReconciliationGet } from "../functions/api/control/[tenant]/budget-reconciliation/[id]";
 import { onRequestPost as onProposalPost } from "../functions/api/control/[tenant]/proposals";
 import { onRequestPost as onValidationPost } from "../functions/api/control/[tenant]/validations";
 import { onRequestPost as onApprovalPost } from "../functions/api/control/[tenant]/approvals";
@@ -158,6 +159,10 @@ function matchApiRoute(
     if (post) return { allowedMethods: ["POST"], handler: () => post({ request, env, params: { tenant: command[1] } }) };
   }
   const control = url.pathname.match(/^\/api\/control\/([^/]+)\/([^/]+)\/([^/]+)$/);
+  if (control?.[2] === "budget-reconciliation") return {
+    allowedMethods: ["GET"],
+    handler: () => onBudgetReconciliationGet({ request, env, params: { tenant: control[1], id: control[3] } })
+  };
   if (control?.[2] === "receipt-corrections") return {
     allowedMethods: ["GET", "POST"],
     handler: () => (request.method === "POST" ? onCorrectionPost : onCorrectionGet)({ request, env,
