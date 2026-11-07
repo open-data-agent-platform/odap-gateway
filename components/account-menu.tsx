@@ -27,8 +27,8 @@ export function AccountMenu() {
 
     return (
       <div className="flex items-center gap-2">
-        <Link
-          href={session.user.role === "admin" ? "/admin" : "/"}
+        <a
+          href={gatewayPath(session.user.role === "admin" ? "/admin" : "/")}
           title={session.user.email}
           className="focus-ring hidden items-center gap-2 rounded-lg border border-white/10 bg-white/[0.035] px-2 py-1 text-xs text-slate-300 transition hover:bg-white/[0.06] sm:flex"
         >
@@ -44,15 +44,17 @@ export function AccountMenu() {
             </span>
           )}
           <span className="max-w-28 truncate">{session.user.name}</span>
-        </Link>
-        <a
-          href={gatewayPath("/api/auth/logout")}
-          title="Sign out"
-          aria-label="Sign out"
-          className="focus-ring rounded-md p-2 text-slate-500 transition hover:bg-white/[0.06] hover:text-slate-200"
-        >
-          <LogOut className="h-4 w-4" />
         </a>
+        <form action={gatewayPath("/api/auth/logout")} method="post" className="flex">
+          <button
+            type="submit"
+            title="Sign out"
+            aria-label="Sign out"
+            className="focus-ring inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-white/[0.06] hover:text-slate-200"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </form>
       </div>
     );
   }

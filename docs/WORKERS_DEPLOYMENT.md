@@ -442,6 +442,20 @@ Operators need a separately approved retention/rate-limit policy before
 public exposure. Local SQLite/Miniflare checks do not establish production
 retention, restore/replay behavior, or real-provider acceptance.
 
+### Explicit same-origin logout
+
+The account menu submits a native POST form to `/api/auth/logout` (under the
+configured Gateway base path). GET, HEAD and other methods return 405 with
+`Allow: POST` without clearing the identity cookie. POST requires an exact
+`Origin` match, including scheme and port; missing, opaque or foreign origins
+return 403 without a cookie change or redirect. Do not strip the Origin header
+in a reverse proxy or use a GET link to sign out.
+
+Accepted POSTs clear the browser's identity cookie and return a no-store 303
+redirect to the mounted `/login?logout=1` page. Logout does not require working
+OAuth configuration or database access. It does not revoke a copied signed
+token, invalidate another browser session, or sign out of Google/GitHub.
+
 ## Secrets
 
 Malformed percent encoding or duplicate identity-cookie names are treated

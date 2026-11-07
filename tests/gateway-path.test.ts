@@ -37,7 +37,7 @@ describe("Gateway path mount", () => {
     expect(await session.json()).toMatchObject({ authenticated: false, configured: false });
   });
 
-  it.each(["/gateway/api/auth/start/google", "/gateway/api/auth/callback/google", "/gateway/api/auth/logout", "/gateway/admin.txt"])(
+  it.each(["/gateway/api/auth/start/google", "/gateway/api/auth/callback/google", "/gateway/admin.txt"])(
     "keeps local redirects under the mount: %s", async path => {
       const response = await call(path);
       expect(response.status).toBe(302);
@@ -45,6 +45,12 @@ describe("Gateway path mount", () => {
       expect(destination.origin).toBe("https://site.test");
       expect(destination.pathname).toBe("/gateway/login");
     });
+
+  it("keeps the logout POST redirect under the mount", async () => {
+    const response = await call("/gateway/api/auth/logout", { method: "POST", headers: { Origin: "https://site.test" } });
+    expect(response.status).toBe(303);
+    expect(response.headers.get("Location")).toBe("https://site.test/gateway/login?logout=1");
+  });
 
   it("remounts static asset canonical redirects without dropping query parameters", async () => {
     const response = await worker.fetch(new Request("https://site.test/gateway/docs.html?x=1"),

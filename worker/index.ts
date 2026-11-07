@@ -28,10 +28,7 @@ import type { AdminStorageEnv } from "../lib/admin-store";
 import type { BigQueryEnv } from "../lib/bigquery";
 import { onRequestGet as onAuthStartGet } from "../functions/api/auth/start/[provider]";
 import { onRequestGet as onAuthCallbackGet } from "../functions/api/auth/callback/[provider]";
-import {
-  onRequestGet as onAuthLogoutGet,
-  onRequestPost as onAuthLogoutPost
-} from "../functions/api/auth/logout";
+import { onRequest as onAuthLogout } from "../functions/api/auth/logout";
 import { onRequestGet as onAuthSessionGet } from "../functions/api/auth/session";
 import { onRequestGet as onAdminStateGet } from "../functions/api/admin/state";
 import { onRequestPost as onAdminSchemaImportPost } from "../functions/api/admin/schema-import";
@@ -219,11 +216,8 @@ function matchApiRoute(
 
   if (url.pathname === "/api/auth/logout") {
     return {
-      allowedMethods: ["GET", "POST"],
-      handler: () =>
-        request.method === "POST"
-          ? onAuthLogoutPost({ request })
-          : onAuthLogoutGet({ request })
+      allowedMethods: ["POST"],
+      handler: () => onAuthLogout({ request })
     };
   }
 
