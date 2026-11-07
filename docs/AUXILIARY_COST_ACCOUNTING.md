@@ -53,11 +53,13 @@ commit in the same transaction as the component; missing or failed audit writes
 roll back accounting. `readAuxiliaryCost` is a current-owner-scoped recovery read,
 not permission to submit another job or a claim that a pending operation failed.
 
+The [auxiliary component export and detached verifier](AUXILIARY_COST_EVIDENCE.md)
+cover recorded holds/bills and their audit links, with unknown costs explicit.
 The existing BigQuery settled-evidence profile and coverage inventory remain
-SQL-job-specific. They do not include these components and must not be presented
-as proof of total workflow cost. Provider adapters, authoritative billing capture,
-partial-bill accumulation, aggregate evidence export and independent acceptance
-remain separate work. No benchmark or protocol object schema was changed.
+SQL-job-specific. Neither profile establishes total workflow cost. Provider
+adapters, authoritative billing capture, partial-bill accumulation, complete
+cross-provider inventory and independent acceptance remain separate work.
+No benchmark or protocol object schema was changed.
 
 Tests: `tests/auxiliary-costs.test.ts` and
 `tests/auxiliary-costs-miniflare.test.ts`, sharing accounting cases against SQLite

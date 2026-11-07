@@ -13,6 +13,7 @@
     "test:native": "node scripts/native-d1-gate.mjs",
     "evidence:build": "tsc -p scripts/tsconfig.evidence.json",
     "evidence:verify": "node dist/evidence/scripts/verify-settled-evidence.js",
+    "evidence:verify-costs": "node dist/evidence/scripts/verify-auxiliary-cost-evidence.js",
     "ci": "npm run lint && npm run typecheck && npm run test && npm run build",
     "worker:dry-run": "npx wrangler deploy --config wrangler.example.jsonc --dry-run",
     "worker:deploy": "npx wrangler deploy --config wrangler.example.jsonc"

@@ -4,9 +4,9 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 
-export async function buildDetachedVerifier(dir: string) {
+export async function buildDetachedVerifier(dir: string, script = "verify-settled-evidence") {
   await exec(process.execPath, [require.resolve("typescript/bin/tsc"),
     "-p", "scripts/tsconfig.evidence.json", "--outDir", dir]);
   return (...args: string[]) => exec(process.execPath,
-    [join(dir, "scripts/verify-settled-evidence.js"), ...args], { cwd: dir });
+    [join(dir, `scripts/${script}.js`), ...args], { cwd: dir });
 }

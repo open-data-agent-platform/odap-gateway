@@ -10,5 +10,5 @@
     "outDir": "../dist/evidence",
     "types": ["node"]
   },
-  "files": ["verify-settled-evidence.ts"]
+  "files": ["verify-settled-evidence.ts", "verify-auxiliary-cost-evidence.ts"]
 }
