@@ -34,8 +34,20 @@ upgrades = {"apply-scan-limits": "0007_bigquery_scan_limits.sql",
             "apply-consistent-billing-outcome": "0027_consistent_billing_outcome.sql",
             "apply-receipt-corrections": "0030_receipt_reason_corrections.sql",
             "apply-audit-checkpoints": "0031_control_audit_checkpoints.sql",
-            "apply-oauth-states": "0032_oauth_login_states.sql"}
-if mode == "batch":
+            "apply-oauth-states": "0032_oauth_login_states.sql",
+            "apply-auxiliary-costs": "0033_auxiliary_costs.sql"}
+if mode == "migration-statements":
+    result = []
+    for migration in sorted(migrations.glob("*.sql")):
+        statement = ""
+        for char in migration.read_text(encoding="utf-8"):
+            statement += char
+            if char == ";" and sqlite3.complete_statement(statement):
+                result.append(statement)
+                statement = ""
+        if statement.strip():
+            raise ValueError("Incomplete migration statement")
+elif mode == "batch":
     statements, _ = json.loads(sys.argv[3])
     result = []
     try:
@@ -60,7 +72,7 @@ elif mode == "upgrade-v10-snapshot":
 elif mode in upgrades:
     db.executescript((migrations / upgrades[mode]).read_text(encoding="utf-8"))
     result = None
-elif mode in ("setup", "setup-v6", "setup-v8", "setup-v9", "setup-v10", "setup-v12", "setup-v14", "setup-v16", "setup-v17", "setup-v18", "setup-v19", "setup-v29", "setup-v30"):
+elif mode in ("setup", "setup-v6", "setup-v8", "setup-v9", "setup-v10", "setup-v12", "setup-v14", "setup-v16", "setup-v17", "setup-v18", "setup-v19", "setup-v29", "setup-v30", "setup-v32"):
     for migration in sorted(migrations.glob("*.sql")):
         if mode.startswith("setup-v") and int(migration.name.split("_", 1)[0]) > int(mode[len("setup-v"):]):
             continue

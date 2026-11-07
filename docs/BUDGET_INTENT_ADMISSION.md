@@ -7,6 +7,10 @@ Budgets use nonnegative safe integer micro-USD units. Capacity is checked agains
 spent plus reserved units. A server-side estimator must supply a conservative
 upper bound; an untrusted client estimate is not acceptable. Billing-mode and
 model/tool costs require separate coverage. Estimates alone cannot guarantee bills.
+The optional [auxiliary accounting primitive](AUXILIARY_COST_ACCOUNTING.md) adds
+separate model/tool holds and final bills in migration 0033. It is not wired to
+production execution, does not authorize provider calls, and does not extend
+the SQL-only evidence profile to total workflow cost.
 
 One INSERT transaction creates an immutable execution intent, reserves capacity,
 consumes the contract and records the lifecycle event. Any constraint failure
