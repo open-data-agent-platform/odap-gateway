@@ -9,6 +9,8 @@ import {
   ShieldCheck
 } from "lucide-react";
 import { DocsFeedbackPanel } from "@/components/docs-feedback-panel";
+import { MainSiteBar } from "@/components/main-site-bar";
+import { SiteFooter } from "@/components/site-footer";
 import {
   docsFaqs,
   docsGuides
@@ -25,12 +27,13 @@ export default function DocsPage() {
   return (
     <main className="min-h-screen bg-[#090d17] text-[#edeae1]">
       <header className="sticky top-0 z-40 border-b border-[#edeae1]/10 bg-[#090d17]/90 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-[1180px] items-center justify-between gap-4 px-5 sm:px-8">
+        <MainSiteBar />
+        <div className="mx-auto flex h-16 max-w-[1180px] items-center justify-between gap-2 px-4 sm:gap-4 sm:px-8">
           <Link href="/" className="flex items-center gap-2 text-[#edeae1]">
             <span className="glow-border flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#4285f4] via-[#a855f7] to-[#34a853] text-white shadow-[0_0_24px_rgba(66,133,244,0.28)]">
               <DatabaseZap className="h-4 w-4" aria-hidden="true" />
             </span>
-            <span className="text-base font-semibold">Open Data Agent Platform</span>
+            <span className="text-sm font-semibold sm:text-base">ODAP Gateway</span>
           </Link>
           <nav className="flex items-center gap-2 text-xs font-semibold">
             <Link
@@ -179,6 +182,7 @@ export default function DocsPage() {
           <DocsFeedbackPanel />
         </div>
       </section>
+      <SiteFooter />
     </main>
   );
 }

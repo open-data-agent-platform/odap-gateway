@@ -1,3 +1,5 @@
+export const MAIN_SITE_URL = "https://googlesql.com/";
+
 export const SOURCE_REPOSITORY_URL =
   "https://github.com/open-data-agent-platform/odap-gateway";
 

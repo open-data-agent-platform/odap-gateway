@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Bell, Database, DatabaseZap } from "lucide-react";
 import { AccountMenu } from "@/components/account-menu";
+import { MainSiteBar } from "@/components/main-site-bar";
 import { SOURCE_REPOSITORY_URL } from "@/lib/open-source";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,7 @@ const navItems = [
 export function SiteHeader({ active = "query" }: { active?: NavKey }) {
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[#070a12]/[0.86] backdrop-blur-xl">
+      <MainSiteBar />
       <div className="mx-auto flex h-14 max-w-[1480px] items-center justify-between px-4 sm:px-6 lg:px-8">
         <div className="flex min-w-0 items-center gap-5">
           <Link href="/" className="flex shrink-0 items-center gap-2 text-slate-50">
@@ -44,7 +46,7 @@ export function SiteHeader({ active = "query" }: { active?: NavKey }) {
             </span>
           </Link>
 
-          <nav className="hidden items-center gap-1 md:flex" aria-label="Primary">
+          <nav className="hidden items-center gap-1 xl:flex" aria-label="Primary">
             {navItems.map((item) => {
               const className = cn(
                 "rounded-md px-3 py-1.5 text-sm font-medium transition",

@@ -35,7 +35,7 @@ export default function HomePage() {
     <main className="min-h-screen bg-[#070a12] text-slate-100">
       <SiteHeader active="sql" />
       <section className="border-b border-white/10 bg-[linear-gradient(180deg,#070a12,#0b1224)]">
-        <div className="mx-auto grid max-w-7xl gap-8 px-4 py-14 sm:px-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(360px,0.55fr)] lg:items-center lg:px-8 lg:py-20">
+        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-4 py-14 sm:px-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(360px,0.55fr)] lg:items-center lg:px-8 lg:py-20">
           <div>
             <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#60a5fa]">
               ODAP Gateway
