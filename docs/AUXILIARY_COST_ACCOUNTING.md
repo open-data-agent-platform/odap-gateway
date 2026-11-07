@@ -55,6 +55,9 @@ not permission to submit another job or a claim that a pending operation failed.
 
 The [auxiliary component export and detached verifier](AUXILIARY_COST_EVIDENCE.md)
 cover recorded holds/bills and their audit links, with unknown costs explicit.
+The [offline cost restore comparison](COST_RESTORE.md) reconciles recorded SQL
+and auxiliary budget counters and compares retained snapshot inventories without
+authorizing retries or writing repairs.
 The existing BigQuery settled-evidence profile and coverage inventory remain
 SQL-job-specific. Neither profile establishes total workflow cost. Provider
 adapters, authoritative billing capture, partial-bill accumulation, complete
