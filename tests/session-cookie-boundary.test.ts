@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { SESSION_COOKIE, readCookie, signAuthPayload } from "../lib/auth";
+import { SESSION_COOKIE, readCookie, signAuthPayload, type AuthSession } from "../lib/auth";
 import { onRequest as pagesMiddleware } from "../functions/_middleware";
 import worker from "../worker";
 
@@ -52,6 +52,25 @@ async function anonymous(cookie: string) {
 }
 
 describe("untrusted identity cookie parsing", () => {
+  it.each(["never", "9999999999999", 9999999999999.5, Number.MAX_SAFE_INTEGER + 1])(
+    "refuses a signed invalid expiry before any protected operation: %s", async expiresAt => {
+      const token = await signAuthPayload({ provider:"google",providerId:"fixture",
+        email:"fixture@example.test",name:"Fixture",role:"admin",expiresAt } as AuthSession, secret);
+      await anonymous(SESSION_COOKIE + "=" + token);
+    });
+
+  it.each([".", ".extra"])("refuses an appended session-token segment: %s", async suffix => {
+    await anonymous(validCookie + suffix);
+  });
+
+  it("refuses a session at its exact expiry before reading authority or private assets", async () => {
+    const expiresAt = Date.now();
+    vi.spyOn(Date,"now").mockReturnValue(expiresAt);
+    const token = await signAuthPayload({ provider:"google",providerId:"fixture",
+      email:"fixture@example.test",name:"Fixture",role:"admin",expiresAt }, secret);
+    await anonymous(SESSION_COOKIE + "=" + token);
+  });
+
   it.each(["%","%A","%ZZ","%E0%A4%A","%C0%AF"])("refuses malformed encoding %s as unauthenticated",async value => {
     await anonymous(SESSION_COOKIE+"="+value);
   });

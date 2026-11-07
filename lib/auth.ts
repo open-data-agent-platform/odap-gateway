@@ -123,8 +123,9 @@ export async function verifyAuthPayload<T extends AuthSession | OAuthState>(
     return null;
   }
 
-  const [encodedPayload, signature] = token.split(".");
-  if (!encodedPayload || !signature) {
+  const segments = token.split(".");
+  const [encodedPayload, signature] = segments;
+  if (segments.length !== 2 || !encodedPayload || !signature) {
     return null;
   }
 
@@ -138,7 +139,8 @@ export async function verifyAuthPayload<T extends AuthSession | OAuthState>(
       new TextDecoder().decode(base64UrlDecode(encodedPayload))
     ) as T;
 
-    if (!payload.expiresAt || payload.expiresAt < Date.now()) {
+    // A valid signature does not make a malformed or expired claim acceptable.
+    if (!Number.isSafeInteger(payload.expiresAt) || payload.expiresAt <= Date.now()) {
       return null;
     }
 
