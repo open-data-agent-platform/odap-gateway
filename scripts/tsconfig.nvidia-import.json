@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmitOnError": true,
+    "rootDir": "..",
+    "outDir": "../dist/nvidia-import",
+    "types": ["node"]
+  },
+  "files": ["stage-nvidia-import.ts"]
+}

@@ -17,6 +17,7 @@ const eslintConfig = [
       "coverage/**",
       "out/**",
       "dist/evidence/**",
+      "dist/nvidia-import/**",
       "next-env.d.ts"
     ]
   }

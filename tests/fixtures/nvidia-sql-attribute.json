@@ -1,0 +1,20 @@
+{
+  "data": {
+    "id": "synthetic-attribute-revenue",
+    "name": "Net revenue",
+    "description": "Synthetic fixture, not a live NVIDIA export or certification.",
+    "expression": "SUM(net_amount)",
+    "source": "manual",
+    "sql": "SELECT SUM(net_amount) FROM analytics.orders",
+    "certified": true,
+    "term_id": "synthetic-term-orders",
+    "term_name": "Orders",
+    "owner_id": "synthetic-upstream-owner",
+    "zones": [{ "id": "synthetic-zone", "name": "Analytics", "enabled": true }],
+    "tags": [],
+    "created": "2026-11-01T00:00:00Z",
+    "modified": "2026-11-02T00:00:00Z",
+    "created_by": "synthetic-author",
+    "modified_by": "synthetic-reviewer"
+  }
+}

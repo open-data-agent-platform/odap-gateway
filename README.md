@@ -61,6 +61,11 @@ credentials for sign-in. See `docs/AUTH_SETUP.md`.
 
 ## Status
 
+The [offline NVIDIA import adapter](docs/NVIDIA_IMPORT.md) stages version-pinned
+SQL attribute context and an explicit local metric mapping for candidate review.
+Upstream certification never grants Gateway approval or execution; live import
+and independent integration remain unverified.
+
 The [local CLI prototype](docs/SEMANTIC_REGISTRY_PROTOTYPE.md) remains a separate
 trusted-operator experiment. The [tenant control service](docs/TENANT_CONTROL_STORAGE.md)
 adds authenticated storage and API paths; neither is evidence of a completed
