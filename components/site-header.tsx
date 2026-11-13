@@ -32,7 +32,7 @@ const navItems = [
   external?: boolean;
 }>;
 
-export function SiteHeader({ active = "query" }: { active?: NavKey }) {
+export function SiteHeader({ active = "query", showDemoBadge = true }: { active?: NavKey; showDemoBadge?: boolean }) {
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[#070a12]/[0.86] backdrop-blur-xl">
       <MainSiteBar />
@@ -83,7 +83,7 @@ export function SiteHeader({ active = "query" }: { active?: NavKey }) {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="hidden items-center rounded-lg border border-white/10 bg-white/[0.035] p-1 text-xs text-slate-500 shadow-[0_14px_30px_rgba(0,0,0,0.18)] sm:flex">
+          {showDemoBadge && <div className="hidden items-center rounded-lg border border-white/10 bg-white/[0.035] p-1 text-xs text-slate-500 shadow-[0_14px_30px_rgba(0,0,0,0.18)] sm:flex">
             <span className="inline-flex items-center gap-1.5 rounded-md px-2 py-1">
               <Database className="h-3.5 w-3.5" />
               demo
@@ -91,7 +91,7 @@ export function SiteHeader({ active = "query" }: { active?: NavKey }) {
             <span className="rounded-md bg-white/[0.06] px-2 py-1 font-medium text-slate-300">
               local
             </span>
-          </div>
+          </div>}
           <button
             type="button"
             title="Notifications"

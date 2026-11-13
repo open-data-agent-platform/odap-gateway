@@ -4,9 +4,9 @@ import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
 export const metadata: Metadata = {
-  title: "Cost Control",
+  title: "Budget Accounting",
   description:
-    "Dry-run cost estimates, team budgets, risk routing, and SQL audit logs for Open Data Agent Platform.",
+    "Owner-scoped reconciliation of recorded SQL, model and tool costs, pending reserves, and budget ledger differences.",
   robots: {
     index: true,
     follow: true
@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 export default function CostPage() {
   return (
     <main className="min-h-screen bg-[#070a12] text-slate-100">
-      <SiteHeader active="cost" />
+      <SiteHeader active="cost" showDemoBadge={false} />
       <CostControlPage />
       <SiteFooter />
     </main>

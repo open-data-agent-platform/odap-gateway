@@ -72,7 +72,7 @@ snapshot statement checks current ownership again; the three request reads are
 not one transaction. A report with `consistent: false` still returns 200 so an
 authorized owner can inspect discrepancies without acquiring repair authority.
 
-There is no public MCP endpoint, UI integration, provider dispatch or production
+There is no public MCP endpoint, provider dispatch or production
 migration in this delivery. Production installations at migration 0032 remain
 unchanged and cannot return a successful combined report. Do not enable demo mode
 or bypass migration approval.
@@ -81,6 +81,28 @@ for comparing two detached snapshots, not a live authorization mechanism.
 
 Tests use disposable synthetic SQLite and native D1 databases with the same
 accounting cases. No real model, tool, warehouse or production database is used.
+
+## Owner Inspection Page
+
+The Cost page at `/cost` (or `/gateway/cost` when mounted) replaces the earlier
+static spending example with an explicit tenant/budget lookup against the same
+read-only HTTP service. It sends no role, principal, bill or execution request.
+There are no automatic lookups, sample balances, forecasts or repair controls.
+
+The page separates final charges from pending reserves for SQL, model and tool
+components, and shows ledger counters and signed differences. USD display keeps
+all six decimal places without converting amount strings to floating point.
+An inconsistent report remains inspectable; a zero final bill is settled while
+an unknown bill remains pending. The report's limited scope and lack of issuer
+authentication or execution authority remain visible.
+
+Malformed scope, amounts, counts, totals or boundary claims fail closed in the
+browser. Authentication, missing owner access, unavailable schema and other
+read failures are distinct states, never successful empty results. Changing
+either ID, hiding or leaving the page clears the private result and cancels the
+pending lookup. A late response cannot restore a cleared report. No report or
+scope is stored in browser persistence or URL parameters. Production OAuth and
+schema approval requirements are unchanged.
 
 ## Local MCP Read
 
