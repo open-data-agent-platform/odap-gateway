@@ -119,8 +119,9 @@ establish that this local request caused it. There is no public endpoint.
 `sendRequestedJobCancellation(access, intentId, transport)` is a separate internal
 boundary for a recorded request on a bounded, non-delegated job. The caller must
 inject both a trusted token loader and a sender; no default credential lookup,
-network sender or public route is installed. Delegated bindings remain refused
-by the existing prepared-job reader. This is not production cancellation wiring.
+network sender or public route is installed. This legacy wrapper still refuses
+delegated bindings; the separate delegated boundary below requires attributed
+requests. Neither boundary is production cancellation wiring.
 
 The boundary pins the tenant/principal and reads the stored job identity and
 current owner authority before preparing a token. It repeats that read after
@@ -145,6 +146,36 @@ The existing durable request records owner intent, not a send attempt or remote
 acceptance. Another explicit invocation can send again: no durable attempt log,
 cross-invocation exactly-once guarantee or operational recovery policy is claimed.
 Tests use synthetic credentials, intercepted sends, SQLite and local native D1.
+
+### Delegated cancellation (offline)
+
+With migration 0034, `requestDelegatedCancellation(owner, audience, intentId)`
+records the current tenant owner, database time, stored job, audience and original
+compiled-body digest. `readDelegatedCancellation` inspects without requesting.
+Both use the verified claim/pending-receipt recovery view. The conditional insert
+and database guard recheck owner authority and exact attribution; concurrent
+requests and replacement attempts preserve the first record. A later delegation
+expiry or withdrawal does not prevent a current owner from recovering or
+cancelling an already claimed job. It never permits another execution.
+
+`sendRequestedDelegatedJobCancellation(owner, audience, intentId, transport)`
+uses the same bounded sender above, rechecking both stored job identity and
+claim attribution after token preparation. Other tenants/audiences, non-owners,
+unclaimed jobs, initial storage failures and unsupported schemas never reach
+credentials or a sender. A failed final read also prevents sending. Known terminal
+outcomes suppress sending and retain the reservation
+until separate authoritative billing reconciliation.
+
+Historical request rows keep NULL attribution after upgrade and return
+`unverified-request`; they cannot trigger a send or be silently replaced by a
+new owner request. Missing provenance needs separately audited reconciliation,
+not invented backfill. These helpers neither produce an authenticated export
+of cancellation provenance nor a durable send-attempt log. Existing observation,
+billing and export boundaries retain their own requirements.
+
+Migration 0034 is an offline-tested installation requirement, not authorization
+to migrate an existing production database. No HTTP route, provider credentials,
+production migration or default network transport is enabled by this delivery.
 
 Coverage uses actual migration and service SQL in SQLite and a test adapter.
 This is not a live submission path or independent authentication of a remote

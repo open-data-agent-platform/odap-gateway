@@ -35,7 +35,8 @@ upgrades = {"apply-scan-limits": "0007_bigquery_scan_limits.sql",
             "apply-receipt-corrections": "0030_receipt_reason_corrections.sql",
             "apply-audit-checkpoints": "0031_control_audit_checkpoints.sql",
             "apply-oauth-states": "0032_oauth_login_states.sql",
-            "apply-auxiliary-costs": "0033_auxiliary_costs.sql"}
+            "apply-auxiliary-costs": "0033_auxiliary_costs.sql",
+            "apply-delegated-cancellation": "0034_delegated_cancellation_requests.sql"}
 if mode == "migration-statements":
     result = []
     for migration in sorted(migrations.glob("*.sql")):

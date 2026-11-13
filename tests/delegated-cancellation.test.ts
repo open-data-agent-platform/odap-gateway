@@ -1,0 +1,78 @@
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { delegationFixture } from "./fixtures/delegation";
+import { delegatedCancellationCases, type CancellationFixture } from "./fixtures/delegated-cancellation-cases";
+import { jobSqlite } from "./fixtures/job-sqlite";
+import { readDelegatedCancellation, requestDelegatedCancellation } from "../lib/delegated-cancellation";
+import { sendRequestedDelegatedJobCancellation } from "../lib/bigquery-cancellation-transport";
+
+let dir: string, file: string, claimed: string, prepared: string, enrolled: CryptoKeyPair, f: CancellationFixture;
+const fixture = delegationFixture(() => file, () => enrolled), { db, sql, first } = fixture;
+const owner = { db, tenantId: "t", principalId: "google:operator" }, audience = "test-gateway";
+const upgrade = () => jobSqlite(file, "apply-delegated-cancellation");
+const read = () => readDelegatedCancellation(owner, audience, f.intentId);
+
+describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () => {
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "odap-delegated-cancel-")); file = claimed = join(dir, "claimed.db"); prepared = join(dir, "prepared.db");
+    enrolled = await fixture.keys();
+    const job = await fixture.seedAmbiguousDelegation(() => copyFile(file, prepared));
+    f = { ...job, owner, audience, sql, first, revoke: fixture.revoke };
+  }, 60000);
+  beforeEach(async () => {
+    file = join(dir, crypto.randomUUID() + ".db"); await copyFile(claimed, file);
+    await jobSqlite(file, "apply-delegated-observations"); await upgrade();
+  });
+  afterAll(async () => { if (dir) await rm(dir, { recursive: true, force: true }); });
+  delegatedCancellationCases(() => f);
+
+  it("keeps an unattributed pre-upgrade request unverified and never sends it", async () => {
+    file = join(dir, crypto.randomUUID() + ".db"); await copyFile(claimed, file);
+    await jobSqlite(file, "apply-delegated-observations");
+    await sql("INSERT INTO bigquery_cancellation_requests(tenant_id,intent_id,job_id,requested_by) VALUES('t',?,?,'google:operator')", [f.intentId, f.ref.jobId]);
+    const original = await first("SELECT * FROM bigquery_cancellation_requests"); await upgrade();
+    const stored = await read(); expect(stored).toMatchObject({ state: "unverified-request", request: { verified: false } });
+    expect(await requestDelegatedCancellation(owner, audience, f.intentId)).toEqual(stored);
+    const getAccessToken = vi.fn(), sendOnce = vi.fn();
+    expect(await sendRequestedDelegatedJobCancellation(owner, audience, f.intentId, { getAccessToken, sendOnce }))
+      .toMatchObject({ state: "not-sent", reason: "unverified-request" });
+    expect(getAccessToken).not.toHaveBeenCalled(); expect(sendOnce).not.toHaveBeenCalled();
+    expect(await first("SELECT * FROM bigquery_cancellation_requests")).toEqual({ ...original, delegation_audience: null, claim_body_digest: null });
+  });
+  it("refuses schema 0033 or earlier without a default sender", async () => {
+    file = join(dir, crypto.randomUUID() + ".db"); await copyFile(claimed, file);
+    await jobSqlite(file, "apply-delegated-observations");
+    const getAccessToken = vi.fn(), sendOnce = vi.fn();
+    await expect(sendRequestedDelegatedJobCancellation(owner, audience, f.intentId, { getAccessToken, sendOnce })).rejects.toThrow("unavailable");
+    expect(getAccessToken).not.toHaveBeenCalled(); expect(sendOnce).not.toHaveBeenCalled();
+  });
+  it("refuses a prepared but unclaimed delegated job", async () => {
+    file = join(dir, crypto.randomUUID() + ".db"); await copyFile(prepared, file);
+    await jobSqlite(file, "apply-delegated-observations"); await upgrade();
+    await expect(requestDelegatedCancellation(owner, audience, f.intentId)).rejects.toThrow("claim unavailable");
+    expect(await first("SELECT count(*) AS n FROM bigquery_cancellation_requests")).toEqual({ n: 0 });
+  });
+  it("recovers a persisted request after lost write confirmation without submitting anything", async () => {
+    const hooked: typeof db = { prepare(q) {
+      const p = db.prepare(q); if (!q.startsWith("INSERT INTO bigquery_cancellation_requests")) return p;
+      return { ...p, bind(...args) { const s = p.bind(...args); return { ...s, async run() {
+        await s.run(); throw new Error("fixture: confirmation lost");
+      } }; } };
+    } };
+    await expect(requestDelegatedCancellation({ ...owner, db: hooked }, audience, f.intentId)).rejects.toThrow("confirmation lost");
+    const saved = await read(); expect(saved.state).toBe("requested");
+    expect(await requestDelegatedCancellation(owner, audience, f.intentId)).toEqual(saved);
+  });
+  it("does not write if ownership is revoked between the read and conditional insert", async () => {
+    const hooked: typeof db = { prepare(q) {
+      const p = db.prepare(q); if (!q.startsWith("INSERT INTO bigquery_cancellation_requests")) return p;
+      return { ...p, bind(...args) { const s = p.bind(...args); return { ...s, async run() {
+        await sql("UPDATE control_memberships SET active=0 WHERE tenant_id='t' AND principal_id='google:operator'"); return s.run();
+      } }; } };
+    } };
+    await expect(requestDelegatedCancellation({ ...owner, db: hooked }, audience, f.intentId)).rejects.toThrow("scope unavailable");
+    expect(await first("SELECT count(*) AS n FROM bigquery_cancellation_requests")).toEqual({ n: 0 });
+  });
+});

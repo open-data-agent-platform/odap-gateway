@@ -8,12 +8,16 @@ import { approveSemanticRevision, promoteSemanticRevision, proposeSemanticRevisi
 import { jobDatabase, jobSqlite } from "./job-sqlite";
 import metric from "./revenue-metric.json";
 
-export function delegationFixture(file: () => string, enrolled: () => CryptoKeyPair) {
-  const db = jobDatabase(file);
+type Backend = { db: ReturnType<typeof jobDatabase>; sql: (q: string, params?: string[]) => ReturnType<typeof jobSqlite>;
+  first: (q: string) => ReturnType<typeof jobSqlite>; migrate: (mode: string) => Promise<unknown> };
+
+export function delegationFixture(file: () => string, enrolled: () => CryptoKeyPair, backend?: Backend) {
+  const db = backend?.db ?? jobDatabase(file);
   const env = { DB: db, AUTH_COOKIE_SECRET: "synthetic-delegation-test-secret", ODAP_DELEGATION_AUDIENCE: "test-gateway",
     ASSETS: { fetch: async () => { throw new Error("Unexpected asset or external call"); } } };
-  const sql = (q: string, params: string[] = []) => jobSqlite(file(), "run", q, params);
-  const first = (q: string) => jobSqlite(file(), "readonly-first", q);
+  const sql = backend?.sql ?? ((q: string, params: string[] = []) => jobSqlite(file(), "run", q, params));
+  const first = backend?.first ?? ((q: string) => jobSqlite(file(), "readonly-first", q));
+  const migrate = backend?.migrate ?? ((mode: string) => jobSqlite(file(), mode));
   const hex = (data: ArrayBuffer) => Buffer.from(data).toString("hex");
   const keys = () => crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign","verify"]);
   const sign = async (challenge: string, pair = enrolled()) => hex(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" },
@@ -51,21 +55,21 @@ export function delegationFixture(file: () => string, enrolled: () => CryptoKeyP
     expect(await recordHumanGrant(owner, { ...request, grantId: "grant", requesterId: principalId, reviewedAction: action, policyRevision: "p1" })).toBeTruthy();
   }
   async function migrateAndEnroll(tenant = "t") {
-    await jobSqlite(file(), "apply-agent-delegations");
+    await migrate("apply-agent-delegations");
     await sql("INSERT INTO agent_verification_keys VALUES(?,'reporter','k1',?,1)", [tenant,hex(await crypto.subtle.exportKey("raw",enrolled().publicKey))]);
   }
   async function seedAdmittedDelegation() {
-    await jobSqlite(file(), "setup-v19");
+    await migrate("setup-v19");
     await setupGrant("t");
     await migrateAndEnroll();
     const d = await challenge();
     const delegationId = d.delegationId;
     expect((await post("t/delegation-proofs", { delegationId, signature: await sign(d.challenge) })).status).toBe(201);
-    await jobSqlite(file(), "apply-contract-issuance");
+    await migrate("apply-contract-issuance");
     const issued = await post("t/contract-issuances", { delegationId }, "reader");
     expect(issued.status).toBe(201);
     const contractId = (await issued.json() as { issuance: { contractId: string } }).issuance.contractId;
-    await jobSqlite(file(), "apply-delegated-budget");
+    await migrate("apply-delegated-budget");
     await sql(`INSERT INTO bigquery_scan_policies VALUES('t','orders','p1','demo-project','US','on_demand',5000000,
       100000000,strftime('%Y-%m-%dT%H:%M:%fZ','now','+5 minutes'),'fixture')`);
     await sql("INSERT INTO delegated_budget_policies VALUES('t','orders','p1','b',80)");
@@ -77,9 +81,9 @@ export function delegationFixture(file: () => string, enrolled: () => CryptoKeyP
   }
   async function seedAmbiguousDelegation(beforeClaim: () => Promise<void>) {
     const ids = await seedAdmittedDelegation();
-    await jobSqlite(file(),"apply-delegated-jobs");
+    await migrate("apply-delegated-jobs");
     expect((await post("t/job-preparations",{ intentId:ids.intentId },"operator")).status).toBe(201);
-    await jobSqlite(file(),"apply-delegated-handoff");
+    await migrate("apply-delegated-handoff");
     await beforeClaim();
     let tag = "", cap = "";
     const h = await handoffDelegatedRead({ db,tenantId:"t",principalId:"google:operator" },ids.intentId,
