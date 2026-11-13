@@ -7,6 +7,7 @@ import { onRequestGet as onEvidenceCoverageGet } from "../functions/api/control/
 import { onRequestGet as onBudgetReconciliationGet } from "../functions/api/control/[tenant]/budget-reconciliation/[id]";
 import { onRequestGet as onJobRecoveryGet } from "../functions/api/control/[tenant]/job-recovery/[id]";
 import { onRequestGet as onSettledEvidenceGet } from "../functions/api/control/[tenant]/settled-evidence/[id]";
+import { onRequestGet as onCancellationEvidenceGet } from "../functions/api/control/[tenant]/cancellation-evidence/[id]";
 import { onRequestPost as onProposalPost } from "../functions/api/control/[tenant]/proposals";
 import { onRequestPost as onValidationPost } from "../functions/api/control/[tenant]/validations";
 import { onRequestPost as onApprovalPost } from "../functions/api/control/[tenant]/approvals";
@@ -161,6 +162,10 @@ function matchApiRoute(
     if (post) return { allowedMethods: ["POST"], handler: () => post({ request, env, params: { tenant: command[1] } }) };
   }
   const control = url.pathname.match(/^\/api\/control\/([^/]+)\/([^/]+)\/([^/]+)$/);
+  if (control?.[2] === "cancellation-evidence") return {
+    allowedMethods: ["GET"],
+    handler: () => onCancellationEvidenceGet({ request, env, params: { tenant: control[1], id: control[3] } })
+  };
   if (control?.[2] === "settled-evidence") return {
     allowedMethods: ["GET"],
     handler: () => onSettledEvidenceGet({ request, env, params: { tenant: control[1], id: control[3] } })

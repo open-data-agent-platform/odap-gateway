@@ -32,8 +32,9 @@ the same body in its text result and sets `isError` on denial or failure.
 The [MCP handler](../lib/coverage-mcp.ts) supports post-initialization
 `tools/list` and `tools/call` in memory; listing reveals only static descriptions
 of the coverage tool, the [budget reconciliation tool](BUDGET_RECONCILIATION.md#local-mcp-read),
-the [stored job recovery tool](BIGQUERY_JOB_RECOVERY.md#local-mcp-stored-recovery-tool)
-and the [settled evidence tool](SETTLED_EVIDENCE.md#local-mcp-settled-evidence-tool).
+the [stored job recovery tool](BIGQUERY_JOB_RECOVERY.md#local-mcp-stored-recovery-tool),
+the [settled evidence tool](SETTLED_EVIDENCE.md#local-mcp-settled-evidence-tool)
+and the [cancellation request evidence tool](CANCELLATION_EVIDENCE.md#local-mcp-cancellation-evidence-tool).
 It is not a listening server, an OAuth integration or an
 independently tested MCP client. There is no tool to execute SQL.
 
@@ -45,7 +46,7 @@ to its private input/output pipes with
 socket or read process credentials. The host supplies the database binding and
 signed request context; nothing in the initialize message grants tenant access.
 The existing function and server names are retained for compatibility. The same
-negotiated session can call all four read-only tools. Recovery and settled evidence
+negotiated session can call all five read-only tools. Recovery, settled evidence and cancellation evidence
 use the host-configured delegation audience and cannot refresh provider status. No tool
 grants access to another tenant or authorizes migration, retry or query execution.
 

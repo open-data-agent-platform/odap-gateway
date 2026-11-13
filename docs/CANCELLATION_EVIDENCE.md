@@ -1,6 +1,6 @@
 # Recorded cancellation request evidence
 
-This internal Gateway export preserves the recorded provenance of a delegated
+This Gateway export preserves the recorded provenance of a delegated
 cancellation request. It does not establish that a request was sent, received,
 or caused a warehouse cancellation. It neither verifies a charge nor releases a
 budget reservation. It is a local engineering profile, not an ODAP wire standard.
@@ -12,7 +12,7 @@ SELECT against a local database with migrations through 0034. The caller must
 derive `ControlAccess` from its trusted authentication boundary; this function
 is not itself an authentication endpoint. The statement checks active ownership
 of the requested tenant and binds the expected audience and intent. It does not
-apply migrations, open a new HTTP/MCP route, retrieve credentials or call BigQuery.
+apply migrations, retrieve credentials or call BigQuery.
 
 Missing, inaccessible, legacy unattributed and mismatched requests return `null`.
 That is not proof that no cancellation occurred. Read failures throw rather than
@@ -29,6 +29,42 @@ pending receipt ID; the claim actor/time, body digest and byte cap; and the
 request actor/time and matching job/audience/digest. It contains no query text,
 parameters, result rows, tokens, provider diagnostics, terminal outcome or bill.
 Identifiers and project metadata are still private and require appropriate handling.
+
+## Authenticated HTTP read
+
+`GET /api/control/{tenant}/cancellation-evidence/{intent}` uses the signed session
+and current active tenant ownership, then rechecks ownership in the export
+snapshot. Under a path-mounted deployment, prepend the configured base path.
+The server supplies the delegation audience. Query parameters and other HTTP
+methods are rejected; identity headers cannot grant access. Responses use
+`Cache-Control: no-store`.
+
+A successful response is `{ok:true,evidence:{tenantId,intentId,audience,json,digest,
+scope,source,...}}`. The scope is `recorded-request-only` and the source is
+`stored-evidence`. `issuerAuthenticated`, `cancellationConfirmed`,
+`providerContacted`, `cancellationAuthorized`, `executionAuthorized` and
+`settlementAuthorized` are all false. Later terminal observations do not change
+the request evidence or turn it into confirmation of cancellation.
+
+Invalid sessions receive 401. Non-owners, missing or inaccessible requests and
+incomplete provenance receive the same 403 response. Missing audience configuration
+or unavailable storage gives 503, never an empty or successful export. This read
+requires schema 0034: older 0032/0033 databases remain unchanged and return a
+sanitized storage-unavailable response after authentication and ownership checks.
+Deployment does not authorize or apply a database upgrade.
+
+## Local MCP cancellation evidence tool
+
+`odap_cancellation_evidence` accepts exactly `{"tenantId":"...","intentId":"..."}`.
+The host supplies a fresh signed request context and database binding on every
+call; no cookie, role, audience, endpoint or action parameter is accepted.
+It calls the same service as HTTP and returns the identical body as a text result,
+with `isError` on denial or failure. The tool is read-only and cannot send a
+cancellation, refresh provider status or settle a reservation.
+
+The existing local [stdio transport](EVIDENCE_COVERAGE.md#local-stdio-transport)
+requires initialization before calls. This integration creates no public MCP
+listener, OAuth configuration or independent client acceptance claim.
 
 ## Verify without a database
 

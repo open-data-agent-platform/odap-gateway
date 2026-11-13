@@ -2,6 +2,7 @@ import { requestEvidenceCoverage, type CoverageEnv } from "./coverage-request";
 import { requestBudgetReconciliation } from "./budget-reconciliation-request";
 import { requestDelegatedRecovery, type DelegatedRecoveryEnv } from "./delegated-recovery-request";
 import { requestSettledEvidence } from "./settled-evidence-request";
+import { requestCancellationEvidence } from "./cancellation-evidence-request";
 
 export type CoverageToolEnv = CoverageEnv & DelegatedRecoveryEnv;
 
@@ -40,6 +41,16 @@ const settledTool = {
   annotations: { readOnlyHint: true, openWorldHint: false }
 } as const;
 
+const cancellationTool = {
+  name: "odap_cancellation_evidence",
+  description: "Read recorded cancellation-request evidence for a tenant you own; not confirmation, issuer authentication or authority to cancel, execute or settle.",
+  inputSchema: { type: "object", properties: {
+    tenantId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" },
+    intentId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" }
+  }, required: ["tenantId", "intentId"], additionalProperties: false },
+  annotations: { readOnlyHint: true, openWorldHint: false }
+} as const;
+
 export function isRpcRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
 }
@@ -60,7 +71,7 @@ export async function handleCoverageToolRequest(request: Request, env: CoverageT
   if (method === "tools/list") {
     if (params !== undefined && (!isRpcRecord(params) || Object.keys(params).some(k => k !== "_meta")))
       return rpcError(id, -32602, "Invalid parameters");
-    return { jsonrpc: "2.0" as const, id, result: { tools: [tool, budgetTool, recoveryTool, settledTool] } };
+    return { jsonrpc: "2.0" as const, id, result: { tools: [tool, budgetTool, recoveryTool, settledTool, cancellationTool] } };
   }
   if (method !== "tools/call") return rpcError(id, -32601, "Method not found");
   if (!isRpcRecord(params) || !isRpcRecord(params.arguments) ||
@@ -79,6 +90,9 @@ export async function handleCoverageToolRequest(request: Request, env: CoverageT
   } else if (params.name === settledTool.name && Object.keys(params.arguments).length === 2 &&
       Object.hasOwn(params.arguments, "intentId") && typeof params.arguments.intentId === "string") {
     response = await requestSettledEvidence(request, env, params.arguments.tenantId, params.arguments.intentId);
+  } else if (params.name === cancellationTool.name && Object.keys(params.arguments).length === 2 &&
+      Object.hasOwn(params.arguments, "intentId") && typeof params.arguments.intentId === "string") {
+    response = await requestCancellationEvidence(request, env, params.arguments.tenantId, params.arguments.intentId);
   } else return rpcError(id, -32602, "Invalid tool call");
   const { body } = response;
   return { jsonrpc: "2.0" as const, id, result: {

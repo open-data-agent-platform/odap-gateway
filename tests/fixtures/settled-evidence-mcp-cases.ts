@@ -157,7 +157,7 @@ export function settledEvidenceMcpCases(fixture: () => CancellationFixture) {
       const prepare = vi.fn(() => { throw new Error("Unexpected storage"); });
       const reply = await handleCoverageToolRequest(evidenceRequest("", "i"), recoveryEnv({ prepare }), { jsonrpc: "2.0", id: 1, method: "tools/list" });
       if (!("result" in reply) || !reply.result.tools) throw new Error("Expected tools");
-      expect(reply.result.tools.map(t => t.name)).toEqual(["odap_evidence_coverage", "odap_budget_reconciliation", "odap_job_recovery", "odap_settled_evidence"]);
+      expect(reply.result.tools.map(t => t.name)).toEqual(["odap_evidence_coverage", "odap_budget_reconciliation", "odap_job_recovery", "odap_settled_evidence", "odap_cancellation_evidence"]);
       expect(reply.result.tools[3]).toMatchObject({ inputSchema: { required: ["tenantId", "intentId"], additionalProperties: false },
         annotations: { readOnlyHint: true, openWorldHint: false } }); expect(prepare).not.toHaveBeenCalled();
     });

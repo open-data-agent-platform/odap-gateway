@@ -84,7 +84,7 @@ export function budgetMcpCases(database:()=>D1Database, legacyDatabase:()=>Promi
     const db={prepare:()=>{throw new Error("Do not inspect storage while listing");}};
     const reply=await handleCoverageToolRequest(budgetReadRequest(""),budgetRequestEnv(db),{jsonrpc:"2.0",id:1,method:"tools/list"});
     if (!("result" in reply) || !reply.result.tools) throw new Error("Expected tool list");
-    expect(reply.result.tools.map(t=>t.name)).toEqual(["odap_evidence_coverage","odap_budget_reconciliation","odap_job_recovery", "odap_settled_evidence"]);
+    expect(reply.result.tools.map(t=>t.name)).toEqual(["odap_evidence_coverage","odap_budget_reconciliation","odap_job_recovery", "odap_settled_evidence", "odap_cancellation_evidence"]);
     expect(reply.result.tools[1]).toMatchObject({inputSchema:{required:["tenantId","budgetId"],additionalProperties:false},
       annotations:{readOnlyHint:true,openWorldHint:false}});
   });

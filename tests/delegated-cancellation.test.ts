@@ -15,6 +15,8 @@ import { delegatedObservationTransportCases } from "./fixtures/delegated-observa
 import { delegatedRecoveryRequestCases, recoveryCookie, recoveryEnv, recoveryRequest } from "./fixtures/delegated-recovery-request-cases";
 import { requestDelegatedRecovery } from "../lib/delegated-recovery-request";
 import { delegatedRecoveryMcpCases, recoveryToolBody } from "./fixtures/delegated-recovery-mcp-cases";
+import { cancellationEvidenceRequest, cancellationEvidenceRequestCases, cancellationToolBody } from "./fixtures/cancellation-evidence-request-cases";
+import { requestCancellationEvidence } from "../lib/cancellation-evidence-request";
 
 let dir: string, file: string, claimed: string, prepared: string, enrolled: CryptoKeyPair, f: CancellationFixture;
 const fixture = delegationFixture(() => file, () => enrolled), { db, sql, first } = fixture;
@@ -39,6 +41,20 @@ describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () =>
   delegatedObservationTransportCases(() => f);
   delegatedRecoveryRequestCases(() => f);
   delegatedRecoveryMcpCases(() => f);
+  cancellationEvidenceRequestCases(() => f);
+
+  it.each(["0032", "0033"])("refuses cancellation evidence on schema %s without migrating or changing bytes", async version => {
+    file = join(dir, crypto.randomUUID()+".db"); await jobSqlite(file, "setup-v32");
+    if (version === "0033") await jobSqlite(file, "apply-auxiliary-costs");
+    await sql("INSERT INTO control_memberships VALUES('t','google:operator','owner',1),('t','google:reader','reader',1)");
+    const before = await readFile(file), env = recoveryEnv(jobDatabase(() => file, "readonly"));
+    for (const [subject, status, code] of [["reader", 403, "tenant_access_denied"], ["operator", 503, "control_storage_unavailable"]] as const) {
+      const req = cancellationEvidenceRequest(await recoveryCookie(subject), f.intentId);
+      expect(await requestCancellationEvidence(req, env, "t", f.intentId)).toEqual({ status, body: { ok: false, code } });
+      expect(await cancellationToolBody(req, env, "t", f.intentId)).toEqual({ ok: false, code });
+    }
+    expect(await readFile(file)).toEqual(before);
+  });
 
   it("reads schema 0025 through a read-only connection without upgrading or changing bytes", async () => {
     file = join(dir, crypto.randomUUID()+".db"); await copyFile(claimed,file);
@@ -70,6 +86,12 @@ describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () =>
 
   it("reads the export through a read-only SQLite connection", async () => {
     await requestDelegatedCancellation(owner,audience,f.intentId);
+    const before = await readFile(file), env = recoveryEnv(jobDatabase(() => file,"readonly"));
+    const req = cancellationEvidenceRequest(await recoveryCookie(), f.intentId);
+    const response = await requestCancellationEvidence(req, env, "t", f.intentId);
+    expect(response.status).toBe(200);
+    expect(await cancellationToolBody(req, env, "t", f.intentId)).toEqual(response.body);
+    expect(await readFile(file)).toEqual(before);
     const saved=await exportCancellationEvidence({ ...owner,db:jobDatabase(() => file,"readonly") },audience,f.intentId);
     expect(saved).toEqual(await exportCancellationEvidence(owner,audience,f.intentId));
     if(!saved) throw new Error("Missing export");
