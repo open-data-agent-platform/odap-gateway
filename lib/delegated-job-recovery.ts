@@ -15,6 +15,10 @@ type Row = {
 type Scope = [tenantId: string, intentId: string, audience: string, owner: string];
 const scoped = "j.tenant_id=? AND j.intent_id=? AND j.audience=? AND j.operator_id=?";
 
+export class DelegatedClaimUnavailableError extends Error {
+  constructor() { super("Verified delegated claim unavailable"); }
+}
+
 export async function loadDelegatedClaimSnapshot(db: D1Database, scope: Scope) {
   const row = await db.prepare(`SELECT j.*,o.outcome,o.billed_bytes,o.observed_at,o.observed_by,
       ${terminalOutcomesConflict("j")} AS conflict
@@ -22,7 +26,7 @@ export async function loadDelegatedClaimSnapshot(db: D1Database, scope: Scope) {
     ON o.tenant_id=j.tenant_id AND o.intent_id=j.intent_id AND o.delegation_audience=j.audience
       AND o.claim_body_digest=j.compiled_body_digest WHERE ${scoped} ORDER BY o.has_bytes DESC LIMIT 1`)
     .bind(...scope).first<Row>();
-  if (!row) throw new Error("Verified delegated claim unavailable");
+  if (!row) throw new DelegatedClaimUnavailableError();
   if (row.conflict) throw new Error("Conflicting terminal outcomes");
   const [tenantId,intentId] = scope;
   const identity = await intentJobIdentity({ tenantId,intentId,actionDigest: row.action_digest,

@@ -172,6 +172,40 @@ submission/replay, proves cancellation causation, issues a final bill or release
 reserved funds. Tests use synthetic providers and local SQLite/native D1 only;
 live credentials, production wiring and independent acceptance remain separate.
 
+### Authenticated stored recovery read
+
+`GET /api/control/{tenant}/job-recovery/{intentId}` exposes the existing
+`readDelegatedRecovery` snapshot to a currently authenticated tenant owner.
+Mounted deployments prepend their base path, for example `/gateway/api/control/...`.
+The audience comes only from `ODAP_DELEGATION_AUDIENCE`; query parameters are
+rejected, including refresh and audience overrides. A signed global administrator
+role, email address or caller-supplied identity header is not tenant authority.
+Membership is checked during authorization, schema inspection and the scoped
+evidence read. Ownership and schema capability are never cached.
+
+The `recovery` object includes `tenantId`, `intentId`, `jobReference`, `receiptId`
+and the strongest stored `observation` (`state`, `billedBytes`, `observedAt`,
+`observedBy`), or null when no terminal observation is recorded. Null does not
+mean the provider is pending or the job is absent. This endpoint never contacts
+the provider and is not a freshness check. The response identifies
+`source: "stored-evidence"`, `providerContacted: false`, `executionAuthorized: false`
+and `settlementAuthorized: false`. It returns no SQL, query parameters, result
+rows or credentials. Responses use `Cache-Control: no-store`.
+
+Missing, unclaimed, wrong-audience and inaccessible jobs share an opaque 403
+response. Invalid paths or query parameters return 400, missing authentication
+returns 401, and unsupported Worker methods return 405 with `Allow: GET`.
+Missing audience configuration, unavailable pre-0025 recovery storage, malformed
+installed storage and inconsistent evidence fail closed with 503. Schema
+inspection happens only after current owner authorization; reads never migrate
+or initialize the database. Schema 0025 or later with the required recovery
+objects can serve this endpoint, including through a read-only connection.
+
+Withdrawal of the original delegation does not erase historical evidence, but
+loss of current tenant ownership denies access. This read does not retry a job,
+record a new observation, settle a charge, release funds or prove cancellation
+causation. The explicit network observer remains a separate internal operation.
+
 ### Non-delegated recovery
 
 `reconcileTerminalObservation(access, intentId, env)` is an internal operation.

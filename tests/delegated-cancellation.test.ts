@@ -1,4 +1,4 @@
-import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +12,8 @@ import { exportCancellationEvidence } from "../lib/cancellation-evidence-export"
 import { jobDatabase } from "./fixtures/job-sqlite";
 import { buildDetachedVerifier } from "./fixtures/detached-verifier";
 import { delegatedObservationTransportCases } from "./fixtures/delegated-observation-transport-cases";
+import { delegatedRecoveryRequestCases, recoveryCookie, recoveryEnv, recoveryRequest } from "./fixtures/delegated-recovery-request-cases";
+import { requestDelegatedRecovery } from "../lib/delegated-recovery-request";
 
 let dir: string, file: string, claimed: string, prepared: string, enrolled: CryptoKeyPair, f: CancellationFixture;
 const fixture = delegationFixture(() => file, () => enrolled), { db, sql, first } = fixture;
@@ -34,6 +36,30 @@ describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () =>
   delegatedCancellationCases(() => f);
   cancellationEvidenceCases(() => f);
   delegatedObservationTransportCases(() => f);
+  delegatedRecoveryRequestCases(() => f);
+
+  it("reads schema 0025 through a read-only connection without upgrading or changing bytes", async () => {
+    file = join(dir, crypto.randomUUID()+".db"); await copyFile(claimed,file);
+    await jobSqlite(file,"apply-delegated-observations");
+    const before = await readFile(file), readonly = jobDatabase(() => file,"readonly");
+    const result = await requestDelegatedRecovery(recoveryRequest(await recoveryCookie(),f.intentId),recoveryEnv(readonly),"t",f.intentId);
+    expect(result.status).toBe(200); expect(result.body).toMatchObject({ recovery: { observation: null } });
+    expect(await readFile(file)).toEqual(before);
+  });
+  it("reports pre-0025 storage unavailable only after authentication without upgrading", async () => {
+    file = join(dir, crypto.randomUUID()+".db"); await copyFile(claimed,file);
+    const before = await readFile(file), readonly = jobDatabase(() => file,"readonly"), env = recoveryEnv(readonly);
+    expect((await requestDelegatedRecovery(recoveryRequest(await recoveryCookie("reader"),f.intentId),env,"t",f.intentId)).status).toBe(403);
+    const result = await requestDelegatedRecovery(recoveryRequest(await recoveryCookie(),f.intentId),env,"t",f.intentId);
+    expect(result).toEqual({ status: 503, body: { ok: false, code: "job_recovery_unavailable" } });
+    expect(await readFile(file)).toEqual(before);
+  });
+  it("refuses recovery of a prepared but unclaimed job through the authenticated API", async () => {
+    file = join(dir, crypto.randomUUID()+".db"); await copyFile(prepared,file);
+    await jobSqlite(file,"apply-delegated-observations");
+    expect(await requestDelegatedRecovery(recoveryRequest(await recoveryCookie(),f.intentId),recoveryEnv(db),"t",f.intentId))
+      .toEqual({ status: 403, body: { ok: false, code: "tenant_access_denied" } });
+  });
 
   it("reads the export through a read-only SQLite connection", async () => {
     await requestDelegatedCancellation(owner,audience,f.intentId);
