@@ -114,6 +114,38 @@ Neither sends a cancellation, dispatches a job, releases a reservation, settles
 costs or rewrites a receipt. Even a later `cancelled` observation does not
 establish that this local request caused it. There is no public endpoint.
 
+### Explicit cancellation transport (offline)
+
+`sendRequestedJobCancellation(access, intentId, transport)` is a separate internal
+boundary for a recorded request on a bounded, non-delegated job. The caller must
+inject both a trusted token loader and a sender; no default credential lookup,
+network sender or public route is installed. Delegated bindings remain refused
+by the existing prepared-job reader. This is not production cancellation wiring.
+
+The boundary pins the tenant/principal and reads the stored job identity and
+current owner authority before preparing a token. It repeats that read after
+token preparation, refusing changed identity, revoked authority, conflicts or
+missing state. No request, a matched terminal observation or a historical
+settlement returns `not-sent`. A fifteen-second deadline covers token preparation,
+the final read and sending; late pre-send continuations cannot send. The final
+read is a local decision point, not an atomic revocation of an external request.
+
+Only a still-requested job permits one sender call per invocation: an empty-body
+POST to the fixed BigQuery host, stored project/job and location, with redirects
+disabled. The conservative routing profile rejects unsafe identifiers before
+loading credentials. Tokens and provider diagnostics are not returned or stored.
+After handoff, every HTTP status, thrown sender or timeout returns
+`observation-required`; response bodies are discarded, including late responses.
+There are no retries, job submissions, accounting writes or terminal receipts.
+
+This follows the [BigQuery cancellation contract](https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/jobs/cancel):
+a cancel request returns before the final outcome and a cancelled job may incur
+cost. Observe the same bound job and obtain authoritative billing separately.
+The existing durable request records owner intent, not a send attempt or remote
+acceptance. Another explicit invocation can send again: no durable attempt log,
+cross-invocation exactly-once guarantee or operational recovery policy is claimed.
+Tests use synthetic credentials, intercepted sends, SQLite and local native D1.
+
 Coverage uses actual migration and service SQL in SQLite and a test adapter.
 This is not a live submission path or independent authentication of a remote
 agent. The [offline-tested jobs.insert boundary](BIGQUERY_GOVERNED_TRANSPORT.md)
