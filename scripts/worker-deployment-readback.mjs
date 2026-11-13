@@ -30,8 +30,9 @@ export function verifyWorkerDeployment(expected, { run, readConfig = path => rea
   try { text = readConfig(configPath); config = JSON.parse(text); } catch { fail("config_invalid"); }
   if (config?.account_id !== accountId || config?.name !== workerName) fail("config_target_mismatch");
   const require = createRequire(import.meta.url);
-  const cli = join(dirname(require.resolve("wrangler/package.json")), "bin/wrangler.js");
-  const invoke = run ?? (args => spawnSync(process.execPath, [cli, ...args], {
+  // The installed launcher maps a signalled child to exit zero. Observe the CLI itself.
+  const cli = join(dirname(require.resolve("wrangler/package.json")), "wrangler-dist/cli.js");
+  const invoke = run ?? (args => spawnSync(process.execPath, ["--no-warnings", "--experimental-vm-modules", cli, ...args], {
     encoding: "utf8", windowsHide: true, timeout: 90000, maxBuffer: 1024 * 1024,
     env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: accountId, WRANGLER_SEND_METRICS: "false" }
   }));

@@ -57,6 +57,8 @@ and `deployments list --json`; user-facing console output is not an identity
 record. Both processes must exit normally within 90 seconds. Invalid JSON,
 termination, a mismatched account, a newer deployment, ambiguous timestamps,
 split traffic or a version other than the expected version at 100% fail closed.
+The helper runs the installed CLI entry directly with the launcher's Node flags,
+so a launcher cannot convert an internally signalled exit into a successful code.
 A local config change during the reads also fails. There are no helper retries.
 
 Each run writes a new `.tmp/verification/worker-readback-*/readback.json`, including
