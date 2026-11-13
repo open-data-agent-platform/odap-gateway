@@ -22,7 +22,9 @@ function fixture(result: unknown = confirmed()) {
   const run = vi.fn(async () => ({success:true}));
   const prepare = vi.fn((query: string) => {
     if (query === "SELECT role,email FROM users WHERE id=? AND provider=? AND provider_id=?") return authority.prepare(query);
-    const statement = {bind:() => statement,run,first:async () => ({id:"legacy-table"}),all:async () => ({success:true,results:[]})};
+    const statement = {bind:() => statement,run,first:async () =>
+      query.startsWith("SELECT id FROM schema_tables WHERE workspace = ? AND table_name = ? AND EXISTS") ? null :
+        ({id:"legacy-table"}),all:async () => ({success:true,results:[]})};
     return statement;
   });
   const batch = vi.fn(async () => result as D1Result[]);

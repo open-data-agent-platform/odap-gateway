@@ -2,7 +2,7 @@ import { Miniflare } from "miniflare";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureAdminSchema, importSchemaCatalog, type SchemaImportTableInput } from "../lib/admin-store";
 import type { D1Database } from "../lib/d1";
-import { importBigQuerySchemaCatalog } from "../lib/schema-import";
+import { importBigQuerySchemaCatalog, mapInformationSchemaRowsToCatalog } from "../lib/schema-import";
 import * as bigquery from "../lib/bigquery";
 import { evaluateSchemaPolicy } from "../lib/schema-policy";
 
@@ -20,6 +20,11 @@ const input: {workspace:string;tables:SchemaImportTableInput[]} = {workspace:"fi
 const submit = (database = db) => importSchemaCatalog({DB:database},input,actor);
 const state = async () => (await db.batch!(["schema_tables","schema_fields","audit_events"].map(table =>
   db.prepare(`SELECT * FROM ${table} ORDER BY id`)))).map(result => result.results);
+const projectCatalog = (projectId: string, restricted = false, workspace = "isolated") => ({ workspace,
+  tables: mapInformationSchemaRowsToCatalog([{ table_catalog: projectId, table_schema: "fixture", table_name: "orders",
+    table_type: "BASE TABLE", column_name: "contact", data_type: "STRING", is_nullable: "YES", ordinal_position: 1,
+    policy_tags: restricted ? "projects/fixture/locations/us/taxonomies/1/policyTags/2" : null }], workspace,
+  { projectId, dataset: "fixture", tablePrefix: "", tableLimit: 1 }) });
 
 describe("schema import transaction on installed local D1",() => {
   beforeAll(async () => {
@@ -42,6 +47,8 @@ describe("schema import transaction on installed local D1",() => {
   afterAll(async () => {await mf?.dispose();});
 
   it("accepts the installed binding through the wrapper preflight and persists intercepted metadata",async () => {
+    await db.prepare("DELETE FROM schema_fields").run();
+    await db.prepare("DELETE FROM schema_tables").run();
     const query = vi.spyOn(bigquery,"runBigQueryQuery").mockResolvedValue({ok:true,totalRows:1,rows:[{
       table_catalog:"fixture-project",table_schema:"fixture",table_name:"orders",table_type:"BASE TABLE",
       column_name:"contact",data_type:"STRING",is_nullable:"YES",ordinal_position:1,policy_tags:null
@@ -52,8 +59,58 @@ describe("schema import transaction on installed local D1",() => {
     expect(query).toHaveBeenCalledTimes(1);
     const [tables,fields,audits] = await state();
     expect(tables).toHaveLength(1);
-    expect(fields).toMatchObject([{id:"historical-contact",table_id:"legacy-orders",pii:1,queryable:0}]);
+    expect(tables).toMatchObject([{ table_name: "fixture-project.fixture.orders" }]);
+    expect(fields).toMatchObject([{ pii: 0, queryable: 1 }]);
     expect(audits).toHaveLength(2);
+  });
+
+  it("isolates project identities and their policies, with no short-name or wrong-project authorization", async () => {
+    for (const catalog of [projectCatalog("first-project", true), projectCatalog("second-project")]) {
+      expect(await importSchemaCatalog({ DB: db }, catalog, actor)).toMatchObject({ ok: true });
+    }
+    const read = async (table: string) => evaluateSchemaPolicy({ DB: db },
+      { workspace: "isolated", sql: `SELECT contact FROM \`${table}\`` });
+    expect(await read("first-project.fixture.orders")).toMatchObject({ blocked: true });
+    expect(await read("second-project.fixture.orders")).toMatchObject({ blocked: false });
+    expect(await read("third-project.fixture.orders")).toMatchObject({ blocked: true });
+    expect(await read("fixture.orders")).toMatchObject({ blocked: true });
+    const rows = await db.prepare(`SELECT t.table_name,f.pii,f.queryable FROM schema_tables t
+      JOIN schema_fields f ON f.table_id=t.id WHERE t.workspace='isolated' ORDER BY t.table_name`).all();
+    expect(rows.results).toEqual([
+      { table_name: "first-project.fixture.orders", pii: 1, queryable: 0 },
+      { table_name: "second-project.fixture.orders", pii: 0, queryable: 1 }
+    ]);
+    expect(await importSchemaCatalog({ DB: db }, projectCatalog("first-project"), actor)).toMatchObject({ ok: true });
+    expect(await read("first-project.fixture.orders")).toMatchObject({ blocked: true });
+  }, 20000);
+
+  it("refuses ambiguous historical identity without touching its fields, policy, IDs or audit", async () => {
+    const before = await state();
+    expect(await importSchemaCatalog({ DB: db }, projectCatalog("fixture-project", false, "fixture"), actor))
+      .toMatchObject({ ok: false, status: 409, code: "schema_import_identity_ambiguous" });
+    expect(await state()).toEqual(before);
+  });
+
+  it("rolls back a racing short-name conflict, including earlier writes in the same import", async () => {
+    const catalog = projectCatalog("fixture-project", false, "isolated");
+    catalog.tables.unshift({ ...catalog.tables[0], name: "fixture-project.fixture.lines" });
+    let concurrent: Awaited<ReturnType<typeof state>>;
+    const batch = vi.fn(async (statements: Parameters<NonNullable<D1Database["batch"]>>[0]) => {
+      await db.prepare("INSERT INTO schema_tables VALUES ('racing-short','isolated','fixture.orders','Concurrent',1,'prior')").run();
+      concurrent = await state();
+      return db.batch!(statements);
+    });
+    await expect(importSchemaCatalog({ DB: { prepare: query => db.prepare(query), batch } }, catalog, actor)).rejects.toThrow();
+    expect(batch).toHaveBeenCalledTimes(1);
+    expect(await state()).toEqual(concurrent!);
+  });
+
+  it("does not disclose ambiguous identity after administrator revocation", async () => {
+    await db.prepare("UPDATE users SET role='viewer'").run();
+    const before = await state();
+    expect(await importSchemaCatalog({ DB: db }, projectCatalog("fixture-project", false, "fixture"), actor))
+      .toMatchObject({ ok: false, status: 403, code: "schema_import_denied" });
+    expect(await state()).toEqual(before);
   });
 
   it("refuses a wrapper without batch before provider work or any native catalog change",async () => {
@@ -111,6 +168,7 @@ describe("schema import transaction on installed local D1",() => {
 
   it.each([[0, 1], [1, 1], [0, 0], [1, 0]])(
     "tightens tagged reimports from pii=%i/queryable=%i and never reopens them after tag removal", async (pii, queryable) => {
+      await db.prepare("UPDATE schema_tables SET table_name='fixture-project.fixture.orders' WHERE id='legacy-orders'").run();
       await db.prepare("UPDATE schema_fields SET pii=?,queryable=? WHERE id='historical-contact'").bind(pii, queryable).run();
       const metadata = { table_catalog: "fixture-project", table_schema: "fixture", table_name: "orders",
         table_type: "BASE TABLE", column_name: "contact", data_type: "STRING", is_nullable: "YES", ordinal_position: 1,
@@ -119,7 +177,7 @@ describe("schema import transaction on installed local D1",() => {
         .mockResolvedValueOnce({ ok: true, totalRows: 1, rows: [metadata] })
         .mockResolvedValueOnce({ ok: true, totalRows: 1, rows: [{ ...metadata, policy_tags: null }] });
       const request = { workspace: "fixture", dataset: "fixture", projectId: "fixture-project" };
-      const policyInput = { workspace: "fixture", sql: "SELECT contact FROM `fixture.orders`" };
+      const policyInput = { workspace: "fixture", sql: "SELECT contact FROM `fixture-project.fixture.orders`" };
       expect((await evaluateSchemaPolicy({ DB: db }, policyInput)).blocked).toBe(pii === 1 || queryable === 0);
       expect(await importBigQuerySchemaCatalog({ DB: db, GATEWAY_MODE: "demo" }, request, actor)).toMatchObject({ ok: true });
       const restriction = await db.prepare("SELECT id,pii,queryable FROM schema_fields WHERE field_name='contact'").first();
@@ -130,14 +188,14 @@ describe("schema import transaction on installed local D1",() => {
       const audit = await db.prepare("SELECT metadata_json FROM audit_events WHERE action='schema_catalog.imported'")
         .first<{ metadata_json: string }>();
       expect(JSON.parse(audit!.metadata_json)).toEqual({ importedTables: 1, importedFields: 1,
-        requestedRestrictions: [{ table: "fixture.orders", field: "contact", pii: true, queryable: false }] });
+        requestedRestrictions: [{ table: "fixture-project.fixture.orders", field: "contact", pii: true, queryable: false }] });
       expect(audit!.metadata_json).not.toContain(metadata.policy_tags);
       expect(await importBigQuerySchemaCatalog({ DB: db, GATEWAY_MODE: "demo" }, request, actor)).toMatchObject({ ok: true });
       expect(await db.prepare("SELECT id,pii,queryable FROM schema_fields WHERE field_name='contact'").first()).toEqual(restriction);
       expect((await evaluateSchemaPolicy({ DB: db }, policyInput)).blocked).toBe(true);
       expect(query).toHaveBeenCalledTimes(2);
       expect(await db.prepare("SELECT count(*) n FROM audit_events WHERE action='schema_catalog.imported'").first()).toEqual({ n: 2 });
-    });
+    }, 20000);
 
   it.each([
     [{ pii: true }, 1, 1], [{ queryable: false }, 0, 0],

@@ -52,7 +52,7 @@ describe("schema import mapping", () => {
     expect(catalog).toHaveLength(1);
     expect(catalog[0]).toMatchObject({
       workspace: "demo",
-      name: "demo.orders"
+      name: "demo-project.demo.orders"
     });
     expect(catalog[0].fields[0]).toMatchObject({
       name: "order_id",

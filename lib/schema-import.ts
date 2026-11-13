@@ -175,7 +175,7 @@ export function mapInformationSchemaRowsToCatalog(
       throw new Error("Invalid BigQuery schema metadata.");
     }
 
-    const tableName = `${parsed.table_schema}.${parsed.table_name}`;
+    const tableName = `${parsed.table_catalog}.${parsed.table_schema}.${parsed.table_name}`;
     const existing =
       tables.get(tableName) ??
       { type: parsed.table_type, columns: new Set<string>(), positions: new Set<number>(), table: {
@@ -293,7 +293,7 @@ function parseInformationSchemaRow(
   const policyTags = row.policy_tags;
 
   if (
-    !tableCatalog.trim() || !tableSchema.trim() || !tableName.trim() || !columnName.trim() || !dataType.trim() ||
+    !tableCatalog.trim() || !tableSchema.trim() || !isSafeDatasetId(tableName) || !columnName.trim() || !dataType.trim() ||
     !IMPORT_TABLE_TYPES.includes(tableType) || !["YES", "NO"].includes(isNullable) || ordinal === undefined ||
     (policyTags !== null && (typeof policyTags !== "string" || (policyTags !== "" && !policyTags.trim())))
   ) {

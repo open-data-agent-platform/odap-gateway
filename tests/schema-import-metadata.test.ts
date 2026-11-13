@@ -9,11 +9,22 @@ const row: BigQueryQueryRow = { table_catalog: source.projectId, table_schema: s
 const map = (rows: BigQueryQueryRow[], scope = source) => mapInformationSchemaRowsToCatalog(rows, "workspace", scope);
 
 describe("schema import metadata admission", () => {
+  it("keeps project identity when two sources share a dataset and table name", () => {
+    const other = { ...source, projectId: "other-project" };
+    const first = map([row])[0];
+    const second = map([{ ...row, table_catalog: other.projectId }], other)[0];
+    expect(first.name).toBe("fixture-project.fixture.orders");
+    expect(second.name).toBe("other-project.fixture.orders");
+    expect(first.name).not.toBe(second.name);
+  });
   it.each([
     ["project", { table_catalog: "another-project" }],
     ["dataset", { table_schema: "another_dataset" }],
     ["prefix", { table_name: "payments" }],
     ["missing name", { column_name: "" }],
+    ["table separator", { table_name: "orders.extra" }],
+    ["quoted table", { table_name: "orders`" }],
+    ["table whitespace", { table_name: "orders " }],
     ["blank type", { data_type: " " }],
     ["unknown table type", { table_type: "TABLE" }],
     ["unknown nullability", { is_nullable: "unknown" }],
@@ -61,7 +72,7 @@ describe("schema import metadata admission", () => {
         policy_tags: "projects/fixture/locations/us/taxonomies/1/policyTags/2" }]);
     expect(result).toHaveLength(1);
     expect(result[0].fields).toHaveLength(4);
-    expect(result[0].fields[0].description).toBe("Pseudo column from fixture.orders.");
+    expect(result[0].fields[0].description).toBe("Pseudo column from fixture-project.fixture.orders.");
     expect(result[0].fields[3]).toMatchObject({ name: "contact", pii: true, queryable: false, mode: "NULLABLE" });
   });
 });

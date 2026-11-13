@@ -41,7 +41,7 @@ describe("write-time administrator authority for schema import",() => {
     file = baseline = join(dir,"baseline.sqlite");
     await jobSqlite(file,"apply-legacy-schema");
     await sql("INSERT INTO users VALUES ('google:actor','google','actor','actor@example.test','Actor',NULL,'admin','prior','prior','prior')");
-    await sql("INSERT INTO schema_tables VALUES ('legacy-orders','fixture','fixture.orders','Prior table',1,'prior')");
+    await sql("INSERT INTO schema_tables VALUES ('legacy-orders','fixture','fixture-project.fixture.orders','Prior table',1,'prior')");
     await sql("INSERT INTO schema_fields VALUES ('historical-contact','legacy-orders','contact','STRING','NULLABLE','Prior field',1,0,0,'prior')");
     await sql("INSERT INTO audit_events VALUES ('prior-audit','prior@example.test','prior.action','prior','{}','prior')");
     cookie = createSessionCookie(await signAuthPayload({provider:"google",providerId:"actor",email:"actor@example.test",
@@ -66,6 +66,15 @@ describe("write-time administrator authority for schema import",() => {
     });
     await denied(await submit(withBodyReadHook(request(), revoke)),snapshot);
     expect(revoke).toHaveBeenCalledOnce();
+  });
+
+  it("returns an identity-review conflict without changing an unqualified historical catalog", async () => {
+    await sql("UPDATE schema_tables SET table_name='fixture.orders' WHERE id='legacy-orders'");
+    const snapshot = await readFile(file), response = await submit();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ ok: false, code: "schema_import_identity_ambiguous" });
+    expect((await readFile(file)).equals(snapshot)).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("baseline: refuses an administrator removed while metadata is retrieved",async () => {

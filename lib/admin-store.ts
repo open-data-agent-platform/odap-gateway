@@ -1069,6 +1069,19 @@ export async function importSchemaCatalog(
 
   for (const table of tables) {
     const tableName = table.name.trim();
+    const parts = tableName.split(".");
+    const legacyName = parts.length >= 3 ? parts.slice(-2).join(".") : null;
+    const legacyGuard = legacyName === null ? "" :
+      "AND NOT EXISTS (SELECT 1 FROM schema_tables WHERE workspace = ? AND table_name = ?)";
+    const legacyValues = legacyName === null ? [] : [workspace, legacyName];
+    // A historical short name has no proven project identity. Do not create a
+    // parallel entry that bypasses its policy, or guess which project owns it.
+    if (legacyName !== null && await configured.db.prepare(
+      `SELECT id FROM schema_tables WHERE workspace = ? AND table_name = ? AND ${authorityGuard}`
+    ).bind(...legacyValues, ...authorityValues).first()) {
+      return { ok: false, status: 409, code: "schema_import_identity_ambiguous",
+        message: "An unqualified catalog entry requires explicit identity review before import." };
+    }
     const tableId =
       (await getSchemaTableId(configured.db, workspace, tableName)) ??
       createImportedSchemaTableId(workspace, tableName);
@@ -1082,7 +1095,7 @@ export async function importSchemaCatalog(
           description,
           row_count,
           updated_at
-        ) SELECT ?, ?, ?, ?, ?, ? WHERE ${writeGuard}
+        ) SELECT ?, ?, ?, ?, ?, ? WHERE ${writeGuard} ${legacyGuard}
         ON CONFLICT(workspace, table_name) DO UPDATE SET
           description = excluded.description,
           row_count = excluded.row_count,
@@ -1097,7 +1110,7 @@ export async function importSchemaCatalog(
         table.description,
         table.rowCount,
         importedAt,
-        ...authorityValues, auditId
+        ...authorityValues, auditId, ...legacyValues
       ), assertWrite());
     expectedWrites.push({id: tableId});
 

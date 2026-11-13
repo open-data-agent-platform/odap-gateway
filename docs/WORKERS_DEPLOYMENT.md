@@ -516,6 +516,21 @@ Only an isolated demo with explicit `GATEWAY_MODE=demo` can use that path.
 Do not switch a production instance to demo to enable import. A production
 metadata import would need separate, tenant-scoped admission and evidence.
 
+Mapped table names retain `project.dataset.table`; matching a dataset and table
+in another project does not select the same catalog row or grant preview access.
+The metadata mapper accepts ordinary identifier-shaped table names only; table
+names with separators, whitespace or quoting are refused rather than normalized
+into a different identity. This is narrower than BigQuery's full naming syntax.
+See [BigQuery table paths](https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/lexical#table_names).
+Historical `dataset.table` entries have no verified project association. If one
+exists in the same workspace, a qualified import returns 409
+(`schema_import_identity_ambiguous`) while the actor is still an administrator.
+It neither overwrites that entry nor creates a parallel row with fresh policy
+defaults. A short-name conflict introduced after this check aborts the entire
+write transaction. Existing entries are not renamed, deleted or automatically
+assigned to a project; resolving them requires separate identity review and an
+explicit authorized change. No migration or production import is enabled.
+
 The catalog storage importer requires a callable `batch` on the selected binding
 and returns 503 (`schema_import_transaction_unavailable`) otherwise, before its
 own initialization or catalog writes. It does not fall back to another binding.
