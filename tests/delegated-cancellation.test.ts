@@ -1,4 +1,4 @@
-import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +7,10 @@ import { delegatedCancellationCases, type CancellationFixture } from "./fixtures
 import { jobSqlite } from "./fixtures/job-sqlite";
 import { readDelegatedCancellation, requestDelegatedCancellation } from "../lib/delegated-cancellation";
 import { sendRequestedDelegatedJobCancellation } from "../lib/bigquery-cancellation-transport";
+import { cancellationEvidenceCases } from "./fixtures/cancellation-evidence-cases";
+import { exportCancellationEvidence } from "../lib/cancellation-evidence-export";
+import { jobDatabase } from "./fixtures/job-sqlite";
+import { buildDetachedVerifier } from "./fixtures/detached-verifier";
 
 let dir: string, file: string, claimed: string, prepared: string, enrolled: CryptoKeyPair, f: CancellationFixture;
 const fixture = delegationFixture(() => file, () => enrolled), { db, sql, first } = fixture;
@@ -27,6 +31,19 @@ describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () =>
   });
   afterAll(async () => { if (dir) await rm(dir, { recursive: true, force: true }); });
   delegatedCancellationCases(() => f);
+  cancellationEvidenceCases(() => f);
+
+  it("reads the export through a read-only SQLite connection", async () => {
+    await requestDelegatedCancellation(owner,audience,f.intentId);
+    const saved=await exportCancellationEvidence({ ...owner,db:jobDatabase(() => file,"readonly") },audience,f.intentId);
+    expect(saved).toEqual(await exportCancellationEvidence(owner,audience,f.intentId));
+    if(!saved) throw new Error("Missing export");
+    const path=join(dir,"request.json"),pin=join(dir,"request.sha256");
+    await writeFile(path,saved.json); await writeFile(pin,saved.digest);
+    const invoke=await buildDetachedVerifier(dir,"verify-cancellation-evidence");
+    const checked=await invoke(path,"t",f.intentId,audience,pin);
+    expect(checked.stderr).toBe(""); expect(JSON.parse(checked.stdout)).toMatchObject({consistent:true,cancellationConfirmed:false});
+  });
 
   it("keeps an unattributed pre-upgrade request unverified and never sends it", async () => {
     file = join(dir, crypto.randomUUID() + ".db"); await copyFile(claimed, file);
@@ -34,6 +51,7 @@ describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () =>
     await sql("INSERT INTO bigquery_cancellation_requests(tenant_id,intent_id,job_id,requested_by) VALUES('t',?,?,'google:operator')", [f.intentId, f.ref.jobId]);
     const original = await first("SELECT * FROM bigquery_cancellation_requests"); await upgrade();
     const stored = await read(); expect(stored).toMatchObject({ state: "unverified-request", request: { verified: false } });
+    expect(await exportCancellationEvidence(owner,audience,f.intentId)).toBeNull();
     expect(await requestDelegatedCancellation(owner, audience, f.intentId)).toEqual(stored);
     const getAccessToken = vi.fn(), sendOnce = vi.fn();
     expect(await sendRequestedDelegatedJobCancellation(owner, audience, f.intentId, { getAccessToken, sendOnce }))
@@ -45,6 +63,7 @@ describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () =>
     file = join(dir, crypto.randomUUID() + ".db"); await copyFile(claimed, file);
     await jobSqlite(file, "apply-delegated-observations");
     const getAccessToken = vi.fn(), sendOnce = vi.fn();
+    await expect(exportCancellationEvidence(owner,audience,f.intentId)).rejects.toThrow();
     await expect(sendRequestedDelegatedJobCancellation(owner, audience, f.intentId, { getAccessToken, sendOnce })).rejects.toThrow("unavailable");
     expect(getAccessToken).not.toHaveBeenCalled(); expect(sendOnce).not.toHaveBeenCalled();
   });

@@ -211,6 +211,10 @@ digest and reports `cancelled` and 7 micro-USD. It verifies the settled
 evidence, not the request's provenance or whether the request caused the
 cancellation. No cancellation was sent to a warehouse.
 
+Recorded delegated request provenance has a separate
+[owner-scoped export and detached verifier](CANCELLATION_EVIDENCE.md).
+It does not change either settled profile or add a cancellation-success claim.
+
 ## Recover from a synthetic snapshot
 
 `tests/settled-evidence.test.ts` takes two SQLite `VACUUM INTO` snapshots
