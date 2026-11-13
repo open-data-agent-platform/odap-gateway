@@ -254,3 +254,23 @@ exercised locally with synthetic monetary evidence.
 
 References: [BigQuery Job](https://cloud.google.com/bigquery/docs/reference/rest/v2/Job)
 and [jobs.get](https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/get).
+
+## Owner inspection page
+
+`/job-recovery` (or `/gateway/job-recovery` when mounted) reads stored delegated
+recovery evidence through the existing authenticated GET policy. It is linked
+from Evidence receipt and accepts tenant and intent IDs without storing them in
+the URL or browser storage. Each lookup requires current tenant-owner access.
+
+The page distinguishes no stored terminal observation from recorded success,
+failure or cancellation. Unknown billed bytes remain unknown; zero stays zero.
+The handoff receipt is not presented as a final settlement receipt, billed bytes
+are not monetary charges, and the report does not establish current provider or
+billing status. There is no provider refresh, retry, settlement or query action.
+
+Scope edits, new lookups, hiding the page and explicit hiding clear private
+results; late aborted responses cannot restore an earlier lookup. Scope, job
+identity, receipt binding and response limitations are checked before display.
+Missing access, unavailable configuration and invalid evidence do not become
+empty or successful reports. Browser verification uses synthetic responses and
+an unauthenticated local Worker, not production credentials or pilot evidence.
