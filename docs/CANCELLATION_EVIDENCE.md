@@ -60,3 +60,7 @@ authority, a truthful source database or the warehouse's behavior. The portable
 profile also cannot verify that source audit rows still exist. No result grants
 permission to send a cancellation, replay a query, serve a restored database,
 refund a charge or claim independent acceptance.
+
+The [offline cancellation restore comparison](CANCELLATION_RESTORE.md) checks
+two retained database snapshots for lost or changed request provenance, including
+legacy unattributed requests. Matching backups do not authorize any retry.
