@@ -5,6 +5,7 @@ import { delegationFixture } from "./fixtures/delegation";
 import { delegatedCancellationCases, type CancellationFixture } from "./fixtures/delegated-cancellation-cases";
 import { jobSqlite } from "./fixtures/job-sqlite";
 import { cancellationEvidenceCases } from "./fixtures/cancellation-evidence-cases";
+import { delegatedObservationTransportCases } from "./fixtures/delegated-observation-transport-cases";
 
 let mf: Miniflare, f: CancellationFixture, statements: string[], sequence = 0;
 describe("delegated cancellation on installed native D1", () => {
@@ -35,4 +36,5 @@ describe("delegated cancellation on installed native D1", () => {
   afterAll(async () => { await mf?.dispose(); });
   delegatedCancellationCases(() => f);
   cancellationEvidenceCases(() => f);
+  delegatedObservationTransportCases(() => f);
 });

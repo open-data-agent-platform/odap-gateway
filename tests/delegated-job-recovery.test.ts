@@ -7,6 +7,7 @@ import { observeDelegatedClaim, readDelegatedRecovery } from "../lib/delegated-j
 import { delegationFixture } from "./fixtures/delegation";
 import { jobSqlite } from "./fixtures/job-sqlite";
 import { corruptTerminalEnrichment } from "./fixtures/conflicting-terminal";
+import { observeDelegatedJobWithTransport } from "../lib/delegated-observation-transport";
 
 let dir: string, file: string, claimed: string, prepared: string, enrolled: CryptoKeyPair;
 let intentId: string, delegationId: string, receiptId: string, tag: string, cap: string;
@@ -208,5 +209,74 @@ describe("observation-only delegated recovery", { timeout: 25000 }, () => {
     for (const [scope,pin] of [["other",digest],[audience,"sha256:"+"f".repeat(64)]])
       await expect(sql(insert,[intentId,scope,pin])).rejects.toThrow("verified delegated observation required");
     expect(await rows()).toBe(0);
+  });
+
+  it("refuses an unclaimed job before preparing observation credentials", async () => {
+    file = join(dir,crypto.randomUUID()+".db"); await copyFile(prepared,file); await upgrade();
+    const getAccessToken = vi.fn(), sendOnce = vi.fn();
+    await expect(observeDelegatedJobWithTransport(owner,audience,intentId,{ ...ref,getAccessToken,sendOnce })).rejects.toThrow("unavailable");
+    expect(getAccessToken).not.toHaveBeenCalled(); expect(sendOnce).not.toHaveBeenCalled();
+  });
+
+  it.each(["compiled_body_digest", "cap"] as const)("refuses a changed %s before the metadata GET", async field => {
+    let changed = false;
+    const hooked: typeof db = { prepare(q) {
+      const p = db.prepare(q);
+      if (!q.startsWith("SELECT j.*,o.outcome")) return p;
+      return { ...p,bind(...args) {
+        const s = p.bind(...args);
+        return { ...s,async first<T>() {
+          const row = await s.first<T>();
+          return changed && row ? { ...row,[field]: field === "cap" ? Number(cap)+1 : "sha256:"+"f".repeat(64) } : row;
+        } };
+      } };
+    } };
+    const sendOnce = vi.fn();
+    await expect(observeDelegatedJobWithTransport({ ...owner,db:hooked },audience,intentId,
+      { ...ref,sendOnce,getAccessToken:async()=>{ changed=true; return "synthetic"; } })).rejects.toThrow("unavailable");
+    expect(sendOnce).not.toHaveBeenCalled(); expect(await rows()).toBe(0);
+  });
+
+  it.each(["token", "headers"] as const)("bounds %s waiting and rejects late observation work", async phase => {
+    const before = await ledger();
+    let started!: () => void, tokenArrives!: (token: string) => void, responseArrives!: (response: Response) => void;
+    let signal!: AbortSignal;
+    const entered = new Promise<void>(resolve=>{ started=resolve; });
+    const getAccessToken = vi.fn((s: AbortSignal) => {
+      signal=s;
+      if (phase==="token") { started(); return new Promise<string>(resolve=>{ tokenArrives=resolve; }); }
+      return Promise.resolve("synthetic");
+    });
+    const sendOnce = vi.fn((request: Request) => {
+      expect(request.signal.aborted).toBe(false); started();
+      return new Promise<Response>(resolve=>{ responseArrives=resolve; });
+    });
+    vi.useFakeTimers();
+    const pending = expect(observeDelegatedJobWithTransport(owner,audience,intentId,
+      { ...ref,getAccessToken,sendOnce })).rejects.toThrow(/^Delegated observation transport unavailable$/);
+    try {
+      await entered; await vi.advanceTimersByTimeAsync(15_000); await pending;
+      expect(signal.aborted).toBe(true);
+      const response=Response.json(resource("DONE","0")), cancel=vi.spyOn(response.body!,"cancel");
+      if (phase==="token") tokenArrives("synthetic"); else responseArrives(response);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sendOnce).toHaveBeenCalledTimes(phase==="token"?0:1);
+      expect(cancel).toHaveBeenCalledTimes(phase==="token"?0:1);
+    } finally { vi.useRealTimers(); }
+    expect(await rows()).toBe(0); expect(await ledger()).toEqual(before);
+  });
+
+  it("bounds a stalled metadata body and keeps the reservation", async () => {
+    const before=await ledger(); let started!:()=>void;
+    const entered=new Promise<void>(resolve=>{ started=resolve; }), cancel=vi.fn();
+    const sendOnce=vi.fn(async()=>new Response(new ReadableStream({ pull(){ started(); },cancel })));
+    vi.useFakeTimers();
+    const pending=expect(observeDelegatedJobWithTransport(owner,audience,intentId,
+      { ...ref,getAccessToken:async()=>"synthetic",sendOnce })).rejects.toThrow("unavailable");
+    try {
+      await entered; await vi.advanceTimersByTimeAsync(15_000); await pending;
+      expect(cancel).toHaveBeenCalledOnce(); expect(sendOnce).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+    expect(await rows()).toBe(0); expect(await ledger()).toEqual(before);
   });
 });

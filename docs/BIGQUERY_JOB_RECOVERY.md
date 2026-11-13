@@ -141,6 +141,37 @@ successful observation does not release the reservation or rewrite the receipt.
 The separate [delegated settlement](COST_SETTLEMENT.md#delegated-job-settlement)
 step requires an attributable final monetary charge, not a byte count.
 
+### Explicit delegated metadata transport
+
+`observeDelegatedJobWithTransport(access, audience, intentId, transport)` composes
+the delegated observer with a narrowly constructed `jobs.get` request. It is
+internal and has no public endpoint, default sender, credential lookup or polling
+loop. The trusted adapter supplies its configured project and location, an
+abort-aware token preparation callback and a one-call request sender. The stored
+claim must match that target before authentication. Current ownership and the
+claim pins are rechecked after token preparation and again by the observer
+before persistence/readback. These checks do not make a network request atomic
+with a subsequent ownership change.
+
+The request is an empty-body GET to the pinned BigQuery job with manual redirect
+handling and the existing narrow metadata field selection. Token preparation,
+GET headers and bounded body consumption share the observer's 15-second deadline;
+initial/final database operations remain outside that network deadline. Late
+tokens cannot initiate GET, and late responses cannot create observations.
+Invalid tokens, redirects, transport errors and unmatched metadata fail with a
+generic diagnostic, without exposing provider or credential details. The supplied
+callbacks are trusted adapter code; they must honor the request/signal and must
+not introduce retries, redirects or other side effects of their own.
+
+A cancellation request does not predict the observation: success, failure and
+cancellation are recorded independently. Grant withdrawal does not erase an
+already-claimed job, but a nonowner cannot inspect it. Not-found and pending
+samples retain stronger stored outcomes. Lost write confirmation may be recovered
+with `readDelegatedRecovery` without another provider request. No result permits
+submission/replay, proves cancellation causation, issues a final bill or releases
+reserved funds. Tests use synthetic providers and local SQLite/native D1 only;
+live credentials, production wiring and independent acceptance remain separate.
+
 ### Non-delegated recovery
 
 `reconcileTerminalObservation(access, intentId, env)` is an internal operation.

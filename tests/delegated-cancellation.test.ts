@@ -11,6 +11,7 @@ import { cancellationEvidenceCases } from "./fixtures/cancellation-evidence-case
 import { exportCancellationEvidence } from "../lib/cancellation-evidence-export";
 import { jobDatabase } from "./fixtures/job-sqlite";
 import { buildDetachedVerifier } from "./fixtures/detached-verifier";
+import { delegatedObservationTransportCases } from "./fixtures/delegated-observation-transport-cases";
 
 let dir: string, file: string, claimed: string, prepared: string, enrolled: CryptoKeyPair, f: CancellationFixture;
 const fixture = delegationFixture(() => file, () => enrolled), { db, sql, first } = fixture;
@@ -32,6 +33,7 @@ describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () =>
   afterAll(async () => { if (dir) await rm(dir, { recursive: true, force: true }); });
   delegatedCancellationCases(() => f);
   cancellationEvidenceCases(() => f);
+  delegatedObservationTransportCases(() => f);
 
   it("reads the export through a read-only SQLite connection", async () => {
     await requestDelegatedCancellation(owner,audience,f.intentId);
