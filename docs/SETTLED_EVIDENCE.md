@@ -64,6 +64,29 @@ Retain a digest independently for later tamper comparison. No export page,
 public MCP transport, production billing integration or independent acceptance
 is implied by this read endpoint.
 
+### Local MCP settled evidence tool
+
+The existing local MCP profile also exposes `odap_settled_evidence` with only
+`tenantId` and `intentId`. It calls the same `requestSettledEvidence` service
+as the HTTP route. The host supplies a fresh authenticated request and configured
+audience independently of tool arguments; metadata cannot assign identity,
+membership or audience. Extra parameters, including refresh, settlement and
+caller-provided digest, are rejected. The read-only annotations are descriptive;
+the shared service and owner-scoped snapshot enforce access.
+
+The result's text contains the same JSON envelope as HTTP. Parse that text once,
+then use `evidence.json` and `evidence.digest` without reformatting the bundle.
+The 4 MiB UTF-8 limit applies to the canonical evidence, not the escaped outer
+RPC envelope. Missing or refused chains return `isError: true` with the same
+sanitized code and no partial bundle. That result does not establish that no
+job ran or that retrying is safe.
+
+`serveCoverageStdio` requires initialization and checks the host session and
+current ownership on every call, including repeated calls on one pipe. This
+addition creates no public MCP endpoint, default process, credentials or
+database. Synthetic SQLite/native D1 and pipe checks are engineering evidence,
+not independent client adoption, issuer authentication or production custody.
+
 ### Correcting an explanation
 
 With migration 0030, an active tenant owner can append a corrected explanation

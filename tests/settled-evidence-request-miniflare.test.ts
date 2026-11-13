@@ -5,6 +5,7 @@ import { delegationFixture } from "./fixtures/delegation";
 import type { CancellationFixture } from "./fixtures/delegated-cancellation-cases";
 import { jobSqlite } from "./fixtures/job-sqlite";
 import { settledEvidenceRequestCases } from "./fixtures/settled-evidence-request-cases";
+import { settledEvidenceMcpCases } from "./fixtures/settled-evidence-mcp-cases";
 
 let mf: Miniflare, f: CancellationFixture, statements: string[], sequence = 0;
 describe("settled evidence export on native D1", () => {
@@ -33,4 +34,5 @@ describe("settled evidence export on native D1", () => {
   }, 60000);
   afterAll(async () => { await mf?.dispose(); });
   settledEvidenceRequestCases(() => f);
+  settledEvidenceMcpCases(() => f);
 });

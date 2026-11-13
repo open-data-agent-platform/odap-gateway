@@ -8,6 +8,7 @@ import { jobDatabase, jobSqlite } from "./fixtures/job-sqlite";
 import { evidenceRequest, settleEvidenceFixture, settledEvidenceRequestCases } from "./fixtures/settled-evidence-request-cases";
 import { recoveryCookie, recoveryEnv } from "./fixtures/delegated-recovery-request-cases";
 import { requestSettledEvidence } from "../lib/settled-evidence-request";
+import { settledEvidenceMcpCases } from "./fixtures/settled-evidence-mcp-cases";
 
 let dir: string, file: string, baseline: string, enrolled: CryptoKeyPair, f: CancellationFixture;
 const fixture = delegationFixture(() => file, () => enrolled), { db, sql, first } = fixture;
@@ -24,6 +25,7 @@ describe("settled evidence HTTP storage boundary", { timeout: 30000 }, () => {
   });
   afterAll(async () => { if (dir) await rm(dir, { recursive: true, force: true }); });
   settledEvidenceRequestCases(() => f);
+  settledEvidenceMcpCases(() => f);
   it("exports schema 0026 through a read-only connection without changing its bytes", async () => {
     await settleEvidenceFixture(f);
     const cookie = await recoveryCookie(), before = await readFile(file);

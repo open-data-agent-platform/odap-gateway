@@ -1,6 +1,7 @@
 import { requestEvidenceCoverage, type CoverageEnv } from "./coverage-request";
 import { requestBudgetReconciliation } from "./budget-reconciliation-request";
 import { requestDelegatedRecovery, type DelegatedRecoveryEnv } from "./delegated-recovery-request";
+import { requestSettledEvidence } from "./settled-evidence-request";
 
 export type CoverageToolEnv = CoverageEnv & DelegatedRecoveryEnv;
 
@@ -29,6 +30,15 @@ const recoveryTool = {
   }, required: ["tenantId", "intentId"], additionalProperties: false },
   annotations: { readOnlyHint: true, openWorldHint: false }
 } as const;
+const settledTool = {
+  name: "odap_settled_evidence",
+  description: "Read a stored settled evidence bundle for a tenant you own; no issuer authentication, provider lookup, execution or settlement authority.",
+  inputSchema: { type: "object", properties: {
+    tenantId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" },
+    intentId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" }
+  }, required: ["tenantId", "intentId"], additionalProperties: false },
+  annotations: { readOnlyHint: true, openWorldHint: false }
+} as const;
 
 export function isRpcRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
@@ -50,7 +60,7 @@ export async function handleCoverageToolRequest(request: Request, env: CoverageT
   if (method === "tools/list") {
     if (params !== undefined && (!isRpcRecord(params) || Object.keys(params).some(k => k !== "_meta")))
       return rpcError(id, -32602, "Invalid parameters");
-    return { jsonrpc: "2.0" as const, id, result: { tools: [tool, budgetTool, recoveryTool] } };
+    return { jsonrpc: "2.0" as const, id, result: { tools: [tool, budgetTool, recoveryTool, settledTool] } };
   }
   if (method !== "tools/call") return rpcError(id, -32601, "Method not found");
   if (!isRpcRecord(params) || !isRpcRecord(params.arguments) ||
@@ -66,6 +76,9 @@ export async function handleCoverageToolRequest(request: Request, env: CoverageT
   } else if (params.name === recoveryTool.name && Object.keys(params.arguments).length === 2 &&
       Object.hasOwn(params.arguments, "intentId") && typeof params.arguments.intentId === "string") {
     response = await requestDelegatedRecovery(request, env, params.arguments.tenantId, params.arguments.intentId);
+  } else if (params.name === settledTool.name && Object.keys(params.arguments).length === 2 &&
+      Object.hasOwn(params.arguments, "intentId") && typeof params.arguments.intentId === "string") {
+    response = await requestSettledEvidence(request, env, params.arguments.tenantId, params.arguments.intentId);
   } else return rpcError(id, -32602, "Invalid tool call");
   const { body } = response;
   return { jsonrpc: "2.0" as const, id, result: {
