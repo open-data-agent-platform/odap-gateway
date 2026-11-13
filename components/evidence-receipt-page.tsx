@@ -96,6 +96,7 @@ export function EvidenceReceiptPage() {
       <ReceiptText className="h-6 w-6 text-sky-400" aria-hidden="true" />Evidence receipt
     </h1>
     <nav aria-label="Related evidence" className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-sky-300">
+      <Link href="/cancellation-evidence" className="focus-ring underline">Cancellation request</Link>
       <Link href="/job-recovery" className="focus-ring underline">Job recovery</Link>
       <Link href="/settled-evidence" className="focus-ring underline">Settled evidence</Link>
     </nav>

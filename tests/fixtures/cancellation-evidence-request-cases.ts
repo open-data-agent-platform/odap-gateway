@@ -6,6 +6,7 @@ import { handleCoverageToolRequest, type CoverageToolEnv } from "../../lib/cover
 import { requestCancellationEvidence } from "../../lib/cancellation-evidence-request";
 import { exportCancellationEvidence } from "../../lib/cancellation-evidence-export";
 import { cancellationEvidenceMaxBytes, verifyCancellationEvidence } from "../../lib/cancellation-evidence";
+import { inspectCancellationEvidence, cancellationEvidenceFile } from "../../lib/cancellation-evidence-inspection";
 import { requestDelegatedCancellation } from "../../lib/delegated-cancellation";
 import { observeDelegatedClaim } from "../../lib/delegated-job-recovery";
 import { serveCoverageStdio } from "../../scripts/coverage-stdio";
@@ -45,6 +46,18 @@ export function cancellationEvidenceRequestCases(fixture: () => CancellationFixt
     expect(await cancellationToolBody(req, env, tenant, intent)).toEqual(body); return body;
   }
   describe("authenticated cancellation evidence transport parity", { timeout: 30000 }, () => {
+    it("feeds the request download without changing bytes and denies an owner after revocation", async () => {
+      const f = fixture(); await save(); const expected = await exportCancellationEvidence(f.owner, f.audience, f.intentId);
+      const cookie = await recoveryCookie(), get: typeof fetch = async () => fetchWorker(cancellationEvidenceRequest(cookie, f.intentId));
+      const result = await inspectCancellationEvidence("t", f.intentId, new AbortController().signal, get);
+      expect(result.state).toBe("ready");
+      if (result.state !== "ready") throw new Error("Missing report");
+      expect(cancellationEvidenceFile(result.report, "json").content).toBe(expected?.json);
+      expect(cancellationEvidenceFile(result.report, "digest").content).toBe(expected?.digest+"\n");
+      expect(result.report).not.toHaveProperty("outcome");
+      await run("UPDATE control_memberships SET active=0 WHERE principal_id='google:operator'");
+      expect(await inspectCancellationEvidence("t", f.intentId, new AbortController().signal, get)).toEqual({ state: "denied" });
+    });
     it("lists a static read-only tool without accessing storage or requiring a session", async () => {
       const prepare = vi.fn(() => { throw new Error("Unexpected storage"); });
       const reply = await handleCoverageToolRequest(new Request("https://gateway.test"), recoveryEnv({ prepare }),

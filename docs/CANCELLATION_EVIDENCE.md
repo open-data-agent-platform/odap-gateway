@@ -68,6 +68,20 @@ listener, OAuth configuration or independent client acceptance claim.
 
 ## Verify without a database
 
+The **Cancellation request** page is linked from job recovery, evidence receipts
+and settled evidence. It reads only the current owner's stored request and checks
+the exact profile, scope and checksum before showing requester/time/job references.
+It displays **Request recorded**, never a terminal outcome or a charge. The page
+does not send cancellations, refresh provider status or upgrade storage.
+
+**Download JSON** preserves the exported canonical bytes; **Download checksum**
+contains the SHA-256 pin plus one newline. File names use only the checksum.
+Editing the tenant/intent, rereading, hiding or leaving the page clears the old
+result; late responses cannot restore it. No evidence or identity is persisted in
+browser storage. Authentication, authorization and unavailable/legacy-storage
+responses withhold the bundle rather than presenting empty or successful evidence.
+Browser-side consistency checking is not issuer authentication or independent custody.
+
 `verifyCancellationEvidence(json, { tenantId, intentId, audience }, expectedDigest)`
 checks the exact profile/fields, canonical representation, scope, deterministic
 job identity, attribution pins and nondecreasing claim/request times. Its input

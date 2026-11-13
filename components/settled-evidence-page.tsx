@@ -40,6 +40,7 @@ export function SettledEvidencePage() {
       <FileCheck2 aria-hidden="true" className="h-6 w-6 shrink-0 text-sky-400" />Settled evidence
     </h1>
     <nav aria-label="Related evidence" className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-sky-300">
+      <Link href="/cancellation-evidence" className="focus-ring underline">Cancellation request</Link>
       <Link href="/evidence-receipt" className="focus-ring underline">Evidence receipt</Link>
       <Link href="/job-recovery" className="focus-ring underline">Job recovery</Link>
     </nav>
