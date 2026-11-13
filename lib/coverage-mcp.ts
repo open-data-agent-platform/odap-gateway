@@ -1,10 +1,20 @@
 import { requestEvidenceCoverage, type CoverageEnv } from "./coverage-request";
+import { requestBudgetReconciliation } from "./budget-reconciliation-request";
 
 const tool = {
   name: "odap_evidence_coverage",
   description: "Count recorded evidence states for a tenant you own.",
   inputSchema: { type: "object", properties: { tenantId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" } },
     required: ["tenantId"], additionalProperties: false },
+  annotations: { readOnlyHint: true, openWorldHint: false }
+} as const;
+const budgetTool = {
+  name: "odap_budget_reconciliation",
+  description: "Inspect recorded SQL, model and tool accounting for a tenant budget you own; not complete workflow cost or execution authority.",
+  inputSchema: { type: "object", properties: {
+    tenantId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" },
+    budgetId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" }
+  }, required: ["tenantId", "budgetId"], additionalProperties: false },
   annotations: { readOnlyHint: true, openWorldHint: false }
 } as const;
 
@@ -28,14 +38,21 @@ export async function handleCoverageToolRequest(request: Request, env: CoverageE
   if (method === "tools/list") {
     if (params !== undefined && (!isRpcRecord(params) || Object.keys(params).some(k => k !== "_meta")))
       return rpcError(id, -32602, "Invalid parameters");
-    return { jsonrpc: "2.0" as const, id, result: { tools: [tool] } };
+    return { jsonrpc: "2.0" as const, id, result: { tools: [tool, budgetTool] } };
   }
   if (method !== "tools/call") return rpcError(id, -32601, "Method not found");
-  if (!isRpcRecord(params) || params.name !== tool.name || !isRpcRecord(params.arguments) ||
+  if (!isRpcRecord(params) || !isRpcRecord(params.arguments) ||
       Object.keys(params).some(k => !["name", "arguments", "_meta"].includes(k)) ||
-      Object.keys(params.arguments).length !== 1 || !Object.hasOwn(params.arguments, "tenantId") ||
+      !Object.hasOwn(params.arguments, "tenantId") ||
       typeof params.arguments.tenantId !== "string") return rpcError(id, -32602, "Invalid tool call");
-  const { body } = await requestEvidenceCoverage(request, env, params.arguments.tenantId);
+  let response;
+  if (params.name === tool.name && Object.keys(params.arguments).length === 1) {
+    response = await requestEvidenceCoverage(request, env, params.arguments.tenantId);
+  } else if (params.name === budgetTool.name && Object.keys(params.arguments).length === 2 &&
+      Object.hasOwn(params.arguments, "budgetId") && typeof params.arguments.budgetId === "string") {
+    response = await requestBudgetReconciliation(request, env, params.arguments.tenantId, params.arguments.budgetId);
+  } else return rpcError(id, -32602, "Invalid tool call");
+  const { body } = response;
   return { jsonrpc: "2.0" as const, id, result: {
     isError: !body.ok, content: [{ type: "text" as const, text: JSON.stringify(body) }]
   } };

@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -15,6 +15,8 @@ const init = (version = "2025-06-18") => rpc(1, "initialize", { protocolVersion:
 const initialized = { jsonrpc: "2.0", method: "notifications/initialized" };
 const call = (id: number, tenantId = "t") => rpc(id, "tools/call", { name: "odap_evidence_coverage",
   arguments: { tenantId }, _meta: { principalId: "google:alternate", role: "owner" } });
+const budgetCall = (id: number, tenantId = "t") => rpc(id, "tools/call", { name: "odap_budget_reconciliation",
+  arguments: { tenantId, budgetId: "b" }, _meta: { principalId: "google:alternate", role: "owner" } });
 const line = (value: unknown) => JSON.stringify(value) + "\n";
 
 async function withClient(check: (client: ReturnType<typeof connect>) => Promise<void>) {
@@ -74,7 +76,8 @@ describe("local coverage MCP over stdio", { timeout: 20_000 }, () => {
       expect(await c.read()).toMatchObject({ id:1,result:{ protocolVersion:"2025-06-18",capabilities:{ tools:{} } } });
       expect(await c.read()).toMatchObject({ id:2,error:{ code:-32002 } });
       await c.write(line(initialized) + line(rpc(3,"tools/list")) + line(call(4)) + line(call(5,"peer")));
-      expect((await c.read()).result.tools.map((t: { name: string }) => t.name)).toEqual(["odap_evidence_coverage"]);
+      expect((await c.read()).result.tools.map((t: { name: string }) => t.name))
+        .toEqual(["odap_evidence_coverage", "odap_budget_reconciliation"]);
       const success = await c.read();
       expect(success).toMatchObject({ id:4,result:{ isError:false } });
       expect(JSON.parse(success.result.content[0].text)).toMatchObject({ ok:true,coverage:{ admitted:1,missingEvidence:1 } });
@@ -93,6 +96,32 @@ describe("local coverage MCP over stdio", { timeout: 20_000 }, () => {
     await withClient(async c => {
       await c.write(line(call(8)));
       expect(await c.read()).toMatchObject({ id:8,error:{ code:-32002 } });
+      expect(await c.finish()).toBe("");
+    });
+  });
+
+  it("reads a budget only after negotiation and rechecks revocation on the same read-only pipe", async () => {
+    await jobSqlite(file,"run","UPDATE control_memberships SET active=1 WHERE principal_id='google:pipe-owner'");
+    const before = await readFile(file);
+    await withClient(async c => {
+      await c.write(line(budgetCall(20)) + line(init()) + line(initialized) + line(budgetCall(21)) + line(budgetCall(22,"peer")));
+      expect(await c.read()).toMatchObject({ id:20,error:{ code:-32002 } });
+      expect(await c.read()).toMatchObject({ id:1,result:{ capabilities:{ tools:{} } } });
+      const report = await c.read();
+      expect(report).toMatchObject({ id:21,result:{ isError:false } });
+      expect(JSON.parse(report.result.content[0].text)).toMatchObject({ ok:true,reconciliation:{
+        tenantId:"t",budgetId:"b",completeWorkflowCost:false,executionAuthorized:false,
+        totals:{ pendingReservedMicroUsd:"20",pendingComponents:1 }
+      } });
+      const denied = await c.read();
+      expect(denied).toMatchObject({ id:22,result:{ isError:true } });
+      expect(JSON.parse(denied.result.content[0].text)).toEqual({ ok:false,code:"tenant_access_denied" });
+      expect((await readFile(file)).equals(before)).toBe(true);
+      await jobSqlite(file,"run","UPDATE control_memberships SET active=0 WHERE principal_id='google:pipe-owner'");
+      await c.write(line(budgetCall(23)));
+      const revoked = await c.read();
+      expect(revoked).toMatchObject({ id:23,result:{ isError:true } });
+      expect(JSON.parse(revoked.result.content[0].text)).toEqual({ ok:false,code:"tenant_access_denied" });
       expect(await c.finish()).toBe("");
     });
   });

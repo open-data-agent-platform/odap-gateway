@@ -72,12 +72,39 @@ snapshot statement checks current ownership again; the three request reads are
 not one transaction. A report with `consistent: false` still returns 200 so an
 authorized owner can inspect discrepancies without acquiring repair authority.
 
-There is no MCP route, UI integration, provider dispatch or production migration
-in this delivery. Production installations at migration 0032 remain unchanged
-and cannot return a successful combined report. Do not enable demo mode or bypass
-migration approval.
+There is no public MCP endpoint, UI integration, provider dispatch or production
+migration in this delivery. Production installations at migration 0032 remain
+unchanged and cannot return a successful combined report. Do not enable demo mode
+or bypass migration approval.
 The [offline restore checker](COST_RESTORE.md) remains a separate operator tool
 for comparing two detached snapshots, not a live authorization mechanism.
 
 Tests use disposable synthetic SQLite and native D1 databases with the same
 accounting cases. No real model, tool, warehouse or production database is used.
+
+## Local MCP Read
+
+The local [read-only MCP handler](../lib/coverage-mcp.ts) lists
+`odap_budget_reconciliation` alongside `odap_evidence_coverage`. Its arguments
+are exactly `{"tenantId":"...","budgetId":"..."}`. IDs have the same limits
+as the HTTP read. Additional arguments, identity fields, arbitrary tools and
+write methods are rejected before storage access. Client `_meta` cannot supply
+identity or authority. The host provides a fresh signed request independently
+of the message, and each call uses `requestBudgetReconciliation`, the same
+authorization and schema-capability service as REST.
+
+The text result contains the same application body as REST, with `isError: true`
+for denied or unavailable reads. Malformed RPC or structurally invalid tool
+arguments use JSON-RPC errors; malformed string IDs retain the shared service's
+`invalid_control_path` application result. An authorized report with
+`consistent: false` is still a successful
+read, not an RPC failure or permission to repair. Unknown costs, exact decimal
+amounts and the incomplete-workflow and non-authority disclosures are unchanged.
+
+The existing [local stdio profile](EVIDENCE_COVERAGE.md#local-stdio-transport)
+exposes both tools after its initialize/initialized handshake. It keeps the
+existing server/function names, frame limits, host-supplied context and current
+ownership checks. No network listener, credential loader or deployment command
+is introduced. Synthetic SQLite/native D1 parity and a real subprocess pipe
+exercise this implementation; they are not two independent client integrations,
+OAuth enrollment, production schema approval or pilot acceptance.

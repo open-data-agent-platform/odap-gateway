@@ -110,12 +110,12 @@ describe("REST and in-process MCP coverage policy", () => {
     expect(revoked).toBe(true);
   });
 
-  it("lists only the count tool and rejects impersonation, arbitrary tools and write methods", async () => {
+  it("lists only the read-only tools and rejects impersonation, arbitrary tools and write methods", async () => {
     const request = req("t",await session("owner"));
     const run = (message: unknown) => handleCoverageToolRequest(request,env,message);
     const listed = await run({ jsonrpc:"2.0", id:"list", method:"tools/list" });
     if (!("result" in listed) || !listed.result.tools) throw new Error("Expected a tool list");
-    expect(listed.result.tools.map(t => t.name)).toEqual(["odap_evidence_coverage"]);
+    expect(listed.result.tools.map(t => t.name)).toEqual(["odap_evidence_coverage", "odap_budget_reconciliation"]);
     for (const args of [{}, { tenantId:"t", principalId:"google:owner" }, { tenantId:"t", sql:"SELECT 1" }])
       expect(await run(call(args))).toMatchObject({ error:{ code:-32602 } });
     expect(await run({ ...call({}), params:{ name:"run_query", arguments:{} } })).toMatchObject({ error:{ code:-32602 } });
