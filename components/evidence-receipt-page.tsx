@@ -95,7 +95,10 @@ export function EvidenceReceiptPage() {
     <h1 className="flex items-center gap-3 text-2xl font-semibold">
       <ReceiptText className="h-6 w-6 text-sky-400" aria-hidden="true" />Evidence receipt
     </h1>
-    <Link href="/job-recovery" className="focus-ring mt-3 inline-block text-sm text-sky-300 underline">Job recovery</Link>
+    <nav aria-label="Related evidence" className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-sky-300">
+      <Link href="/job-recovery" className="focus-ring underline">Job recovery</Link>
+      <Link href="/settled-evidence" className="focus-ring underline">Settled evidence</Link>
+    </nav>
     <ControlObjectLookup kind="Receipt" load={inspectEvidenceReceipt}>{receipt => <>
       <dl className="grid gap-4 border-b border-white/10 pb-5 sm:grid-cols-2">
         <div><dt className="text-sm text-slate-400">Recorded outcome</dt>

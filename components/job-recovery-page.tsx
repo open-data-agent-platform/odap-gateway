@@ -29,6 +29,7 @@ export function JobRecoveryPage() {
     </h1>
     <nav aria-label="Related evidence" className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-sky-300">
       <Link href="/evidence-receipt" className="focus-ring underline">Evidence receipt</Link>
+      <Link href="/settled-evidence" className="focus-ring underline">Settled evidence</Link>
       <Link href="/cost" className="focus-ring underline">Budget accounting</Link>
     </nav>
     <form onSubmit={submit} className="mt-6 grid gap-3 border-b border-white/10 pb-6 sm:grid-cols-[1fr_1fr_auto] sm:items-end">

@@ -9,6 +9,7 @@ import type { D1Database, D1PreparedStatement } from "../../lib/d1";
 import type { CancellationFixture } from "./delegated-cancellation-cases";
 import { recoveryCookie, recoveryEnv } from "./delegated-recovery-request-cases";
 import { corruptTerminalEnrichment } from "./conflicting-terminal";
+import { inspectSettledEvidence, settledEvidenceFile } from "../../lib/settled-evidence-inspection";
 
 export function evidenceRequest(cookie: string, intent: string, tenant = "t", query = "", prefix = "", method = "GET") {
   return new Request(`https://gateway.test${prefix}/api/control/${tenant}/settled-evidence/${intent}${query}`,
@@ -33,6 +34,22 @@ export function settledEvidenceRequestCases(fixture: () => CancellationFixture) 
     expect(r.headers.get("Cache-Control")).toBe("no-store");
   };
   describe("authenticated settled evidence export", { timeout: 30000 }, () => {
+    it("feeds the owner download without changing bytes and rechecks access on reread", async () => {
+      const f = fixture(); await settleEvidenceFixture(f, "stopped", 12);
+      const expected = await exportSettledEvidence(f.owner, f.intentId, f.audience);
+      const cookie = await recoveryCookie();
+      const read = vi.fn<typeof fetch>().mockImplementation(async () =>
+        fetchWorker(evidenceRequest(cookie, f.intentId)));
+      const result = await inspectSettledEvidence("t", f.intentId, new AbortController().signal, read);
+      expect(result.state).toBe("ready");
+      if (result.state !== "ready" || !expected) throw new Error("Missing verified export");
+      expect(settledEvidenceFile(result.report, "json").content).toBe(expected.json);
+      expect(settledEvidenceFile(result.report, "digest").content).toBe(expected.digest+"\n");
+      expect(result.report).toMatchObject({ outcome: "cancelled", actualMicroUsd: 12 });
+      await run("UPDATE control_memberships SET active=0 WHERE tenant_id='t' AND principal_id='google:operator'");
+      expect(await inspectSettledEvidence("t", f.intentId, new AbortController().signal, read)).toEqual({ state: "denied" });
+      expect(read).toHaveBeenCalledTimes(2);
+    });
     it.each(["reader", "reviewer", "inactive", "absent", "outsider"])("denies %s despite admin cookie and forged headers", async subject => {
       await run("INSERT INTO control_tenants VALUES('peer','Peer')");
       await run("INSERT INTO control_memberships VALUES('t','google:reviewer','reviewer',1),('t','google:inactive','owner',0),('peer','google:outsider','owner',1)");

@@ -1,7 +1,12 @@
 type JsonBodyFailure = "invalid" | "too_large" | "timeout";
 type JsonBodyResult = { ok: true; value: unknown } | { ok: false; reason: JsonBodyFailure };
 
-export async function readBoundedRequestJson(request: Request, maxBytes: number): Promise<JsonBodyResult> {
+export function readBoundedRequestJson(request: Request, maxBytes: number): Promise<JsonBodyResult> {
+  return readBoundedJsonBody(request, maxBytes);
+}
+
+export async function readBoundedJsonBody(request: Pick<Request, "body" | "bodyUsed" | "headers" | "signal">,
+  maxBytes: number): Promise<JsonBodyResult> {
   if (request.bodyUsed || request.body?.locked) return { ok: false, reason: "invalid" };
   if (request.signal.aborted || Number(request.headers.get("Content-Length")) > maxBytes) {
     void request.body?.cancel().catch(() => {});

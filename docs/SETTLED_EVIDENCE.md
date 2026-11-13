@@ -60,9 +60,30 @@ no job ran, no charge remains, or a retry is safe.
 Historical withdrawal of an execution delegation does not erase the export;
 current owner access is still required. The digest delivered alongside the
 bundle checks consistency, not independent custody or issuer authenticity.
-Retain a digest independently for later tamper comparison. No export page,
-public MCP transport, production billing integration or independent acceptance
+Retain a digest independently for later tamper comparison. No public MCP
+transport, production billing integration or independent acceptance
 is implied by this read endpoint.
+
+### Owner download page
+
+Open **Settled evidence** from Evidence receipt or Job recovery, enter the
+tenant and intent, and explicitly read the stored export. The page checks the
+envelope, expected scope, delegated reference chain, canonical bytes and digest
+before showing an outcome or enabling downloads. It applies the same 4 MiB
+evidence bound, a separate escaped-envelope bound and a bounded body-read time.
+Errors withhold the bundle; they do not establish a safe retry or absent charge.
+
+**Download JSON** saves the exact canonical UTF-8 bytes. **Download checksum**
+saves the accompanying `sha256:` digest plus one newline. Filenames use the
+digest rather than tenant identifiers. These two files share a source: saving
+them together is not independent custody or issuer authentication. The page
+shows that limitation even after consistency checks pass.
+
+Changing scope, starting another read, hiding evidence or hiding the page clears
+the displayed bundle and cancels an outstanding read. Nothing is written to
+browser storage, and no download starts until requested. A saved file remains
+the user's private copy; hiding the page cannot retract it. Every reread uses
+the authenticated owner endpoint, with no provider contact or accounting write.
 
 ### Local MCP settled evidence tool
 
