@@ -40,6 +40,35 @@ npx wrangler deploy
 - D1 binding: `ODAP_GATEWAY_DB`
 - Static assets binding: `ASSETS`
 
+## Read-only deployment confirmation
+
+After an authorized deployment, check the explicit account, Worker, deployment
+and version using the installed official CLI:
+
+```bash
+node scripts/worker-deployment-readback.mjs --config wrangler.jsonc --account ACCOUNT_ID --worker WORKER_NAME --deployment DEPLOYMENT_ID --version VERSION_ID
+```
+
+This helper accepts JSON syntax in the configuration file (including a `.jsonc`
+filename), with explicit top-level `account_id` and `name`. It does not select a
+named environment or infer a target. It uses official
+[`whoami --json`](https://developers.cloudflare.com/workers/wrangler/commands/general/#whoami)
+and `deployments list --json`; user-facing console output is not an identity
+record. Both processes must exit normally within 90 seconds. Invalid JSON,
+termination, a mismatched account, a newer deployment, ambiguous timestamps,
+split traffic or a version other than the expected version at 100% fail closed.
+A local config change during the reads also fails. There are no helper retries.
+
+Each run writes a new `.tmp/verification/worker-readback-*/readback.json`, including
+normalized process outcomes and the explicit target on success. Raw CLI output,
+provider diagnostics, credentials and account contact details are not retained
+by the helper. A failed attempt is not overwritten by a later success. Use the
+existing official login; this tool neither retrieves tokens nor changes account,
+Worker, route, secret or database configuration. It does not establish the account
+plan, application administrator identity, schema readiness or pilot acceptance.
+Check live responses, route boundaries and unchanged adjacent-site behavior
+separately; the two metadata reads are not an atomic snapshot or an upload.
+
 ## Hosting under a path
 
 To mount the Gateway at `https://googlesql.com/gateway`, build with
