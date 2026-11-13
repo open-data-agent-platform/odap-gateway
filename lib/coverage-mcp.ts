@@ -1,5 +1,8 @@
 import { requestEvidenceCoverage, type CoverageEnv } from "./coverage-request";
 import { requestBudgetReconciliation } from "./budget-reconciliation-request";
+import { requestDelegatedRecovery, type DelegatedRecoveryEnv } from "./delegated-recovery-request";
+
+export type CoverageToolEnv = CoverageEnv & DelegatedRecoveryEnv;
 
 const tool = {
   name: "odap_evidence_coverage",
@@ -17,6 +20,15 @@ const budgetTool = {
   }, required: ["tenantId", "budgetId"], additionalProperties: false },
   annotations: { readOnlyHint: true, openWorldHint: false }
 } as const;
+const recoveryTool = {
+  name: "odap_job_recovery",
+  description: "Inspect stored delegated job evidence for a tenant you own; no provider refresh, retry or settlement authority.",
+  inputSchema: { type: "object", properties: {
+    tenantId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" },
+    intentId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" }
+  }, required: ["tenantId", "intentId"], additionalProperties: false },
+  annotations: { readOnlyHint: true, openWorldHint: false }
+} as const;
 
 export function isRpcRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
@@ -30,7 +42,7 @@ export function rpcError(id: string | number | null, code: number, message: stri
 
 // Post-initialization MCP request handler. The host supplies a fresh request
 // carrying its session, never a cookie, role or subject from tool arguments.
-export async function handleCoverageToolRequest(request: Request, env: CoverageEnv, message: unknown) {
+export async function handleCoverageToolRequest(request: Request, env: CoverageToolEnv, message: unknown) {
   if (!isRpcRecord(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string" || !isRpcId(message.id)) {
     return rpcError(null, -32600, "Invalid request");
   }
@@ -38,7 +50,7 @@ export async function handleCoverageToolRequest(request: Request, env: CoverageE
   if (method === "tools/list") {
     if (params !== undefined && (!isRpcRecord(params) || Object.keys(params).some(k => k !== "_meta")))
       return rpcError(id, -32602, "Invalid parameters");
-    return { jsonrpc: "2.0" as const, id, result: { tools: [tool, budgetTool] } };
+    return { jsonrpc: "2.0" as const, id, result: { tools: [tool, budgetTool, recoveryTool] } };
   }
   if (method !== "tools/call") return rpcError(id, -32601, "Method not found");
   if (!isRpcRecord(params) || !isRpcRecord(params.arguments) ||
@@ -51,6 +63,9 @@ export async function handleCoverageToolRequest(request: Request, env: CoverageE
   } else if (params.name === budgetTool.name && Object.keys(params.arguments).length === 2 &&
       Object.hasOwn(params.arguments, "budgetId") && typeof params.arguments.budgetId === "string") {
     response = await requestBudgetReconciliation(request, env, params.arguments.tenantId, params.arguments.budgetId);
+  } else if (params.name === recoveryTool.name && Object.keys(params.arguments).length === 2 &&
+      Object.hasOwn(params.arguments, "intentId") && typeof params.arguments.intentId === "string") {
+    response = await requestDelegatedRecovery(request, env, params.arguments.tenantId, params.arguments.intentId);
   } else return rpcError(id, -32602, "Invalid tool call");
   const { body } = response;
   return { jsonrpc: "2.0" as const, id, result: {

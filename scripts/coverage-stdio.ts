@@ -1,7 +1,6 @@
 import type { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { handleCoverageToolRequest, isRpcId, isRpcRecord, rpcError } from "../lib/coverage-mcp";
-import type { CoverageEnv } from "../lib/coverage-request";
+import { handleCoverageToolRequest, isRpcId, isRpcRecord, rpcError, type CoverageToolEnv } from "../lib/coverage-mcp";
 
 // One local tools-only profile. An incompatible client can disconnect
 // after seeing the version in the initialize response.
@@ -27,7 +26,7 @@ async function* lines(source: AsyncIterable<Buffer>) {
   // An incomplete frame at EOF is never an executable request.
 }
 
-function coverageSession(env: CoverageEnv, sessionRequest: () => Request) {
+function coverageSession(env: CoverageToolEnv, sessionRequest: () => Request) {
   let phase: "new" | "negotiated" | "ready" = "new";
   return async (message: unknown) => {
     if (!isRpcRecord(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string" ||
@@ -61,7 +60,7 @@ function coverageSession(env: CoverageEnv, sessionRequest: () => Request) {
 
 // No default process, credentials, network listener or database. The local
 // host owns the streams and supplies session context independently of stdin.
-export async function serveCoverageStdio(input: Readable, output: Writable, env: CoverageEnv, sessionRequest: () => Request) {
+export async function serveCoverageStdio(input: Readable, output: Writable, env: CoverageToolEnv, sessionRequest: () => Request) {
   const dispatch = coverageSession(env, sessionRequest);
   const decoder = new TextDecoder("utf-8", { fatal: true });
   await pipeline(input, async function* (source: AsyncIterable<Buffer>, options?: { signal: AbortSignal }) {

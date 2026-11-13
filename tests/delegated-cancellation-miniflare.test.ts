@@ -7,6 +7,7 @@ import { jobSqlite } from "./fixtures/job-sqlite";
 import { cancellationEvidenceCases } from "./fixtures/cancellation-evidence-cases";
 import { delegatedObservationTransportCases } from "./fixtures/delegated-observation-transport-cases";
 import { delegatedRecoveryRequestCases } from "./fixtures/delegated-recovery-request-cases";
+import { delegatedRecoveryMcpCases } from "./fixtures/delegated-recovery-mcp-cases";
 
 let mf: Miniflare, f: CancellationFixture, statements: string[], sequence = 0;
 describe("delegated cancellation on installed native D1", () => {
@@ -39,4 +40,5 @@ describe("delegated cancellation on installed native D1", () => {
   cancellationEvidenceCases(() => f);
   delegatedObservationTransportCases(() => f);
   delegatedRecoveryRequestCases(() => f);
+  delegatedRecoveryMcpCases(() => f);
 });

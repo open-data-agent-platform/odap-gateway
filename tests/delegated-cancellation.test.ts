@@ -14,6 +14,7 @@ import { buildDetachedVerifier } from "./fixtures/detached-verifier";
 import { delegatedObservationTransportCases } from "./fixtures/delegated-observation-transport-cases";
 import { delegatedRecoveryRequestCases, recoveryCookie, recoveryEnv, recoveryRequest } from "./fixtures/delegated-recovery-request-cases";
 import { requestDelegatedRecovery } from "../lib/delegated-recovery-request";
+import { delegatedRecoveryMcpCases, recoveryToolBody } from "./fixtures/delegated-recovery-mcp-cases";
 
 let dir: string, file: string, claimed: string, prepared: string, enrolled: CryptoKeyPair, f: CancellationFixture;
 const fixture = delegationFixture(() => file, () => enrolled), { db, sql, first } = fixture;
@@ -37,6 +38,7 @@ describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () =>
   cancellationEvidenceCases(() => f);
   delegatedObservationTransportCases(() => f);
   delegatedRecoveryRequestCases(() => f);
+  delegatedRecoveryMcpCases(() => f);
 
   it("reads schema 0025 through a read-only connection without upgrading or changing bytes", async () => {
     file = join(dir, crypto.randomUUID()+".db"); await copyFile(claimed,file);
@@ -44,6 +46,7 @@ describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () =>
     const before = await readFile(file), readonly = jobDatabase(() => file,"readonly");
     const result = await requestDelegatedRecovery(recoveryRequest(await recoveryCookie(),f.intentId),recoveryEnv(readonly),"t",f.intentId);
     expect(result.status).toBe(200); expect(result.body).toMatchObject({ recovery: { observation: null } });
+    expect(await recoveryToolBody(recoveryRequest(await recoveryCookie(),f.intentId),recoveryEnv(readonly),"t",f.intentId)).toEqual(result.body);
     expect(await readFile(file)).toEqual(before);
   });
   it("reports pre-0025 storage unavailable only after authentication without upgrading", async () => {
@@ -52,6 +55,8 @@ describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () =>
     expect((await requestDelegatedRecovery(recoveryRequest(await recoveryCookie("reader"),f.intentId),env,"t",f.intentId)).status).toBe(403);
     const result = await requestDelegatedRecovery(recoveryRequest(await recoveryCookie(),f.intentId),env,"t",f.intentId);
     expect(result).toEqual({ status: 503, body: { ok: false, code: "job_recovery_unavailable" } });
+    expect(await recoveryToolBody(recoveryRequest(await recoveryCookie("reader"),f.intentId),env,"t",f.intentId)).toEqual({ ok: false,code: "tenant_access_denied" });
+    expect(await recoveryToolBody(recoveryRequest(await recoveryCookie(),f.intentId),env,"t",f.intentId)).toEqual(result.body);
     expect(await readFile(file)).toEqual(before);
   });
   it("refuses recovery of a prepared but unclaimed job through the authenticated API", async () => {
@@ -59,6 +64,8 @@ describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () =>
     await jobSqlite(file,"apply-delegated-observations");
     expect(await requestDelegatedRecovery(recoveryRequest(await recoveryCookie(),f.intentId),recoveryEnv(db),"t",f.intentId))
       .toEqual({ status: 403, body: { ok: false, code: "tenant_access_denied" } });
+    expect(await recoveryToolBody(recoveryRequest(await recoveryCookie(),f.intentId),recoveryEnv(db),"t",f.intentId))
+      .toEqual({ ok: false,code: "tenant_access_denied" });
   });
 
   it("reads the export through a read-only SQLite connection", async () => {

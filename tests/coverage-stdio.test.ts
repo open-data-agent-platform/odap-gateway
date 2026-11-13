@@ -77,7 +77,7 @@ describe("local coverage MCP over stdio", { timeout: 20_000 }, () => {
       expect(await c.read()).toMatchObject({ id:2,error:{ code:-32002 } });
       await c.write(line(initialized) + line(rpc(3,"tools/list")) + line(call(4)) + line(call(5,"peer")));
       expect((await c.read()).result.tools.map((t: { name: string }) => t.name))
-        .toEqual(["odap_evidence_coverage", "odap_budget_reconciliation"]);
+        .toEqual(["odap_evidence_coverage", "odap_budget_reconciliation", "odap_job_recovery"]);
       const success = await c.read();
       expect(success).toMatchObject({ id:4,result:{ isError:false } });
       expect(JSON.parse(success.result.content[0].text)).toMatchObject({ ok:true,coverage:{ admitted:1,missingEvidence:1 } });

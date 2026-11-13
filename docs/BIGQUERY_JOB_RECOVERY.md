@@ -206,6 +206,29 @@ loss of current tenant ownership denies access. This read does not retry a job,
 record a new observation, settle a charge, release funds or prove cancellation
 causation. The explicit network observer remains a separate internal operation.
 
+### Local MCP stored recovery tool
+
+The existing local tools-only MCP profile now also lists `odap_job_recovery`
+with exactly `tenantId` and `intentId`. It delegates to the same
+`requestDelegatedRecovery` policy as the HTTP endpoint. The host supplies a fresh
+signed-session request for each call and configures `ODAP_DELEGATION_AUDIENCE`
+outside tool arguments. RPC metadata is not identity or audience authority.
+Extra arguments, including credentials, refresh, retry and settlement, are
+rejected. Successful content is the same stored-evidence body as HTTP;
+authorization/storage failures retain that body with `isError: true`.
+
+`serveCoverageStdio` requires initialization before a tool call. Ownership and
+schema capability are checked on every call, including after revocation on the
+same pipe. The tool has read-only/closed-world annotations, but actual enforcement
+is the shared server policy. It never starts an observer, writes an outcome,
+retries a job or grants settlement. A null observation remains an absence of
+stored terminal evidence, not a provider freshness result.
+
+This addition creates no remote MCP endpoint, default process, database,
+credential source or production session. The local host owns its streams and
+authenticated context; synthetic SQLite/native D1 and local stdio checks are not
+two independent client integrations or external pilot acceptance.
+
 ### Non-delegated recovery
 
 `reconcileTerminalObservation(access, intentId, env)` is an internal operation.
