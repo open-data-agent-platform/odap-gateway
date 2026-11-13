@@ -1,7 +1,7 @@
 import type { ControlAccess } from "./control-storage";
 import { canonicalControlJson } from "./control-objects";
 import { conflictingTerminalOutcomes, delegatedBillLink, delegatedEvidenceJoins, nonDelegatedEvidence } from "./delegated-evidence-sql";
-import { delegatedSettledEvidenceProfile, settledEvidenceProfile, verifySettledEvidence } from "./settled-evidence";
+import { delegatedSettledEvidenceProfile, settledEvidenceMaxBytes, settledEvidenceProfile, verifySettledEvidence } from "./settled-evidence";
 import { hasReceiptCreationEvent } from "./receipt-event-sql";
 
 // A single owner-scoped SELECT gives one snapshot, without billing or warehouse access.
@@ -44,6 +44,10 @@ export async function exportSettledEvidence(access: ControlAccess, intentId: str
     .bind(settledEvidenceProfile, access.tenantId, intentId, access.principalId, audience ?? null, audience ?? null)
     .first<{ evidence: string; delegation: string | null }>();
   if (!row) return null;
+  const parts = [row.evidence, row.delegation ?? ""];
+  if (parts.some(part => typeof part !== "string" || part.length > settledEvidenceMaxBytes) ||
+      parts.reduce((size, part) => size + new TextEncoder().encode(part).length, 0) > settledEvidenceMaxBytes)
+    throw new Error("Invalid settled evidence size");
   const data = JSON.parse(row.evidence);
   if (row.delegation !== null) {
     data.profile = delegatedSettledEvidenceProfile;

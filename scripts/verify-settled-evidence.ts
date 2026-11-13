@@ -1,4 +1,4 @@
-import { verifySettledEvidence } from "../lib/settled-evidence";
+import { settledEvidenceMaxBytes, verifySettledEvidence } from "../lib/settled-evidence";
 import { readEvidenceText as readText } from "./evidence-input";
 
 const usage = "Usage: verify-settled-evidence <bundle.json> <tenant> <intent> <expected.sha256> [--audience <expected-audience>]";
@@ -16,7 +16,7 @@ async function main(args: string[]) {
   const [bundle, tenantId, intentId, pinFile, , audience] = args;
   const pin = await readText(pinFile, 128);
   if (!/^sha256:[0-9a-f]{64}(?:\r?\n)?$/.test(pin)) throw new Error("Invalid pin");
-  const json = await readText(bundle, 4 * 1024 * 1024);
+  const json = await readText(bundle, settledEvidenceMaxBytes);
   const report = await verifySettledEvidence(json, { tenantId, intentId, audience }, pin.trimEnd());
   console.log(JSON.stringify(report));
 }

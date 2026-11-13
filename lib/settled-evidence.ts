@@ -3,6 +3,7 @@ import { canonicalControlJson, isApprovalContract, isControlTimestamp, isEvidenc
 
 export const settledEvidenceProfile = "odap.gateway.local.settled-bigquery.v1";
 export const delegatedSettledEvidenceProfile = "odap.gateway.local.settled-delegated-bigquery.v1";
+export const settledEvidenceMaxBytes = 4 * 1024 * 1024;
 type Scope = { tenantId: string; intentId: string; audience?: string };
 
 function fields(v: unknown, keys: string): v is Record<string, unknown> {
@@ -19,6 +20,8 @@ function scoped(row: Record<string, unknown>, scope: Scope) {
 
 // Checks a detached local snapshot, not its issuer or current authorization.
 export async function verifySettledEvidence(json: string, scope: Scope, expectedDigest?: string) {
+  if (typeof json !== "string" || json.length > settledEvidenceMaxBytes ||
+      new TextEncoder().encode(json).length > settledEvidenceMaxBytes) throw new Error("Invalid settled evidence size");
   const data: unknown = JSON.parse(json);
   const common = "profile release contract intent job pending observation final bill settlement";
   const delegated = fields(data, common + " delegation") && data.profile === delegatedSettledEvidenceProfile;

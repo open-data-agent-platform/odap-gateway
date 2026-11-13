@@ -11,7 +11,7 @@ requires an active owner of the requested tenant in the same database snapshot.
 Missing, incomplete, legacy unattributed and inaccessible chains return
 `null`; an inconsistent returned chain raises an error, not a partial export.
 Read from a local database with migrations through 0026 applied. The reader
-does not run migrations, require a new role, expose a route or call a provider.
+does not run migrations, require a new role or call a provider.
 
 The database reader requires a matching [creation event](EVIDENCE_COVERAGE.md#interpreting-the-counts)
 for **both** the pending and final receipt. Missing, duplicate or mismatched
@@ -31,6 +31,38 @@ export or turn a byte count into money. Costs are integer micro-USD.
 The projection does not fetch query text, parameters, rows, tokens or raw
 invoices. It **does** include tenant and actor identifiers, project, business
 metadata and control-object text. Treat even a verified export as private.
+
+### Authenticated export read
+
+GET `/api/control/{tenant}/settled-evidence/{intentId}` (under `/gateway`
+on a mounted deployment) exposes the existing delegated settled export.
+It derives the principal from the signed session, requires current tenant-owner
+membership, and takes the expected audience only from the server's
+`ODAP_DELEGATION_AUDIENCE`. Ownership and evidence links are checked again in
+the export statement. Query parameters and non-GET methods are rejected.
+No warehouse lookup, billing retrieval, settlement, retry or migration occurs.
+
+The uncached JSON response is `{ ok: true, evidence }`. The evidence envelope
+contains tenant/intent/audience, the exact canonical `json` string, its `digest`,
+`source: "stored-evidence"`, and false flags for `issuerAuthenticated`,
+`providerContacted`, `executionAuthorized` and `settlementAuthorized`.
+Decode the envelope once: verify the bytes of its `json` field, not the outer
+response or a pretty-printed copy. Both the export and detached verifier enforce
+the same 4 MiB UTF-8 evidence limit.
+
+Unauthenticated callers receive 401. Missing ownership, an inaccessible intent,
+an incomplete chain, conflicting outcomes or a legacy/unattributed settlement
+receive the same 403 response without a partial bundle. Invalid paths or query
+parameters receive 400; unconfigured audience, unsupported storage or an invalid
+returned chain receive sanitized 503 responses. A refusal is not evidence that
+no job ran, no charge remains, or a retry is safe.
+
+Historical withdrawal of an execution delegation does not erase the export;
+current owner access is still required. The digest delivered alongside the
+bundle checks consistency, not independent custody or issuer authenticity.
+Retain a digest independently for later tamper comparison. No export page,
+public MCP transport, production billing integration or independent acceptance
+is implied by this read endpoint.
 
 ### Correcting an explanation
 
