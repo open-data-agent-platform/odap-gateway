@@ -70,6 +70,12 @@ elif mode == "upgrade-v10-snapshot":
         if int(migration.name.split("_", 1)[0]) > 10:
             db.executescript(migration.read_text(encoding="utf-8"))
     result = None
+elif mode in ("upgrade-v24-snapshot-to-v32", "upgrade-v24-snapshot-to-v33"):
+    maximum = 32 if mode.endswith("v32") else 33
+    for migration in sorted(migrations.glob("*.sql")):
+        if 24 < int(migration.name.split("_", 1)[0]) <= maximum:
+            db.executescript(migration.read_text(encoding="utf-8"))
+    result = None
 elif mode in upgrades:
     db.executescript((migrations / upgrades[mode]).read_text(encoding="utf-8"))
     result = None

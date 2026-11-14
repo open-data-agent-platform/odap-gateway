@@ -23,6 +23,7 @@ import { onRequestPost as onDelegationProofPost } from "../functions/api/control
 import { onRequestPost as onIssuancePost } from "../functions/api/control/[tenant]/contract-issuances";
 import { onRequestPost as onBudgetAdmissionPost } from "../functions/api/control/[tenant]/budget-admissions";
 import { onRequestPost as onJobPreparationPost } from "../functions/api/control/[tenant]/job-preparations";
+import { onRequestPost as onCancellationRequestPost } from "../functions/api/control/[tenant]/cancellation-requests";
 import { getPublicSession, type AuthEnv } from "../lib/auth";
 import {
   jsonResponse,
@@ -147,7 +148,8 @@ const controlCommands = new Map([["proposals", onProposalPost], ["validations", 
   ["human-grant-reviews", onHumanGrantReviewPost],
   ["metric-previews", onMetricPreviewPost],
   ["delegations", onDelegationPost], ["delegation-proofs", onDelegationProofPost], ["contract-issuances", onIssuancePost],
-  ["budget-admissions", onBudgetAdmissionPost], ["job-preparations", onJobPreparationPost]]);
+  ["budget-admissions", onBudgetAdmissionPost], ["job-preparations", onJobPreparationPost],
+  ["cancellation-requests", onCancellationRequestPost]]);
 
 function matchApiRoute(
   request: Request,

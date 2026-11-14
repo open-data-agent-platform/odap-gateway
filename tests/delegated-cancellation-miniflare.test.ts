@@ -9,6 +9,7 @@ import { delegatedObservationTransportCases } from "./fixtures/delegated-observa
 import { delegatedRecoveryRequestCases } from "./fixtures/delegated-recovery-request-cases";
 import { delegatedRecoveryMcpCases } from "./fixtures/delegated-recovery-mcp-cases";
 import { cancellationEvidenceRequestCases } from "./fixtures/cancellation-evidence-request-cases";
+import { cancellationCommandCases } from "./fixtures/cancellation-command-cases";
 
 let mf: Miniflare, f: CancellationFixture, statements: string[], sequence = 0;
 describe("delegated cancellation on installed native D1", () => {
@@ -43,4 +44,5 @@ describe("delegated cancellation on installed native D1", () => {
   delegatedRecoveryRequestCases(() => f);
   delegatedRecoveryMcpCases(() => f);
   cancellationEvidenceRequestCases(() => f);
+  cancellationCommandCases(() => f);
 });

@@ -17,6 +17,8 @@ import { requestDelegatedRecovery } from "../lib/delegated-recovery-request";
 import { delegatedRecoveryMcpCases, recoveryToolBody } from "./fixtures/delegated-recovery-mcp-cases";
 import { cancellationEvidenceRequest, cancellationEvidenceRequestCases, cancellationToolBody } from "./fixtures/cancellation-evidence-request-cases";
 import { requestCancellationEvidence } from "../lib/cancellation-evidence-request";
+import { cancellationCommandCases, cancellationCommandRequest } from "./fixtures/cancellation-command-cases";
+import { onRequestPost as requestCancellationCommand } from "../functions/api/control/[tenant]/cancellation-requests";
 
 let dir: string, file: string, claimed: string, prepared: string, enrolled: CryptoKeyPair, f: CancellationFixture;
 const fixture = delegationFixture(() => file, () => enrolled), { db, sql, first } = fixture;
@@ -42,6 +44,16 @@ describe("delegated cancellation storage and upgrade", { timeout: 25000 }, () =>
   delegatedRecoveryRequestCases(() => f);
   delegatedRecoveryMcpCases(() => f);
   cancellationEvidenceRequestCases(() => f);
+  cancellationCommandCases(() => f);
+
+  it.each(["0032", "0033"])("refuses cancellation commands on schema %s without migrating or changing bytes", async version => {
+    file = join(dir, crypto.randomUUID()+".db"); await copyFile(claimed, file);
+    await jobSqlite(file, version === "0032" ? "upgrade-v24-snapshot-to-v32" : "upgrade-v24-snapshot-to-v33");
+    const before = await readFile(file), env = recoveryEnv(jobDatabase(() => file, "readonly"));
+    const response = await requestCancellationCommand({ request: cancellationCommandRequest(await recoveryCookie(), f.intentId), env, params: { tenant: "t" } });
+    expect(response.status).toBe(503); expect(await response.json()).toEqual({ ok: false, code: "control_storage_unavailable" });
+    expect(await readFile(file)).toEqual(before);
+  });
 
   it.each(["0032", "0033"])("refuses cancellation evidence on schema %s without migrating or changing bytes", async version => {
     file = join(dir, crypto.randomUUID()+".db"); await jobSqlite(file, "setup-v32");

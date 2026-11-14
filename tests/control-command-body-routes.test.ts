@@ -10,7 +10,8 @@ const commands = [
   ["human-grants", "human_grant"], ["human-grant-reviews", "human_grant_review"],
   ["delegations", "delegation"], ["delegation-proofs", "delegation_proof"],
   ["contract-issuances", "contract_issuance"], ["budget-admissions", "budget_admission"],
-  ["job-preparations", "job_preparation"], ["receipt-corrections/receipt", "receipt_correction"]
+  ["job-preparations", "job_preparation"], ["receipt-corrections/receipt", "receipt_correction"],
+  ["cancellation-requests", "cancellation_request"]
 ];
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });

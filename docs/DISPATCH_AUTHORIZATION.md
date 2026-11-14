@@ -174,8 +174,33 @@ of cancellation provenance nor a durable send-attempt log. Existing observation,
 billing and export boundaries retain their own requirements.
 
 Migration 0034 is an offline-tested installation requirement, not authorization
-to migrate an existing production database. No HTTP route, provider credentials,
-production migration or default network transport is enabled by this delivery.
+to migrate an existing production database. These internal transports do not
+enable provider credentials, a production migration or a default network sender.
+
+### Authenticated cancellation request recording
+
+`POST /api/control/{tenant}/cancellation-requests` accepts exactly
+`{"intentId":"..."}`. Prepend the configured mount path when deployed under one.
+The route requires an exact same-origin JSON request, a signed session and current
+tenant ownership. The server supplies the audience; query options and caller-supplied
+identity, job, sending or billing options are rejected. The request body is bounded
+to 2 KiB with the shared timeout and abort handling.
+
+The route invokes only `requestDelegatedCancellation`. A 200 response acknowledges
+the stored first requester/time, including on retries by a replacement owner.
+The response has `scope: recorded-request-only` and false provider-contact,
+cancellation-confirmation, cancellation/execution/settlement authority flags.
+It does not send a cancellation, read provider status, release a hold or make a bill.
+A prior terminal observation without a request, or an unattributed legacy request,
+returns 409. An existing attributed request remains readable after a terminal
+observation; acknowledging it does not establish that it caused that outcome.
+
+Invalid sessions receive 401 and inaccessible claims/tenant membership are denied.
+Storage failures return a sanitized 503. Failure can occur after a request is stored;
+retrying recovers the same first record, never a new cancellation send. Responses
+are private and not cached. Schema 0034 is still required, never installed by this
+route. The local MCP tools remain read-only; no public mutation tool or provider
+wiring is implied. [Request evidence](CANCELLATION_EVIDENCE.md) is a separate read.
 
 Coverage uses actual migration and service SQL in SQLite and a test adapter.
 This is not a live submission path or independent authentication of a remote

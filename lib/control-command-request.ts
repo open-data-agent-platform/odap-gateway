@@ -34,7 +34,7 @@ export function parseGrantReview(d: unknown) {
     policyRevision: d.policyRevision, reviewedAction: d.reviewedAction };
 }
 
-const scopedIdFields = { contract_issuance: "delegationId", budget_admission: "contractId", job_preparation: "intentId" };
+const scopedIdFields = { contract_issuance: "delegationId", budget_admission: "contractId", job_preparation: "intentId", cancellation_request: "intentId" };
 type ScopedCommand = keyof typeof scopedIdFields;
 
 export async function readCommandBody(request: Request, maxBytes: number, kind: "proposal" | "contract_request" | "metric_preview" | "delegation" | "delegation_proof" | ScopedCommand | OwnerCommand) {
@@ -53,7 +53,7 @@ export async function readScopedContractCommand({ request, env, params }: Delega
   if (invalid) return invalid;
   const auth = await authorizeControlRequest(request, env, params.tenant);
   if (!auth.ok) return commandError(auth.status, auth.code);
-  if (kind === "job_preparation" && auth.role !== "owner") return commandError(403, "job_preparation_denied");
+  if ((kind === "job_preparation" || kind === "cancellation_request") && auth.role !== "owner") return commandError(403, kind + "_denied");
   const audience = env.ODAP_DELEGATION_AUDIENCE;
   if (!audience || !routeId.test(audience)) return commandError(503, "delegation_not_configured");
   const body = await readCommandBody(request, 2048, kind);
