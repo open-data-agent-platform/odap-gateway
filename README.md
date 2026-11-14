@@ -61,6 +61,10 @@ credentials for sign-in. See `docs/AUTH_SETUP.md`.
 
 ## Status
 
+See [integrations](integrations/README.md) for runnable adapters, supported
+versions, and explicit validation boundaries. Framework evidence tools are
+separate from query execution and do not configure production authentication.
+
 The [offline NVIDIA import adapter](docs/NVIDIA_IMPORT.md) stages version-pinned
 SQL attribute context and an explicit local metric mapping for candidate review.
 Upstream certification never grants Gateway approval or execution; live import
