@@ -1,6 +1,10 @@
 import { isControlTimestamp } from "./control-objects";
 import type { ControlAccess } from "./control-storage";
 
+export class PreDispatchStopUnavailableError extends Error {
+  constructor() { super("Pre-dispatch stop unavailable"); }
+}
+
 // Internal only. This stops local handoff; it neither cancels a warehouse job
 // nor resolves the reservation. Access comes from authenticated server context.
 export async function stopBeforeDispatch(access: ControlAccess, intentId: string) {
@@ -12,6 +16,12 @@ export async function stopBeforeDispatch(access: ControlAccess, intentId: string
   if (!write.success) throw new Error("Pre-dispatch stop write failed");
   // Zero changes can mean replay, a competing claim, or a historical marker.
   // Use persisted facts and recheck owner access, even when this call wrote nothing.
+  const stored = await readPreDispatchStop(access, intentId);
+  if (stored.state === "not-stopped") throw new PreDispatchStopUnavailableError();
+  return stored;
+}
+
+export async function readPreDispatchStop({ db, tenantId, principalId }: ControlAccess, intentId: string) {
   const row = await db.prepare(`SELECT c.intent_id AS claimed,s.intent_id AS settled,
       t.intent_id AS stopped,t.stopped_by AS actor,t.stopped_at AS at
     FROM execution_intents i
@@ -22,14 +32,17 @@ export async function stopBeforeDispatch(access: ControlAccess, intentId: string
     WHERE i.tenant_id=? AND i.id=?`)
     .bind(principalId, tenantId, intentId).first<{ claimed: string | null; settled: string | null;
       stopped: string | null; actor: string | null; at: string | null }>();
-  if (!row) throw new Error("Pre-dispatch stop unavailable");
+  if (!row) throw new PreDispatchStopUnavailableError();
+  if (![row.claimed, row.settled, row.stopped].every(id => id === null || id === intentId))
+    throw new Error("Invalid stored dispatch stop");
   if (row.claimed !== null) return { state: "already-claimed" as const };
   if (row.settled !== null) return { state: "already-settled" as const };
   if (row.stopped === intentId) {
     if (row.actor === null && row.at === null) return { state: "legacy-stop" as const };
-    if (row.actor && row.at && isControlTimestamp(row.at)) {
+    if (typeof row.actor === "string" && row.actor.trim() && typeof row.at === "string" && isControlTimestamp(row.at)) {
       return { state: "stopped" as const, stoppedBy: row.actor, stoppedAt: row.at };
     }
   }
-  throw new Error("Pre-dispatch stop unavailable");
+  if (row.stopped === null && row.actor === null && row.at === null) return { state: "not-stopped" as const };
+  throw new Error("Invalid stored dispatch stop");
 }

@@ -106,6 +106,19 @@ A storage/readback failure returns 503 even if the stop committed; an explicit
 retry may recover that same immutable stop. There is no automatic retry,
 provider transport, budget release, schema initialization or public MCP mutation.
 
+`GET /api/control/{tenant}/dispatch-stops/{intentId}` reads the same owner-scoped
+stored facts without recording a stop or retrying a command. It accepts no query
+options and returns `not-stopped`, `stopped`, `already-claimed`, `already-settled`
+or `legacy-stop`. A claim takes precedence over a historical stop. Only `stopped`
+includes the originally recorded actor/time; legacy attribution is never invented.
+Missing and out-of-scope intents have the same denial. The result is uncached,
+requires current ownership in the evidence SELECT and cannot authorize a later
+write or handoff. All provider-contact, cancellation, execution and settlement
+authority flags remain false. A stop committed before a lost POST acknowledgement
+can therefore be inspected using only this GET. No audience is required, and the
+initialized 0032 schema supports this read; unsupported storage fails closed
+without initialization or migration.
+
 ## Cancellation after a dispatch claim
 
 An active tenant owner can call the internal `requestJobCancellation(access, intentId)`.

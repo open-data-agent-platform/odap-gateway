@@ -25,6 +25,7 @@ import { onRequestPost as onBudgetAdmissionPost } from "../functions/api/control
 import { onRequestPost as onJobPreparationPost } from "../functions/api/control/[tenant]/job-preparations";
 import { onRequestPost as onCancellationRequestPost } from "../functions/api/control/[tenant]/cancellation-requests";
 import { onRequestPost as onDispatchStopPost } from "../functions/api/control/[tenant]/dispatch-stops";
+import { onRequestGet as onDispatchStopGet } from "../functions/api/control/[tenant]/dispatch-stops/[id]";
 import { getPublicSession, type AuthEnv } from "../lib/auth";
 import {
   jsonResponse,
@@ -165,6 +166,10 @@ function matchApiRoute(
     if (post) return { allowedMethods: ["POST"], handler: () => post({ request, env, params: { tenant: command[1] } }) };
   }
   const control = url.pathname.match(/^\/api\/control\/([^/]+)\/([^/]+)\/([^/]+)$/);
+  if (control?.[2] === "dispatch-stops") return {
+    allowedMethods: ["GET"],
+    handler: () => onDispatchStopGet({ request, env, params: { tenant: control[1], id: control[3] } })
+  };
   if (control?.[2] === "cancellation-evidence") return {
     allowedMethods: ["GET"],
     handler: () => onCancellationEvidenceGet({ request, env, params: { tenant: control[1], id: control[3] } })
