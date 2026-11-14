@@ -14,6 +14,7 @@
     "evidence:build": "tsc -p scripts/tsconfig.evidence.json",
     "evidence:verify": "node dist/evidence/scripts/verify-settled-evidence.js",
     "evidence:verify-costs": "node dist/evidence/scripts/verify-auxiliary-cost-evidence.js",
+    "evidence:export-openlineage": "node dist/evidence/scripts/export-openlineage.js",
     "ci": "npm run lint && npm run typecheck && npm run test && npm run build",
     "worker:dry-run": "npx wrangler deploy --config wrangler.example.jsonc --dry-run",
     "worker:deploy": "npx wrangler deploy --config wrangler.example.jsonc"
@@ -30,6 +31,8 @@
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1",
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
     "eslint-config-next": "^15.0.0",

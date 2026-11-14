@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/open-data-agent-platform/odap-gateway/openlineage-evidence-v0.1.0/integrations/openlineage/OdapEvidenceRunFacet.json",
+  "$defs": {
+    "OdapEvidenceRunFacet": {
+      "allOf": [
+        { "$ref": "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunFacet" },
+        {
+          "type": "object",
+          "properties": {
+            "_producer": { "type": "string", "format": "uri" },
+            "_schemaURL": { "type": "string", "format": "uri" },
+            "profile": { "enum": ["odap.gateway.local.settled-bigquery.v1", "odap.gateway.local.settled-delegated-bigquery.v1"] },
+            "evidenceDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            "receiptId": { "type": "string", "minLength": 1 },
+            "contractId": { "type": "string", "minLength": 1 },
+            "semanticReleaseId": { "type": "string", "minLength": 1 },
+            "intentId": { "type": "string", "minLength": 1 },
+            "recordedOutcome": { "enum": ["succeeded", "failed", "cancelled"] },
+            "consistencyChecked": { "const": true },
+            "issuerAuthenticated": { "const": false },
+            "retrospective": { "const": true },
+            "startTimeBasis": { "const": "gateway-claim" },
+            "endTimeBasis": { "const": "gateway-terminal-observation" }
+          },
+          "required": ["_producer", "_schemaURL", "profile", "evidenceDigest", "receiptId", "contractId", "semanticReleaseId", "intentId", "recordedOutcome", "consistencyChecked", "issuerAuthenticated", "retrospective", "startTimeBasis", "endTimeBasis"],
+          "additionalProperties": false
+        }
+      ],
+      "type": "object"
+    }
+  },
+  "$ref": "#/$defs/OdapEvidenceRunFacet"
+}
