@@ -119,6 +119,16 @@ can therefore be inspected using only this GET. No audience is required, and the
 initialized 0032 schema supports this read; unsupported storage fails closed
 without initialization or migration.
 
+The `/dispatch-stop` owner page inspects this stored state before offering an
+unchecked, explicit confirmation for a currently unstopped intent. Recording
+rechecks the current state, sends at most one command per review, then reads the
+stored marker separately. The acknowledgement and marker must agree on original
+actor/time. Changed, denied, malformed or uncertain results never imply success.
+The recovery control only reads; it cannot repeat a command automatically.
+Scope edits, rereading, hiding, navigation and page hiding discard private results
+and confirmation. The page does not store evidence in browser storage and does
+not configure identity, contact the provider or release reserved budget.
+
 ## Cancellation after a dispatch claim
 
 An active tenant owner can call the internal `requestJobCancellation(access, intentId)`.

@@ -4,6 +4,7 @@ import { onRequestGet } from "../../functions/api/control/[tenant]/dispatch-stop
 import { onRequestPost } from "../../functions/api/control/[tenant]/dispatch-stops";
 import { prepareIntentJob } from "../../lib/bigquery-job-storage";
 import { stopBeforeDispatch } from "../../lib/pre-dispatch-stop";
+import { inspectDispatchStop, recordReviewedDispatchStop } from "../../lib/dispatch-stop-inspection";
 import type { D1Database, D1PreparedStatement } from "../../lib/d1";
 import { dispatchStopRequest } from "./dispatch-stop-command-cases";
 import { recoveryCookie, recoveryEnv } from "./delegated-recovery-request-cases";
@@ -38,6 +39,34 @@ export function dispatchStopReadCases(database: () => D1Database) {
     } };
   }
   describe("owner-scoped stored dispatch stop inspection", { timeout: 30000 }, () => {
+    it.each(["success", "lost-ack", "revoked-review", "claim-race", "revoked-readback"])("owner interface uses stored policy for %s", async mode => {
+      const methods: string[] = [], cookie = await recoveryCookie();
+      const send: typeof fetch = async (path, options) => {
+        const method = options?.method ?? "GET"; methods.push(method);
+        if (mode === "claim-race" && method === "POST") { await prepare(); await claim(); }
+        const headers = new Headers(options?.headers); headers.set("Cookie", cookie);
+        if (method === "POST") headers.set("Origin", "https://gateway.test");
+        const result = await worker.fetch(new Request(new URL(String(path), "https://gateway.test"), { ...options, headers }),
+          { ...env(database()), GATEWAY_BASE_PATH: "" }, { waitUntil() {} });
+        if (method === "POST" && mode === "lost-ack") { expect(result.status).toBe(200); throw new Error("synthetic lost response"); }
+        if (method === "POST" && mode === "revoked-readback") await run("UPDATE control_memberships SET active=0 WHERE principal_id='google:operator'");
+        return result;
+      };
+      const signal = new AbortController().signal, reviewed = await inspectDispatchStop("t", "i", signal, send);
+      expect(reviewed.state).toBe("ready"); if (reviewed.state !== "ready") throw new Error("Missing review");
+      if (mode === "revoked-review") await run("UPDATE control_memberships SET active=0 WHERE principal_id='google:operator'");
+      const result = await recordReviewedDispatchStop(reviewed.report, signal, send);
+      expect(result.state).toBe(mode === "success" ? "ready" : mode === "lost-ack" ? "unknown" : mode === "claim-race" ? "ineligible" : "denied");
+      expect(methods.filter(m => m === "POST")).toHaveLength(mode === "revoked-review" ? 0 : 1);
+      if (mode === "lost-ack" || mode === "success") {
+        const before = await snapshot(), saved = await inspectDispatchStop("t", "i", signal, send);
+        expect(saved).toMatchObject({ state: "ready", report: { state: "stopped", stoppedBy: "google:operator" } });
+        expect(await snapshot()).toEqual(before); expect(methods.filter(m => m === "POST")).toHaveLength(1);
+      }
+      expect(await snapshot()).toMatchObject({ stops: mode === "revoked-review" || mode === "claim-race" ? 0 : 1,
+        claims: mode === "claim-race" ? 1 : 0, settlements: 0, receipts: mode === "claim-race" ? 1 : 0,
+        reserved_units: 20, spent_units: 0 });
+    });
     it.each([false,true])("reads prepared=%s absence without granting execution or changing storage", async prepared => {
       if (prepared) await prepare(); const before = await snapshot();
       const outbound = vi.spyOn(globalThis,"fetch").mockRejectedValue(new Error("No provider contact"));
