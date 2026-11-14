@@ -70,6 +70,17 @@ export function evaluateSchemaCatalog(
   const workspaceCatalog = catalog.filter(
     (table) => normalizeWorkspace(table.workspace) === normalizedWorkspace
   );
+  // Normalization must not select one conflicting identity by result order.
+  const ambiguousTables = referencedTables.filter(reference => workspaceCatalog.filter(
+    table => normalizeTableName(table.name) === reference.normalized
+  ).length > 1);
+  if (ambiguousTables.length) {
+    const reasons = ambiguousTables.map(table =>
+      `${table.original} has ambiguous catalog identity in the ${normalizedWorkspace} workspace`);
+    return { workspace: normalizedWorkspace, source,
+      referencedTables: referencedTables.map(table => table.original), blocked: true, reasons,
+      checks: [...POLICY_CHECK_LABELS].map(label => ({ label, detail: reasons.join("; "), status: "warn" })) };
+  }
   const workspaceTables = new Map(
     workspaceCatalog.map((table) => [normalizeTableName(table.name), table])
   );

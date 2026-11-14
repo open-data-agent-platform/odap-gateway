@@ -29,6 +29,18 @@ used only as a filter retains the existing policy: filtering alone is not a
 selected-field disclosure check. This does not constitute an inference-control
 or anonymization guarantee.
 
+Table identity must also be unambiguous in the selected workspace. If multiple
+catalog rows normalize to the referenced name, the preview is blocked before
+field checks or provider access, including COUNT(*) and matching policy copies.
+Record order cannot select a permissive row or merge conflicting policies.
+Workspace case/whitespace and table quoting/whitespace use the existing lookup
+normalization; duplicate identities in unrelated tables/workspaces do not affect
+a unique selected identity. Project-qualified names remain exact: matching a
+dataset/table suffix does not establish project identity. This check does not
+rewrite or repair historical catalog rows, infer their owner, or establish
+catalog freshness. Resolve ambiguous records through a separately authorized
+catalog review, not by relaxing policy or interpreting a blocked preview as a grant.
+
 ## Refusal and limitations
 
 Invalid SQL, unknown AST shapes and unsupported syntax block the preview with
