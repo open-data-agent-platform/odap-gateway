@@ -360,6 +360,36 @@ history, check post-backup delegations or dispatch claims, or reconcile
 permissions. A reference with unknown freshness or provenance is unusable.
 Reopening any API is a separate decision with other recovery checks.
 
+### Delegation history is separate from membership
+
+An older snapshot can retain the same members while losing a delegation
+revocation, public verification key disablement or already-used proof record.
+The [offline regression](../tests/restore-delegation-authority.test.ts) reproduces
+acceptance of the same synthetic proof on the older isolated copy and refusal
+on the later copy for each of these three changes. It does not issue a contract,
+prepare or dispatch a job, or contact an external provider.
+
+For separately obtained trusted snapshots from the same Gateway, schema 0020 or
+later, use the same standalone-copy requirements:
+
+```sh
+python -B scripts/check-restore-delegations.py --restored restored.sqlite --reference later-ledger.sqlite --tenant tenant-id
+```
+
+The tool compares all recorded tenant verification public keys, requests, human
+grants, delegations and proof markers, including disabled, revoked and expired
+history. It checks exact reference bindings, public-point encoding, action digests,
+grant/proof/revocation chronology and uniqueness; each table is bounded to 10,000
+rows. It never reads private signing keys, session secrets or result payloads.
+Counts alone are emitted, not identifiers, public points, digests or timestamps.
+Exit 0 means equal stored sets (possibly equally stale); exit 1 reports per-table
+missing/extra/changed counts; exit 2 means no usable comparison. None authorizes
+serving, execution or proof replay. A proof marker is not a signature verification,
+and public-point encoding is not curve validation or issuer authentication.
+This does not check the entire semantic/policy graph, current expiry/eligibility,
+dispatch claims or independently establish reference freshness. Keep copies isolated;
+do not erase proof/revocation history or reenable keys to repair a discrepancy.
+
 ### A missing dispatch claim is not permission to retry
 
 Job preparation creates the job address and a pending receipt **before**
