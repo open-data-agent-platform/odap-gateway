@@ -420,6 +420,37 @@ establish freshness, cancel running jobs, release budget, or authorize serving,
 execution or replay. Unretired releases and approval-withdrawal history are outside
 this check. Do not remove retirement markers to repair a discrepancy.
 
+### Retain approval withdrawals before publication
+
+An older snapshot can lose an approval withdrawal even when its memberships,
+delegations, retirement markers, stops and claims match the later snapshot.
+The [isolated regression](../tests/restore-withdrawal-provenance.test.ts) shows
+one local release and audit event created from the old synthetic copy, while
+the later copy rejects the same promotion and creates neither. It does not
+execute a query, contact a provider or publish any production release.
+
+For separately obtained trusted standalone snapshots from the same Gateway,
+schema 0016 or later, compare recorded withdrawals for an explicit tenant:
+
+```sh
+python -B scripts/check-restore-withdrawals.py --restored restored.sqlite --reference later-ledger.sqlite --tenant tenant-id
+```
+
+The tool binds each withdrawal to its original approval, revision and validation,
+including the owner, reviewer, proposer, evidence references and chronology. It
+checks the digest of the stored definition bytes and refuses conflicting recorded
+promotions for the approval or revision. Current membership and catalog changes
+do not hide history. Definition whitespace changes without a matching digest are
+unusable; this is not structural JSON equivalence. Reasons can retain line breaks.
+
+Only counts are emitted. Exit 0 means equal recorded sets, possibly equally stale;
+exit 1 reports missing, extra or changed withdrawals; exit 2 gives no comparison.
+The same standalone-copy requirements apply, with at most 10,000 selected rows.
+This does not authenticate issuers or evidence, establish freshness, run the full
+definition compiler, check all approvals or authorize publication, serving,
+execution or replay. Keep copies isolated; never erase withdrawals, recreate
+approvals or infer permission from an absent marker to repair a discrepancy.
+
 ### A missing dispatch claim is not permission to retry
 
 Job preparation creates the job address and a pending receipt **before**
