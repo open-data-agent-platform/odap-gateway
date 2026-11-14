@@ -393,6 +393,34 @@ Drift in just the compiled-body digest is detected despite equal claim counts.
 Keep the restored copy isolated; reconcile against independent job evidence
 through an authorized observation process, never by resubmitting the job.
 
+### Retain pre-dispatch stops during recovery
+
+Matching memberships and dispatch claims can still omit an owner's later stop.
+With a separately retained, trusted later snapshot from the same Gateway, compare
+the recorded stops for an explicit tenant (schema 0011 or later):
+
+```sh
+python -B scripts/check-restore-stops.py --restored restored.sqlite --reference later-ledger.sqlite --tenant tenant-id
+```
+
+The same standalone-copy requirements apply. Exit 0 means only the recorded sets
+match, including two empty or equally stale sets. Exit 1 reports counts of stops
+only on either side or changed for the same intent. Exit 2 gives no comparison;
+malformed/partial attribution, orphan intent references, duplicate markers,
+missing schema and more than 10,000 selected rows fail closed. Output contains
+counts, not tenant, actor, intent, reason or action values.
+
+Comparison includes the original reason, actor/time and the stored intent's
+contract, principal, action digest, budget, reservation and reserved units.
+Unattributed historical markers remain separate, even when a prior claim exists.
+Current owner or release withdrawal cannot hide history. This is a stored-reference
+comparison, not validation of all linked objects, issuer authentication, proof
+of reference freshness, a retention policy or evidence of warehouse cancellation.
+No result authorizes serving, dispatch, retry, settlement or a budget refund.
+Keep the copy isolated; never recreate missing stops or infer permission from
+their absence. The [offline regression](../tests/restore-stop-provenance.test.ts)
+demonstrates a lost stop that the membership and claim comparators do not detect.
+
 ### Conflicting outcomes block settlement
 
 Two observations for the same tenant and intent can legitimately agree on
