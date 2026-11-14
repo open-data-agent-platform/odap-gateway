@@ -8,6 +8,8 @@ Gateway login, authorize a query, or complete a pilot.
 | --- | --- | --- |
 | [OpenLineage](openlineage/README.md) | Export pinned settled evidence as retrospective attempt events | Offline schema/client checks; no collector acceptance or physical table lineage |
 | [NVIDIA Auto Ontology](nvidia/README.md) | Stage pinned SQL attribute context and explicit local mapping for candidate review | Synthetic pinned-source checks; no live import or automatic approval |
+| [Cube](cube/README.md) | Stage a selected REST metadata measure plus explicit local definition for candidate review | Offline selected-envelope, pin, CLI and local admission checks; no Cube query or live import |
+| [dbt](dbt/README.md) | Stage a selected manifest v12 metric plus explicit local definition for candidate review | Offline selected-envelope, pin, CLI and local admission checks; no dbt invocation or MetricFlow translation |
 | [FastMCP](fastmcp/README.md) | Register the local evidence verifier as an MCP tool | Actual client/server tests; no public authenticated endpoint or query dispatch |
 | [LangChain](langchain/README.md) | Async structured evidence-verification tool | Actual tool invocation; no LLM or hosted LangSmith call |
 | [LangGraph](langgraph/README.md) | Model-free evidence ToolNode graph | Actual graph invocation, including tool error status; no agent planning benchmark |
