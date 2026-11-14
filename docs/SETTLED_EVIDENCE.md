@@ -390,6 +390,36 @@ This does not check the entire semantic/policy graph, current expiry/eligibility
 dispatch claims or independently establish reference freshness. Keep copies isolated;
 do not erase proof/revocation history or reenable keys to repair a discrepancy.
 
+### Retain release retirement history
+
+An older snapshot can lose a release retirement while membership, delegation,
+stop and claim comparisons still match. The [isolated regression](../tests/restore-retirement-provenance.test.ts)
+shows that the later copy's actual database guard refuses a new claim while the
+older copy accepts that same claim. It does not submit a job or call a provider.
+
+For separately trusted snapshots from the same Gateway, schema 0017 or later:
+
+```sh
+python -B scripts/check-restore-retirements.py --restored restored.sqlite --reference later-ledger.sqlite --tenant tenant-id
+```
+
+The same standalone-copy requirements apply. This read-only tool compares each
+recorded tenant retirement's reason, original actor/time and exact linked release
+content and creation metadata. It checks v0.1 release bindings, digest encoding,
+attribution and chronology; JSON formatting does not change the comparison.
+Multiline reasons are preserved. Legacy records without both actor and time remain
+explicitly unattributed, including after a prior claim; current membership changes
+do not hide them. It neither assigns missing history nor infers cancellation.
+
+Only counts are emitted, never reasons, identities, release content or timestamps.
+Exit 0 means equal recorded sets, possibly equally stale; exit 1 reports missing,
+extra or changed records; exit 2 refuses malformed, unbound, duplicate, unsupported
+or journal-dependent inputs. The inventory is bounded to 10,000 retirement rows.
+Comparison does not authenticate provenance, validate every definition or review,
+establish freshness, cancel running jobs, release budget, or authorize serving,
+execution or replay. Unretired releases and approval-withdrawal history are outside
+this check. Do not remove retirement markers to repair a discrepancy.
+
 ### A missing dispatch claim is not permission to retry
 
 Job preparation creates the job address and a pending receipt **before**
