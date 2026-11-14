@@ -7,6 +7,8 @@ import { exportCancellationEvidence } from "../../lib/cancellation-evidence-expo
 import type { D1Database, D1PreparedStatement } from "../../lib/d1";
 import type { CancellationFixture } from "./delegated-cancellation-cases";
 import { recoveryCookie, recoveryEnv } from "./delegated-recovery-request-cases";
+import { inspectRecovery } from "../../lib/recovery-inspection";
+import { recordReviewedCancellation, recoverReviewedCancellation } from "../../lib/owner-cancellation-request";
 
 export function cancellationCommandRequest(cookie: string, intentId: string, tenant = "t") {
   return new Request("https://gateway.test/gateway/api/control/"+tenant+"/cancellation-requests", { method: "POST",
@@ -35,6 +37,45 @@ export function cancellationCommandCases(fixture: () => CancellationFixture) {
     } };
   }
   describe("authenticated cancellation request command", { timeout: 30000 }, () => {
+    async function browserTransport() {
+      const cookie = await recoveryCookie(), env = recoveryEnv(db());
+      return vi.fn<typeof fetch>(async (url, init) => {
+        const headers = new Headers(init?.headers); headers.set("Cookie", cookie); headers.set("Origin", "https://gateway.test");
+        return worker.fetch(new Request(new URL(String(url), "https://gateway.test"), { ...init, headers }), env, { waitUntil() {} });
+      });
+    }
+    it("owner cancellation request workflow records and verifies stored provenance", async () => {
+      const f = fixture(), send = await browserTransport(), signal = new AbortController().signal;
+      const review = await inspectRecovery("t", f.intentId, signal, send); expect(review.state).toBe("ready");
+      if (review.state !== "ready") throw new Error("Missing reviewed job");
+      const before = await ledger(), result = await recordReviewedCancellation(review.report, signal, send);
+      expect(result).toMatchObject({ state: "recorded", report: { requestedBy: f.owner.principalId, jobId: f.ref.jobId } });
+      expect(await recoverReviewedCancellation(review.report, signal, send)).toEqual(result);
+      expect(send.mock.calls.filter(c => c[1]?.method === "POST")).toHaveLength(1);
+      expect(await count()).toEqual({ n: 1 }); expect(await ledger()).toEqual(before);
+    });
+    it("owner cancellation request workflow never posts after owner revocation or terminal evidence", async () => {
+      const f = fixture(), send = await browserTransport(), signal = new AbortController().signal;
+      const review = await inspectRecovery("t", f.intentId, signal, send);
+      if (review.state !== "ready") throw new Error("Missing reviewed job");
+      await f.sql("UPDATE control_memberships SET active=0 WHERE principal_id='google:operator'");
+      expect(await recordReviewedCancellation(review.report, signal, send)).toEqual({ state: "denied" });
+      await f.sql("UPDATE control_memberships SET active=1 WHERE principal_id='google:operator'"); await finish();
+      expect(await recordReviewedCancellation(review.report, signal, send)).toEqual({ state: "ineligible" });
+      expect(send.mock.calls.filter(c => c[1]?.method === "POST")).toHaveLength(0); expect(await count()).toEqual({ n: 0 });
+    });
+    it("owner cancellation request workflow recovers a lost acknowledgement without posting again", async () => {
+      const f = fixture(), send = await browserTransport(), signal = new AbortController().signal;
+      const review = await inspectRecovery("t", f.intentId, signal, send);
+      if (review.state !== "ready") throw new Error("Missing reviewed job");
+      const lost = vi.fn<typeof fetch>(async (url, init) => {
+        const response = await send(url, init); if (init?.method === "POST") throw new Error("Lost response"); return response;
+      });
+      expect(await recordReviewedCancellation(review.report, signal, lost)).toEqual({ state: "unknown" });
+      expect(await count()).toEqual({ n: 1 });
+      expect(await recoverReviewedCancellation(review.report, signal, send)).toMatchObject({ state: "recorded", report: { requestedBy: f.owner.principalId } });
+      expect(send.mock.calls.filter(c => c[1]?.method === "POST")).toHaveLength(1); expect(await count()).toEqual({ n: 1 });
+    });
     it("records one explicit request without provider contact or accounting changes", async () => {
       const f = fixture(), before = await ledger(), network = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No network"));
       try {

@@ -5,6 +5,7 @@ import { History, Search } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { inspectRecovery, type RecoveryInspection } from "../lib/recovery-inspection";
 import { usePrivateInspection } from "./use-private-inspection";
+import { OwnerCancellationRequest } from "./owner-cancellation-request";
 
 const messages = {
   idle: "", loading: "Reading stored evidence...", invalid: "Enter tenant and intent IDs using letters, numbers, hyphens or underscores.",
@@ -69,6 +70,7 @@ export function JobRecoveryPage() {
       </dl>
       <p className="text-sm leading-6 text-slate-400">Stored evidence only. Billed bytes are not a monetary charge.
         The handoff receipt is not a final settlement receipt. No execution or settlement authority.</p>
+      {!observation && <OwnerCancellationRequest report={report} />}
       <button type="button" onClick={clear} className="focus-ring text-sm text-sky-300 underline">Hide evidence</button>
     </section>}
   </section>;

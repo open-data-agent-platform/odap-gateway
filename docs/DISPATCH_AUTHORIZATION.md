@@ -202,6 +202,15 @@ are private and not cached. Schema 0034 is still required, never installed by th
 route. The local MCP tools remain read-only; no public mutation tool or provider
 wiring is implied. [Request evidence](CANCELLATION_EVIDENCE.md) is a separate read.
 
+The owner can record this intent from the job recovery page after inspecting the
+bound job and explicitly checking the confirmation. The browser rereads the job
+before one POST, then verifies separate request evidence against the acknowledgement
+and reviewed job. A terminal observation or changed job prevents that POST.
+An uncertain response is never automatically repeated: the separate recovery
+control only reads recorded evidence. Scope edits, rereads, hiding and navigation
+discard the prior confirmation and result. Stored requester/time remain historical,
+not necessarily the current owner. No result claims provider cancellation or billing.
+
 Coverage uses actual migration and service SQL in SQLite and a test adapter.
 This is not a live submission path or independent authentication of a remote
 agent. The [offline-tested jobs.insert boundary](BIGQUERY_GOVERNED_TRANSPORT.md)
