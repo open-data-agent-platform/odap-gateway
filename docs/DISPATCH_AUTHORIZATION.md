@@ -91,7 +91,20 @@ Absent intents and insufficient membership fail without returning state. A
 claim takes precedence even if an older database contains both a claim and
 a stop. A stop is not a warehouse cancellation, a terminal Evidence Receipt
 or evidence of zero cost. It does not release reserved funds, change the
-consumed contract, or rewrite a pending receipt. No public stop API is wired.
+consumed contract, or rewrite a pending receipt.
+
+`POST /api/control/{tenant}/dispatch-stops` (under the configured mount) accepts
+exactly `{ "intentId": "..." }` from a signed session with current tenant-owner
+membership and exact same-origin JSON. The body is bounded to 2 KiB with the
+shared timeout/abort guard. The database checks ownership again at the write;
+the response is based on an owner-scoped read, never the attempted insert alone.
+Success acknowledges the original `stoppedBy` and `stoppedAt` with scope
+`local-dispatch-stop` and false provider-contact, cancellation-confirmation,
+execution and settlement authority flags. Existing claims, settlements or
+unattributed legacy markers return 409 without asserting a new stop.
+A storage/readback failure returns 503 even if the stop committed; an explicit
+retry may recover that same immutable stop. There is no automatic retry,
+provider transport, budget release, schema initialization or public MCP mutation.
 
 ## Cancellation after a dispatch claim
 

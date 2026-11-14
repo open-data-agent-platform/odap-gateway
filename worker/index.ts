@@ -24,6 +24,7 @@ import { onRequestPost as onIssuancePost } from "../functions/api/control/[tenan
 import { onRequestPost as onBudgetAdmissionPost } from "../functions/api/control/[tenant]/budget-admissions";
 import { onRequestPost as onJobPreparationPost } from "../functions/api/control/[tenant]/job-preparations";
 import { onRequestPost as onCancellationRequestPost } from "../functions/api/control/[tenant]/cancellation-requests";
+import { onRequestPost as onDispatchStopPost } from "../functions/api/control/[tenant]/dispatch-stops";
 import { getPublicSession, type AuthEnv } from "../lib/auth";
 import {
   jsonResponse,
@@ -149,7 +150,7 @@ const controlCommands = new Map([["proposals", onProposalPost], ["validations", 
   ["metric-previews", onMetricPreviewPost],
   ["delegations", onDelegationPost], ["delegation-proofs", onDelegationProofPost], ["contract-issuances", onIssuancePost],
   ["budget-admissions", onBudgetAdmissionPost], ["job-preparations", onJobPreparationPost],
-  ["cancellation-requests", onCancellationRequestPost]]);
+  ["cancellation-requests", onCancellationRequestPost], ["dispatch-stops", onDispatchStopPost]]);
 
 function matchApiRoute(
   request: Request,

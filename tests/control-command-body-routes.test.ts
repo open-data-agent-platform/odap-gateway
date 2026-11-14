@@ -11,7 +11,7 @@ const commands = [
   ["delegations", "delegation"], ["delegation-proofs", "delegation_proof"],
   ["contract-issuances", "contract_issuance"], ["budget-admissions", "budget_admission"],
   ["job-preparations", "job_preparation"], ["receipt-corrections/receipt", "receipt_correction"],
-  ["cancellation-requests", "cancellation_request"]
+  ["cancellation-requests", "cancellation_request"], ["dispatch-stops", "dispatch_stop"]
 ];
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });

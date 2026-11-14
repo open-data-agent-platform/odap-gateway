@@ -21,7 +21,7 @@ export function exactFields(value: unknown, keys: string[]): value is Record<str
     Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 }
 
-type OwnerCommand = "validation" | "approval" | "promotion" | "withdrawal" | "retirement" | "human_grant" | "human_grant_review" | "receipt_correction";
+type OwnerCommand = "validation" | "approval" | "promotion" | "withdrawal" | "retirement" | "human_grant" | "human_grant_review" | "receipt_correction" | "dispatch_stop";
 
 export function parseGrantReview(d: unknown) {
   const label = (v: unknown): v is string => typeof v === "string" && !!v && v === v.trim() && v.length <= 256;
@@ -71,6 +71,6 @@ export async function readOwnerCommand({ request, env, params }: TenantCommandCo
   if (!auth.ok) return commandError(auth.status, auth.code);
   if (auth.role !== "owner") return commandError(403, kind + "_denied");
   // A human grant repeats the admitted action inside a larger review envelope.
-  const body = await readCommandBody(request, kind === "human_grant" || kind === "human_grant_review" ? 16 * 1024 : 8 * 1024, kind);
+  const body = await readCommandBody(request, kind === "dispatch_stop" ? 2048 : kind === "human_grant" || kind === "human_grant_review" ? 16 * 1024 : 8 * 1024, kind);
   return body instanceof Response ? body : { access: auth.access, data: body.data };
 }
