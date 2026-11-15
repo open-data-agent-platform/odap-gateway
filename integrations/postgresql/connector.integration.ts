@@ -16,6 +16,7 @@ import { createPostgresGateway } from "./gateway";
 import { SESSION_COOKIE, signAuthPayload } from "../../lib/auth";
 import { approvePostgresAgentFixture, pgAgentOrigin } from "../../tests/fixtures/postgresql-agent";
 import { revokePostgresDelegation } from "../../lib/postgresql-agent";
+import { postgresCrashCases } from "../../tests/fixtures/postgresql-crash-cases";
 
 // Fixed disposable fixture only: never accept a business endpoint or credentials.
 const config: PostgresHostConfig = { host: "127.0.0.1", port: 55432, database: "odap_pg_fixture",
@@ -56,6 +57,12 @@ beforeAll(async () => {
     ALTER TABLE metrics.slow_orders ENABLE ROW LEVEL SECURITY;
     CREATE POLICY slow_access ON metrics.slow_orders TO reader_a USING (metrics.slow());
     GRANT SELECT ON metrics.slow_orders TO reader_a;
+    CREATE FUNCTION metrics.crash_slow() RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(2); RETURN true; END $$;
+    CREATE TABLE metrics.crash_orders (LIKE metrics.orders);
+    INSERT INTO metrics.crash_orders SELECT * FROM metrics.orders;
+    ALTER TABLE metrics.crash_orders ENABLE ROW LEVEL SECURITY;
+    CREATE POLICY crash_access ON metrics.crash_orders TO reader_a USING (metrics.crash_slow());
+    GRANT SELECT ON metrics.crash_orders TO reader_a;
     CREATE DOMAIN metrics.custom_number AS bigint;
     CREATE TABLE metrics.domain_orders (tenant_id text, amount metrics.custom_number);
     ALTER TABLE metrics.domain_orders ENABLE ROW LEVEL SECURITY;
@@ -64,11 +71,12 @@ beforeAll(async () => {
   writeFileSync("postgresql-environment.json", JSON.stringify({ serverVersion: "17.12", serverVersionNum: version,
     driver: "pg", driverVersion, syntheticDataOnly: true, transport: "isolated-loopback-without-TLS",
     productionVerified: false, gatewayDispatchIntegrated: true, transportScope: "Node host, not deployed Worker",
-    tlsFixtureRequired: true, signedAgentDelegation: true, budgetUnit: "read-attempt", monetaryCost: "unpriced" }, null, 2) + "\n");
+    tlsFixtureRequired: true, signedAgentDelegation: true, terminalCodes: ["57014", "42501"],
+    hostCrashFixture: "SIGKILL-execute/fresh-process-recovery", budgetUnit: "read-attempt", monetaryCost: "unpriced" }, null, 2) + "\n");
 });
 afterAll(async () => { await admin.end(); });
 
-async function governedFixture(test: (db: D1Database) => Promise<void>, c = config, definition = d) {
+async function governedFixture(test: (db: D1Database, file: string) => Promise<void>, c = config, definition = d) {
   const directory = await mkdtemp(join(tmpdir(), "odap-pg-governed-"));
   try {
     const file = join(directory, "ledger.db");
@@ -76,9 +84,11 @@ async function governedFixture(test: (db: D1Database) => Promise<void>, c = conf
     const db = jobTransactionalDatabase(() => file);
     await seedPostgresControl(db, await postgresConnectionDigest("tenant-a", c), 2, { ...postgresSource, table: definition.table.name });
     await publishPostgresFixture(db, definition); await approvePostgresFixture(db);
-    await test(db);
+    await test(db, file);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
+
+postgresCrashCases(governedFixture, admin, config);
 
 it.each([false, true])("executes a signed delegated PostgreSQL read and recovers without resubmitting (MCP=%s)", async mcp => {
   await governedFixture(async db => {
@@ -108,14 +118,14 @@ it("does not submit when delegated consent is revoked during actual provider pre
     expect(await inspectPostgresRead(pgAccess(db), "agent-request")).toMatchObject({ used_attempts: 0, state: "not-submitted" });
   });
 });
-it("retains delegated claims and pending receipts after a real statement timeout", async () => {
+it("records acknowledged delegated statement timeout without refund or replay", async () => {
   const c = { ...config, statementTimeoutMs: 100, lockTimeoutMs: 50 };
   await governedFixture(async db => {
     const a = await approvePostgresAgentFixture(db);
     expect(await postgresAgentOperation(db, pgAgentOrigin, "tenant-a", a.delegationId, a.signature, "execute", async () => c))
-      .toMatchObject({ outcome: "observation-required", claim: "confirmed" });
+      .toMatchObject({ outcome: "failed", claim: "confirmed", sqlState: "57014" });
     expect(await postgresAgentOperation(db, pgAgentOrigin, "tenant-a", a.delegationId, a.inspectSignature, "inspect", async () => c))
-      .toMatchObject({ state: "observation-required" });
+      .toMatchObject({ state: "failed", terminalSqlState: "57014" });
     await expect(postgresAgentOperation(db, pgAgentOrigin, "tenant-a", a.delegationId, a.signature, "execute", async () => c)).rejects.toThrow();
   }, c, { ...d, table: { ...d.table, name: "slow_orders" } });
 });
@@ -136,13 +146,13 @@ it("allows exactly one real-engine submission under concurrent governed executio
     expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ used_attempts: 1 });
   });
 });
-it("retains a consumed attempt and pending evidence after a real governed statement timeout", async () => {
+it("appends terminal failure while retaining consumed attempt and earlier pending receipt", async () => {
   const c = { ...config, statementTimeoutMs: 100, lockTimeoutMs: 50 };
   await governedFixture(async db => {
     const result = await executeGovernedPostgresRead(pgAccess(db), "request", async () => c);
-    expect(result).toMatchObject({ outcome: "observation-required", claim: "confirmed" });
+    expect(result).toMatchObject({ outcome: "failed", claim: "confirmed", sqlState: "57014" });
     expect(result).not.toHaveProperty("value");
-    expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ state: "observation-required", used_attempts: 1 });
+    expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ state: "failed", used_attempts: 1, terminal_sql_state: "57014" });
     await expect(executeGovernedPostgresRead(pgAccess(db), "request", async () => c)).rejects.toThrow();
   }, c, { ...d, table: { ...d.table, name: "slow_orders" } });
 });
@@ -153,6 +163,27 @@ it("rejects resolver role and endpoint substitution before connecting", async ()
     }
     expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ used_attempts: 0 });
   });
+});
+it("recovers a terminal receipt after its write acknowledgement is lost", async () => {
+  const c = { ...config, statementTimeoutMs: 100, lockTimeoutMs: 50 };
+  await governedFixture(async db => {
+    const fault: D1Database = { prepare(sql) {
+      const prepared = db.prepare(sql);
+      return { ...prepared, bind(...params) {
+        const statement = prepared.bind(...params);
+        return { ...statement, async first<T>() {
+          const value = await statement.first<T>();
+          if (sql.startsWith("INSERT INTO postgresql_terminal_failures")) throw new Error("synthetic acknowledgement loss");
+          return value;
+        } };
+      } };
+    } };
+    expect(await executeGovernedPostgresRead(pgAccess(fault), "request", async () => c))
+      .toMatchObject({ outcome: "observation-required", claim: "confirmed" });
+    expect(await inspectPostgresRead(pgAccess(db), "request"))
+      .toMatchObject({ state: "failed", terminal_sql_state: "57014", used_attempts: 1 });
+    await expect(executeGovernedPostgresRead(pgAccess(db), "request", async () => c)).rejects.toThrow();
+  }, c, { ...d, table: { ...d.table, name: "slow_orders" } });
 });
 it.each(["claim", "observation"])("does not manufacture success after a lost %s acknowledgement", async phase => {
   await governedFixture(async db => {
@@ -295,14 +326,14 @@ it("rechecks database permission when revoked after the host claim", async () =>
   try {
     expect(await executePostgresMetric(config, await postgresRead(), async () => {
       await admin.query("REVOKE SELECT ON metrics.orders FROM reader_a"); return true;
-    })).toMatchObject({ outcome: "observation-required", claim: "confirmed" });
+    })).toMatchObject({ outcome: "failed", claim: "confirmed", sqlState: "42501" });
   } finally { await admin.query("GRANT SELECT ON metrics.orders TO reader_a"); }
 });
-it("bounds a real slow query with server statement timeout, retaining unresolved claim", async () => {
+it("acknowledges a real server statement timeout without refunding its claim", async () => {
   const r = await postgresRead({ ...d, table: { ...d.table, name: "slow_orders" } }); r.source.table = "slow_orders";
   const start = Date.now();
   expect(await executePostgresMetric({ ...config, statementTimeoutMs: 50, lockTimeoutMs: 25 }, r, async () => true))
-    .toMatchObject({ outcome: "observation-required", claim: "confirmed" });
+    .toMatchObject({ outcome: "failed", claim: "confirmed", sqlState: "57014" });
   expect(Date.now() - start).toBeLessThan(4000);
 });
 it("bounds preflight table locking before the claim", async () => {
@@ -312,6 +343,25 @@ it("bounds preflight table locking before the claim", async () => {
     expect(await executePostgresMetric(config, await postgresRead(), async () => true))
       .toMatchObject({ outcome: "not-submitted", claim: "not-attempted" });
   } finally { await admin.query("ROLLBACK"); }
+});
+it("requires the metric error and rollback acknowledgement after a real cancel request", async () => {
+  const r = await postgresRead({ ...d, table: { ...d.table, name: "crash_orders" } }); r.source.table = "crash_orders";
+  let cancellation: Promise<void> | undefined;
+  const result = await executePostgresMetric({ ...config, statementTimeoutMs: 3000, deadlineMs: 6000 }, r, async () => {
+    cancellation = (async () => {
+      await expect.poll(async () => (await admin.query(`SELECT pid FROM pg_stat_activity WHERE application_name='odap-postgresql-preview'
+        AND datname='odap_pg_fixture' AND usename='reader_a' AND state='active' AND wait_event='PgSleep'
+        AND query LIKE '%AS metric_value FROM ONLY%crash_orders%'`)).rows.length, { timeout: 2000, interval: 10 }).toBe(1);
+      const response = await admin.query(`SELECT pg_cancel_backend(pid) AS requested FROM pg_stat_activity
+        WHERE application_name='odap-postgresql-preview' AND datname='odap_pg_fixture' AND usename='reader_a'
+        AND state='active' AND query LIKE '%AS metric_value FROM ONLY%crash_orders%'`);
+      expect(response.rows).toEqual([{ requested: true }]);
+    })();
+    return true;
+  });
+  await cancellation;
+  expect(result).toMatchObject({ outcome: "failed", claim: "confirmed", sqlState: "57014" });
+  expect(result).not.toHaveProperty("value");
 });
 it("retains uncertainty on server-side connection termination without retry", async () => {
   const r = await postgresRead({ ...d, table: { ...d.table, name: "slow_orders" } }); r.source.table = "slow_orders";

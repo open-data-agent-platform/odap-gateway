@@ -4,6 +4,7 @@ import { claimPostgresRead, observePostgresRead, preparePostgresDispatch, Postgr
 import { executePostgresMetric, type PostgresHostConfig } from "./index";
 import { verifyPostgresAgent, inspectPostgresAgent, type PostgresAgentProof, type PostgresAgentOperation } from "../../lib/postgresql-agent";
 import type { D1Database } from "../../lib/d1";
+import { recordPostgresFailure } from "../../lib/postgresql-terminal";
 
 export type PostgresConnectionResolver = (tenantId: string, connectionRef: string) => Promise<PostgresHostConfig>;
 
@@ -46,9 +47,12 @@ export async function executeGovernedPostgresRead(access: ControlAccess, request
   }
   let recorded = false;
   try {
-    recorded = await bounded(observePostgresRead(access, requestId, intentId,
+    recorded = result.outcome === "failed" ? await bounded(recordPostgresFailure(access, requestId, intentId,
+      result.statementDigest, result.sqlState)) : await bounded(observePostgresRead(access, requestId, intentId,
       result.outcome === "succeeded" ? "succeeded" : "observation-required"));
   } catch { /* The pending receipt remains authoritative when observation acknowledgement is lost. */ }
+  if (recorded && result.outcome === "failed") return { outcome: "failed", claim: "confirmed", requestId, intentId,
+    sqlState: result.sqlState, receiptId: "pg-failed-" + intentId, monetaryCost: "unpriced" as const };
   if (!recorded || result.outcome !== "succeeded") {
     return { outcome: "observation-required", claim: "confirmed", requestId, intentId, monetaryCost: "unpriced" as const };
   }

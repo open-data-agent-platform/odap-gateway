@@ -142,6 +142,7 @@ export async function inspectPostgresRead(access: ControlAccess, requestId: stri
   const row = required(await access.db.prepare(`SELECT q.id,q.requester_id,q.release_id,q.source_id,q.action_json,q.action_digest,
     a.contract_id,CASE WHEN d.id IS NULL THEN a.expires_at ELSE min(a.expires_at,d.expires_at) END AS expires_at,
     c.intent_id,c.claimed_at,o.outcome,s.stopped_at,
+    t.sql_state AS terminal_sql_state,
     d.id AS delegation_id,d.agent_id,d.key_id,d.audience,d.expires_at AS delegation_expires_at,d.revoked_at AS delegation_revoked_at,
     b.limit_attempts,(SELECT count(*) FROM postgresql_read_claims used WHERE used.tenant_id=q.tenant_id AND used.budget_id=v.budget_id) AS used_attempts
     FROM postgresql_read_requests q JOIN postgresql_source_versions v ON v.tenant_id=q.tenant_id AND v.id=q.source_id
@@ -152,16 +153,19 @@ export async function inspectPostgresRead(access: ControlAccess, requestId: stri
     LEFT JOIN postgresql_read_claims c ON c.tenant_id=q.tenant_id AND c.request_id=q.id
     LEFT JOIN postgresql_read_observations o ON o.tenant_id=q.tenant_id AND o.request_id=q.id
     LEFT JOIN postgresql_read_stops s ON s.tenant_id=q.tenant_id AND s.request_id=q.id
+    LEFT JOIN postgresql_terminal_failures t ON t.tenant_id=q.tenant_id AND t.request_id=q.id
     LEFT JOIN postgresql_agent_delegations d ON d.tenant_id=q.tenant_id AND d.request_id=q.id
     WHERE q.tenant_id=? AND q.id=?`).bind(access.principalId, access.tenantId, requestId)
     .first<{ id: string; requester_id: string; release_id: string; source_id: string; action_json: string; action_digest: string;
       contract_id: string | null; expires_at: string | null; intent_id: string | null; claimed_at: string | null;
       delegation_id: string | null; agent_id: string | null; key_id: string | null; audience: string | null;
       delegation_expires_at: string | null; delegation_revoked_at: string | null;
+      terminal_sql_state: string | null;
       outcome: string | null; stopped_at: string | null; limit_attempts: number; used_attempts: number }>());
   return { ...row, budgetUnit: "read-attempt" as const, monetaryCost: "unpriced" as const,
-    receiptIds: row.intent_id ? ["pg-pending-" + row.intent_id, ...(row.outcome ? ["pg-observed-" + row.intent_id] : [])] : [],
-    state: row.outcome ?? (row.intent_id ? "observation-required" : row.stopped_at ? "stopped-before-claim" : "not-submitted") };
+    receiptIds: row.intent_id ? ["pg-pending-" + row.intent_id, ...(row.outcome ? ["pg-observed-" + row.intent_id] : []),
+      ...(row.terminal_sql_state ? ["pg-failed-" + row.intent_id] : [])] : [],
+    state: row.terminal_sql_state ? "failed" : row.outcome ?? (row.intent_id ? "observation-required" : row.stopped_at ? "stopped-before-claim" : "not-submitted") };
 }
 
 type PostgresApprovalInput = {

@@ -5,7 +5,8 @@
 authenticated REST and post-initialization MCP command hooks. This is a **Node host
 integration**, not a deployed Cloudflare Worker query endpoint or full PostgreSQL
 SQL/type coverage. The offline inspector still refuses production Gateway dispatch.
-Migrations `0035_postgresql_control.sql` and `0036_postgresql_agent_delegations.sql`
+Migrations `0035_postgresql_control.sql`, `0036_postgresql_agent_delegations.sql`
+and `0037_postgresql_terminal_failures.sql`
 are opt-in and have not been applied to the production D1 database. Existing
 production migration restrictions still apply.
 
@@ -71,7 +72,8 @@ Do not place passwords or connection strings in the registry or public evidence.
 4. Successful query and cleanup acknowledgements append a success observation and
    receipt. No values, credentials or raw SQL are persisted in receipts. A lost
    storage acknowledgement suppresses the value response; `inspect` reads durable
-   state without resubmitting. Pending and observed receipts are never overwritten.
+   state without resubmitting. A bounded acknowledged provider failure appends a
+   separate failed receipt. Pending and observed receipts are never overwritten.
 5. `stop` blocks future claims; it does not prove cancellation of an already-claimed
    query. `retire` blocks new claims for a release. Uncertain claims are never rearmed
    or automatically refunded. There is no distributed exactly-once claim.
@@ -183,11 +185,31 @@ PostgreSQL itself notes that read-only transactions do not prevent all side effe
 
 The driver does not retry submissions. A denied/unknown claim never sends the
 metric. Successful results require query and transaction cleanup acknowledgements.
-Any failure after a send attempt, including timeout, disconnect, permission
-revocation or abort, returns `observation-required`. It is not permission to refund,
-retry, publish a terminal receipt or claim successful cancellation. An abort closes
-only this call's connection; the preview does not prove the server query stopped.
-Errors returned to callers are bounded reason codes, not raw driver errors or SQL.
+An actual metric ErrorResponse with severity `ERROR` and SQLSTATE `57014`
+(`query_canceled`) or `42501` (`insufficient_privilege`), followed by a successful
+ROLLBACK acknowledgement on the same connection with no local abort/deadline,
+establishes the bounded `failed` result. The governed wrapper returns it only
+after the matching immutable failed receipt is confirmed. It does not infer who
+caused cancellation or return a `cancelled` user-intent outcome. Error text is not
+parsed, returned or persisted. Other SQLSTATEs remain unsupported/uncertain.
+[PostgreSQL error codes](https://www.postgresql.org/docs/17/errcodes-appendix.html).
+
+Disconnects, local aborts, unknown errors, lost rollback acknowledgement and lost
+terminal-write acknowledgement return `observation-required`. That is not
+permission to refund, retry or infer a terminal outcome. An abort closes only this
+call's connection. A cancellation request by itself does not prove cancellation;
+this host does not expose an administrative backend-cancel endpoint.
+[Cancellation acknowledgement semantics](https://www.postgresql.org/docs/17/libpq-cancel.html).
+
+`postgresql_terminal_failures` binds the original tenant/request/intent/statement
+digest and appends `pg-failed-{intentId}` using the existing EvidenceReceipt schema.
+Earlier pending evidence remains intact. Conflicting success, mutation, deletion
+and replacement are rejected. Terminal state and receipt are atomic; failed
+receipt insertion rolls back the terminal row. A confirmed failed read still
+consumes its attempt quota and contract, without a monetary refund claim.
+Inspection returns the authoritative persisted state even if its write response
+was lost. It never recovers or stores query values. Terminal recording is an
+internal provider-observation API, not a REST/MCP command or caller assertion.
 
 Statement and lock timeouts are server controls; the connection deadline bounds
 driver work. These are **not** billed-cost, scanned-row, memory or whole-transaction
@@ -218,12 +240,23 @@ tenant/owner isolation, concurrent claims, quota exhaustion, withdrawal of autho
 append-only storage and receipt-write rollback. Real PostgreSQL tests exercise the
 governed host path, session and signed Agent REST/MCP, concurrency, requester
 consent, owner/key/audience binding, revocation races, resolver substitution and
-lost claim or observation acknowledgements. SQLite also verifies upgrades retain
-prior session contracts. These are author engineering tests, not independent
+lost claim, observation or terminal acknowledgements. Eight isolated real-engine
+cases use actual SIGKILL at claim acknowledgement, active query, success receipt
+acknowledgement and failed receipt acknowledgement, for both session and Agent
+execution. A fresh Node process then inspects the same durable ledger and proves
+replay is refused before provider resolution. The killed child is an intentional
+fault asserted by a normally completing test runner, not a passing crashed test.
+Backend disappearance is fixture cleanup only, never a cancellation or success
+proof. This validates host-process death, not storage/power loss, replica failover,
+server restart or a generic distributed exactly-once guarantee.
+
+SQLite also verifies upgrades retain prior contracts and receipts. These are
+author engineering tests, not independent
 signoff, formal scoring or a real pilot.
 
 Still required for full acceptance: approved production catalog/auth/host setup and
-schema rollout; open-ended policy/Agent grants where required; independently verifiable terminal
-cancellation/reconciliation; a reviewed monetary pricing/settlement model; broader
+schema rollout; open-ended policy/Agent grants where required; active cancellation
+delivery and cross-process reconciliation of unacknowledged provider outcomes;
+a reviewed monetary pricing/settlement model; broader
 SQL/type/version coverage where required; independent review and an authorized
 pilot. Do not enable the general adapter inspector by merely listing this host hook.

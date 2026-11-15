@@ -2,6 +2,8 @@ import { Client } from "pg";
 import { compilePostgresMetric, postgresIdentifier, type PostgresSource } from "../../lib/postgresql-metric-compiler";
 import { submitPreparedRead } from "../../lib/read-submission";
 import type { SemanticRelease } from "../../lib/control-objects";
+import { acknowledgePostgresFailure } from "./terminal";
+import type { PostgresFailureCode } from "../../lib/postgresql-terminal";
 
 export type PostgresHostConfig = Readonly<{
   host: string; port: number; database: string; user: string; password: string;
@@ -16,6 +18,7 @@ export type PostgresClaim = Readonly<{
 }>;
 export type PostgresReadResult =
   | { outcome: "succeeded"; claim: "confirmed"; value: string | null; serverVersion: "17.12"; statementDigest: string }
+  | { outcome: "failed"; claim: "confirmed"; sqlState: PostgresFailureCode; statementDigest: string }
   | { outcome: "not-submitted" | "observation-required"; claim: "not-attempted" | "denied" | "unknown" | "confirmed";
       reason: "preflight-rejected" | "claim-unconfirmed" | "execution-unconfirmed" };
 
@@ -96,7 +99,12 @@ export async function executePostgresMetric(config: PostgresHostConfig, read: Po
         if (stopped) throw new Error("Read stopped");
         sent = true;
         const result = await db.query({ text: compiled.text, values: [...compiled.values], rowMode: "array",
-          types: { getTypeParser: () => (value: string) => value } });
+          types: { getTypeParser: () => (value: string) => value } }).catch(async error => {
+          const failure = await acknowledgePostgresFailure(error, () => db.query("ROLLBACK"), () => stopped);
+          if (!failure) throw error;
+          return failure;
+        });
+        if ("outcome" in result) return { ...result, statementDigest: compiled.statementDigest };
         const value: unknown = result.rows[0]?.[0];
         if (result.rows.length !== 1 || result.fields.length !== 1 || result.fields[0].name !== "metric_value" ||
             ![20, 1700].includes(result.fields[0].dataTypeID) || !(value === null || (typeof value === "string" &&
