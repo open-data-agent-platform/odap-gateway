@@ -15,6 +15,21 @@ function failure(kind: FailureKind) {
   return { value, inspect };
 }
 
+function throwingPrepare(value: unknown) {
+  let calls = 0;
+  // A synchronous vi.fn inspects thrown prototypes before the Worker sees them.
+  return { prepare() { calls++; throw value; }, calls: () => calls };
+}
+
+it.each(kinds)("storage fixture preserves an opaque %s exception", kind => {
+  const f = failure(kind), storage = throwingPrepare(f.value);
+  let thrown: unknown;
+  try { storage.prepare(); } catch (error) { thrown = error; }
+  expect(thrown === f.value).toBe(true);
+  expect(storage.calls()).toBe(1);
+  expect(f.inspect).not.toHaveBeenCalled();
+});
+
 async function assertFailure(response: Response, log: ReturnType<typeof vi.spyOn>) {
   expect(response.status).toBe(500);
   expect(response.headers.get("Cache-Control")).toBe("no-store");
@@ -29,17 +44,17 @@ describe.each(["", "/gateway"])("Worker failure boundary at mount '%s'", mount =
     it.each(kinds)("does not inspect or disclose %s exceptions", async kind => {
       const f = failure(kind), log = vi.spyOn(console, "error").mockImplementation(() => {});
       const assets = vi.fn(async () => { throw f.value; });
-      const prepare = vi.fn(() => { throw f.value; });
+      const storage = throwingPrepare(f.value);
       const outbound = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected outbound request"));
       const path = surface === "assets" ? "/login" : "/api/docs/feedback";
       const response = await worker.fetch(new Request("https://gateway.test" + mount + path), {
         GATEWAY_BASE_PATH: mount, GATEWAY_MODE: "production", ASSETS: { fetch: assets },
-        ODAP_GATEWAY_DB: { prepare }
+        ODAP_GATEWAY_DB: { prepare: storage.prepare }
       }, { waitUntil() {} });
       await assertFailure(response, log);
       expect(f.inspect).not.toHaveBeenCalled();
       expect(assets).toHaveBeenCalledTimes(surface === "assets" ? 1 : 0);
-      expect(prepare).toHaveBeenCalledTimes(surface === "storage" ? 1 : 0);
+      expect(storage.calls()).toBe(surface === "storage" ? 1 : 0);
       expect(outbound).not.toHaveBeenCalled();
     });
   });

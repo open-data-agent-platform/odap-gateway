@@ -2,7 +2,8 @@
 
 `integrations/postgresql/index.ts` implements the restricted Node.js read connector.
 `control.ts` connects it to persisted Gateway authority, and `gateway.ts` supplies
-authenticated REST and post-initialization MCP command hooks. This is a **Node host
+authenticated REST and post-initialization MCP command hooks. `server.ts` supplies
+an optional bounded loopback HTTP listener. This is a **Node host
 integration**, not a deployed Cloudflare Worker query endpoint or full PostgreSQL
 SQL/type coverage. The offline inspector still refuses production Gateway dispatch.
 Migrations `0035_postgresql_control.sql`, `0036_postgresql_agent_delegations.sql`,
@@ -89,8 +90,8 @@ const handler = createPostgresGateway({
 ```
 
 Mount this single long-lived handler in the host's existing Request/Response
-bridge; do not instantiate a new handler per request. No listener, OAuth provider
-or public deployment is provisioned by this module.
+bridge, or use the loopback listener below; do not instantiate a new handler per
+request. No OAuth provider or public deployment is provisioned by this module.
 Use an explicitly authorized deployment, trusted durable control binding and
 secret resolver; the example is not authorization to configure production.
 
@@ -127,6 +128,112 @@ SQLite-aware backup of the database and committed WAL, not a copy of the main fi
 while writers are active. Restart/recovery preserves unresolved claims and never
 rearms them. Tests cover process termination, not power loss or damaged storage.
 
+### Loopback HTTP service
+
+```js
+const { startPostgresHttpHost } = require('./dist/postgresql/integrations/postgresql/server.js');
+// env already contains the approved control DB and authentication configuration.
+// resolve is the trusted source registry's credential resolver, not request input.
+const host = await startPostgresHttpHost({
+  origin: 'https://your-approved-host.example', port: 8080,
+  env, resolve, maxConcurrentExecutions: 8, maxRequests: 64,
+  requestDeadlineMs: 30000,
+});
+// On operator-requested shutdown, stop acceptance and await in-flight work.
+const state = await host.close(5000);
+// Close the control store only when state.drained is true. If false, retain it
+// until work settles and call close again; do not infer a query's terminal state.
+```
+
+Use this example inside an async entry point. The service always binds
+`127.0.0.1`, never a public interface. A separately approved TLS reverse proxy must
+preserve the configured canonical Host and authenticate clients through the
+existing session/signed-Agent boundary. HTTPS origin is required even though this
+internal hop is HTTP. Do not expose the loopback port through an unauthenticated
+tunnel or reuse a main-site proxy without reviewing its routing and cookie scope.
+Forwarded headers do not establish identity, origin or authorization. No proxy,
+DNS, certificate, credentials or production route is created by this library.
+
+HTTP/1.1 POST requests retain the `/postgresql/{tenant}/{command}` paths. The
+listener rejects ambiguous duplicate headers, mismatched Host, compression,
+trailers, expectation handshakes, upgrades and CONNECT. Request headers are bounded
+to 16 KiB/128 fields, bodies to 64 KiB and responses to 1 MiB. Connections carry
+one request; header/body receipt timeouts and a total request deadline are bounded.
+Transport admission includes body receipt and handler work, separately from the
+execution admission limit. Client disconnect or deadline signals cancellation to
+the existing executor, without asserting provider cancellation or freeing durable
+capacity. A timed-out handler retains its transport slot until it actually settles.
+[Node HTTP lifecycle](https://nodejs.org/download/release/v24.22.1/docs/api/http.html).
+
+`close(graceMs)` is idempotent, stops accepting work, waits for admitted work and
+responses, then aborts overdue work and closes remaining sockets. `drained: false`
+means host work remains; it is not permission to close its ledger, refund a claim
+or retry a query. Even `drained: true` describes only host work, not a provider
+terminal outcome. Existing post-initialization MCP hooks remain compatible; the
+additional standard transport below supplies initialization/discovery. Neither
+path provisions OAuth issuance or a public production deployment.
+
+### Standard MCP transport
+
+The loopback host additionally serves POST `/postgresql/{tenant}/mcp-stream` for
+current browser-session identities and `/postgresql/{tenant}/agent-mcp-stream`
+for scoped signed Agents. These use official `@modelcontextprotocol/server` 2.4.0
+and are tested with `@modelcontextprotocol/client` 2.4.0 at protocol revisions
+2025-11-25 and 2026-07-28. The former negotiates `initialize` and the latter
+`server/discover`; both invoke the existing gateway service and share its execution
+admission, approval, claim, receipt and replay rules. This is not a new ODAP revision.
+
+Each request has a fresh SDK instance. No MCP session identifier is issued or
+accepted, no persistent stream/resumption is offered, and GET/DELETE return 405.
+The SDK handles protocol validation; the host preserves Accept, MCP-Protocol-Version,
+Mcp-Method and Mcp-Name and refuses duplicate headers. The trusted TLS proxy must
+preserve these and Host. Bodies are capped at 64 KiB, replies at 1 MiB; existing
+host request deadlines and drain rules apply. No sampling, resources, prompts,
+subscriptions or asynchronous task interface is registered.
+
+The session endpoint requires the current verified cookie and exact Origin on
+**every** protocol request, including discovery; initialization does not retain
+authorization after membership/key/consent changes. This is the application's
+existing session scheme, not an implementation of the MCP OAuth authorization
+server profile. Production OAuth and initial administrator setup remain external
+configuration, and general clients must support the selected authentication mode.
+
+Agent initialization/discovery exposes only two static tool descriptions:
+`postgresql_agent_execute` and `postgresql_agent_inspect`. No database lookup or
+tenant existence claim is implied by discovery. Each call still requires its own
+registered-key signature over the approved tenant, audience, delegation, contract
+and operation; the endpoint rejects browser cookies and bearer identities.
+It never exposes human review/approval tools to Agent callers.
+
+For an already approved Agent delegation and configured HTTPS host:
+
+```ts
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+
+const client = new Client({ name: "approved-agent", version: "1.0.0" }, {
+  supportedProtocolVersions: ["2026-07-28", "2025-11-25"],
+  versionNegotiation: { mode: { pin: "2026-07-28" } },
+});
+await client.connect(new StreamableHTTPClientTransport(
+  new URL(`/postgresql/${tenant}/agent-mcp-stream`, approvedHostOrigin),
+));
+try {
+  const result = await client.callTool({ name: "postgresql_agent_execute",
+    arguments: { delegationId, signature: executeSignature } });
+  // A tool error or disconnect is not permission to issue a fresh execution.
+  consumeResultWithoutAutomaticReplay(result);
+} finally { await client.close(); }
+```
+
+Use `versionNegotiation: { mode: "legacy" }` for the tested 2025 initialization
+flow. Signing remains the separately documented `signPostgresAgentCommand` flow;
+no private key is sent. Disconnecting or sending a protocol cancellation notification
+does not create the durable human-authorized cancellation command. Unknown reads
+remain unresolved and consumed; inspect using the separately signed inspect proof.
+Host draining waits for admitted provider/control work even if the SDK has already
+closed the client exchange. These are socket/SDK engineering tests, not a real
+external TLS-proxy deployment or a verified third-party Agent product integration.
+
 Before enabling traffic, verify the exact engine/driver version, TLS trust,
 read-only role/RLS, schema migration level and explicit source/budget/concurrency
 rows. Apply migrations 0035-0039 in order only on an authorized target after
@@ -150,9 +257,10 @@ signal)` or mount `createPostgresGateway({origin, env, resolve})` in an authenti
 Node host. `env` uses the existing session verifier and D1-compatible control-store
 interface; Node hosts must provide a durable compatible binding. There is no
 fallback to demo identity, CLI email, caller principal, or an Agent permission flag.
-The host must bound total HTTP requests and supply TLS termination, OAuth session
-issuance, and MCP session/protocol initialization. This hook does not implement a
-standalone MCP server or an OAuth provider. Bounded Agent execution uses the
+The host must bound total HTTP requests and supply TLS termination and OAuth session
+issuance. The optional HTTP service above supplies standard MCP initialization;
+the bare gateway hook still expects an initialized transport. Neither is an OAuth
+provider. Bounded Agent execution uses the
 separate registered-key path below, not a human session impersonation.
 
 The operator provisions an immutable `postgresql_read_budgets` row and a
@@ -336,8 +444,8 @@ inspection; re-enablement is not supported. A new key needs fresh consent.
 The post-initialization `/postgresql/{tenant}/agent-mcp` hook accepts JSON-RPC
 `tools/call` for `postgresql_agent_execute` or `postgresql_agent_inspect`, with the
 same two signed arguments and the same service as REST. The host registers those
-two tools and handles MCP initialization/discovery; this hook is not a complete
-MCP server. Human consent/review/challenge/revocation commands remain available
+two tools and handles MCP initialization/discovery, or uses the standard transport
+above; this bare hook is not a complete MCP server. Human consent/review/challenge/revocation commands remain available
 through the session REST/MCP hooks, never through the Agent endpoint.
 
 The signature is verified before provider resolution. After asynchronous signature
@@ -460,7 +568,13 @@ Agent queries through human REST/MCP, cancellation TLS rejection without fallbac
 and isolation from an unrelated live query, as well as the
 governed host path, session and signed Agent REST/MCP, concurrency, requester
 consent, owner/key/audience binding, revocation races, resolver substitution and
-lost claim, observation or terminal acknowledgements. Eight isolated real-engine
+lost claim, observation or terminal acknowledgements. Socket tests cover HTTP
+boundaries, admission retention and bounded draining; real-engine tests also send
+session/Agent REST/MCP reads through the listener and disconnect an active client
+without replaying or refunding its uncertain read. These cases are complemented
+by official SDK session/Agent calls at both tested protocol
+revisions, refusing replay after successful execution and retaining uncertainty
+after an active standard-client disconnect. Eight isolated real-engine
 cases use actual SIGKILL at claim acknowledgement, active query, success receipt
 acknowledgement and failed receipt acknowledgement, for both session and Agent
 execution. A fresh Node process then inspects the same durable ledger and proves

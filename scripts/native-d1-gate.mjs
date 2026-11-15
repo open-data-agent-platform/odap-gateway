@@ -62,7 +62,7 @@ function main() {
   mkdirSync(evidenceRoot, { recursive: true });
   const directory = mkdtempSync(join(evidenceRoot, "native-d1-gate-"));
   const reportPath = join(directory, "vitest.json");
-  const args = [cli, "run", "--environment", "node", "--pool=forks", "--maxWorkers=1", "--minWorkers=1",
+  const args = [cli, "run", "--environment", "node", "--pool=forks", "--maxWorkers=1",
     "--reporter=default", "--reporter=json", `--outputFile=${reportPath}`, ...files];
   console.log(`Native D1 gate: ${version}, ${files.length} files; evidence: ${directory}`);
   const child = spawnSync(node, args, { cwd: root, stdio: "inherit", windowsHide: true });
