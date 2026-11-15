@@ -15,6 +15,7 @@
     "../integrations/postgresql/index.ts",
     "../integrations/postgresql/control.ts",
     "../integrations/postgresql/gateway.ts",
-    "../integrations/postgresql/agent.ts"
+    "../integrations/postgresql/agent.ts",
+    "../integrations/postgresql/sqlite-control.ts"
   ]
 }

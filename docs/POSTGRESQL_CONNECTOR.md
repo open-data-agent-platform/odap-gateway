@@ -89,10 +89,43 @@ const handler = createPostgresGateway({
 ```
 
 Mount this single long-lived handler in the host's existing Request/Response
-bridge; do not instantiate a new handler per request. No listener, OAuth provider,
-control-store implementation or public deployment is provisioned by this module.
+bridge; do not instantiate a new handler per request. No listener, OAuth provider
+or public deployment is provisioned by this module.
 Use an explicitly authorized deployment, trusted durable control binding and
 secret resolver; the example is not authorization to configure production.
+
+### Local durable control binding
+
+`sqlite-control.ts` supplies `openPostgresSqliteControl(absolutePath)` for a trusted
+Node host. Its `{db, close}` result implements the control-plane D1 interface;
+it is **not** an adapter for querying SQLite business data. Pass `db` to the
+host's existing `env.DB` binding and close it after in-flight handlers have drained.
+Only Node **24.22.1** is accepted. The built-in `node:sqlite` API is release-candidate
+software; other versions need separate compatibility verification.
+[Node SQLite API](https://nodejs.org/download/release/v24.22.1/docs/api/sqlite.html).
+
+The opener requires an existing, nonempty regular local file and the exact schema
+fingerprint produced by migrations 0001-0039. Missing, symbolic-link or drifted
+files fail closed. It never creates, migrates or seeds a control database, reads
+credentials, or configures an administrator. Provisioning and schema upgrades
+still require their own approval. No production database has been migrated.
+
+Transactions use WAL, FULL synchronization and foreign keys, with a 250 ms busy
+timeout and no automatic retries. Each operation/batch takes a short immediate
+write transaction, including reads; the synchronous binding is for bounded
+control queries, not analytic scans. Batches are atomic, limited to 100 owned
+statements, 10,000 output rows and 8 MiB of output across the batch. SQL is bounded
+to 65,536 characters, individual text/blob bindings to 1 MiB. Bound data stays
+separate from SQL. Unsafe integer results, transaction/connection escape commands,
+trailing statements, invalid result columns and limit failures roll back the
+whole operation. Errors omit SQL, data and file paths.
+
+Protect the parent directory and SQLite WAL/SHM sidecars with host filesystem
+permissions; only trusted host code may use the binding. It is not an untrusted
+SQL sandbox, high-availability service or network-filesystem deployment. Use a
+SQLite-aware backup of the database and committed WAL, not a copy of the main file
+while writers are active. Restart/recovery preserves unresolved claims and never
+rearms them. Tests cover process termination, not power loss or damaged storage.
 
 Before enabling traffic, verify the exact engine/driver version, TLS trust,
 read-only role/RLS, schema migration level and explicit source/budget/concurrency

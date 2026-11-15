@@ -9,6 +9,9 @@ It has an independent Node build (`npm run postgresql:build`), shared local
 execution/preparation admission, and exact integer-width, decimal, boolean, text,
 UUID and temporal equality parameters with built-in OID validation. Results remain
 single numeric aggregates; this is not arbitrary SQL or general row extraction.
+An optional Node 24.22.1 `node:sqlite` control binding opens an already authorized,
+initialized local ledger with schema validation, atomic batches and bounded waits;
+it never initializes a production database or adds SQLite business-query support.
 Cancellation intent is not terminal proof; an unavailable executor leaves it pending.
 Host-process crash recovery is tested without automatic replay. It is not deployed in the production
 Worker and does not offer monetary cost settlement or open-ended Agent grants. The inspector continues to reject it

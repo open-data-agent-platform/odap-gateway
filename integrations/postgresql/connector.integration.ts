@@ -8,7 +8,9 @@ import { createRequire } from "node:module";
 import { executePostgresMetric, type PostgresClaim, type PostgresHostConfig } from "./index";
 import { postgresDefinition as d, postgresRead, postgresSource, postgresBarrier } from "../../tests/fixtures/postgresql";
 import { executeGovernedPostgresRead, postgresAgentOperation, postgresConnectionDigest } from "./control";
-import { jobSqlite, jobTransactionalDatabase } from "../../tests/fixtures/job-sqlite";
+import { jobTransactionalDatabase } from "../../tests/fixtures/job-sqlite";
+import { initializePostgresLocalFixture } from "../../tests/fixtures/postgresql-local-store";
+import { openPostgresSqliteControl, POSTGRES_CONTROL_SCHEMA_DIGEST } from "./sqlite-control";
 import { approvePostgresFixture, pgAccess, pgAction, publishPostgresFixture, seedPostgresControl } from "../../tests/fixtures/postgresql-control";
 import { inspectPostgresRead } from "../../lib/postgresql-control";
 import type { D1Database } from "../../lib/d1";
@@ -89,6 +91,7 @@ beforeAll(async () => {
     productionVerified: false, gatewayDispatchIntegrated: true, transportScope: "Node host, not deployed Worker",
     tlsFixtureRequired: true, signedAgentDelegation: true, terminalCodes: ["57014", "42501"],
     hostCrashFixture: "SIGKILL-execute/fresh-process-recovery", durableConcurrency: true, activeCancellation: true,
+    controlStore: "node:sqlite", controlSchemaDigest: POSTGRES_CONTROL_SCHEMA_DIGEST, nodeVersion: process.versions.node,
     scalarTypes: ["INT16", "INT32", "INT64", "DECIMAL", "BOOL", "STRING", "UUID", "DATE", "TIME", "TIMESTAMP", "TIMESTAMPTZ"],
     resourceUnit: "unresolved-read-claim", budgetUnit: "read-attempt", monetaryCost: "unpriced" }, null, 2) + "\n");
 });
@@ -98,14 +101,16 @@ async function governedFixture(test: (db: D1Database, file: string) => Promise<v
   definition: Omit<typeof d, "measure"> & { measure: Record<string, unknown> } = d,
   concurrency = 2, action: unknown = pgAction) {
   const directory = await mkdtemp(join(tmpdir(), "odap-pg-governed-"));
+  let store: ReturnType<typeof openPostgresSqliteControl> | undefined;
   try {
     const file = join(directory, "ledger.db");
-    await jobSqlite(file, "setup");
-    const db = jobTransactionalDatabase(() => file);
+    initializePostgresLocalFixture(file);
+    store = openPostgresSqliteControl(file);
+    const db = store.db;
     await seedPostgresControl(db, await postgresConnectionDigest("tenant-a", c), 2, { ...postgresSource, table: definition.table.name }, concurrency);
     await publishPostgresFixture(db, definition); await approvePostgresFixture(db, "request", action);
     await test(db, file);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally { store?.close(); await rm(directory, { recursive: true, force: true }); }
 }
 
 postgresCrashCases(governedFixture, admin, config);

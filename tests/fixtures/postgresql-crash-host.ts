@@ -5,7 +5,7 @@ import { executeGovernedPostgresRead, postgresAgentOperation } from "../../integ
 import { inspectPostgresRead } from "../../lib/postgresql-control";
 import { pgAccess } from "./postgresql-control";
 import { pgAgentOrigin } from "./postgresql-agent";
-import { jobTransactionalDatabase } from "./job-sqlite";
+import { openPostgresSqliteControl } from "../../integrations/postgresql/sqlite-control";
 
 export type PostgresCrashInput = {
   file: string; phase: "claim-ack" | "query-running" | "observation-ack" | "terminal-ack";
@@ -24,7 +24,8 @@ async function main(input: PostgresCrashInput) {
       basename(input.file) !== "ledger.db" || !basename(dirname(input.file)).startsWith("odap-pg-governed-") ||
       input.config.host !== "127.0.0.1" || input.config.port !== 55432 || input.config.database !== "odap_pg_fixture" ||
       input.config.user !== "reader_a" || input.config.password !== "synthetic-fixture-only") throw new Error("Invalid synthetic crash fixture");
-  const base = jobTransactionalDatabase(() => input.file);
+  const store = openPostgresSqliteControl(input.file), base = store.db;
+  try {
   const request = input.agent ? "agent-request" : "request";
   if (input.mode === "recover") {
     let resolverCalls = 0, refused = false;
@@ -55,6 +56,7 @@ async function main(input: PostgresCrashInput) {
   const result = input.agent ? await postgresAgentOperation(db, pgAgentOrigin, "tenant-a", input.agent.delegationId,
     input.agent.signature, "execute", async () => input.config) : await executeGovernedPostgresRead(pgAccess(db), request, async () => input.config);
   await send({ unexpectedCompletion: result.outcome });
+  } finally { store.close(); }
 }
 process.once("message", input => {
   void main(input as PostgresCrashInput).then(() => process.disconnect(), async () => {
