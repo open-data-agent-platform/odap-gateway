@@ -23,10 +23,13 @@ import { postgresCrashCases } from "../../tests/fixtures/postgresql-crash-cases"
 import { sendPostgresCancellation, type PostgresBackendKey } from "./cancellation";
 import { startPostgresHttpHost } from "./server";
 import { startConfiguredPostgresHost } from "./host";
+import { POSTGRES_SERVER_VERSIONS, postgresServerVersion } from "./compatibility";
 import { postgresHttpRequest } from "../../tests/fixtures/postgresql-http";
 import { connectPostgresMcpFixture } from "../../tests/fixtures/postgresql-mcp";
 
 // Fixed disposable fixture only: never accept a business endpoint or credentials.
+const fixtureVersion = process.env.ODAP_POSTGRES_VERSION ?? "17.12";
+const fixtureVersionNumber = Object.entries(POSTGRES_SERVER_VERSIONS).find(([, label]) => label === fixtureVersion)?.[0];
 const config: PostgresHostConfig = { host: "127.0.0.1", port: 55432, database: "odap_pg_fixture",
   user: "reader_a", password: "synthetic-fixture-only", tls: { insecureLoopback: true },
   statementTimeoutMs: 1000, lockTimeoutMs: 200, deadlineMs: 5000 };
@@ -35,10 +38,12 @@ const admin = new Client({ host: config.host, port: config.port, database: confi
 
 beforeAll(async () => {
   if (process.env.ODAP_POSTGRES_FIXTURE !== "isolated-synthetic-only") throw new Error("Disposable fixture opt-in required");
+  if (!fixtureVersionNumber) throw new Error("Unsupported fixture version");
   await admin.connect();
   const version = (await admin.query("SHOW server_version_num")).rows[0].server_version_num;
   const driverVersion: string = createRequire(import.meta.url)("pg/package.json").version;
-  expect(version).toBe("170012");
+  expect(version).toBe(fixtureVersionNumber);
+  expect(postgresServerVersion(version)).toBe(fixtureVersion);
   expect(driverVersion).toBe("8.23.1");
   // CREATE without IF NOT EXISTS prevents accidental reuse of an existing fixture.
   await admin.query(`CREATE ROLE reader_a LOGIN PASSWORD 'synthetic-fixture-only' NOSUPERUSER NOBYPASSRLS;
@@ -91,7 +96,7 @@ beforeAll(async () => {
     CREATE POLICY typed_access ON metrics.typed_orders TO reader_a,reader_b USING
       (tenant_id = CASE current_user WHEN 'reader_a' THEN 'tenant-a' WHEN 'reader_b' THEN 'tenant-b' END);
     GRANT SELECT ON metrics.typed_orders TO reader_a,reader_b;`);
-  writeFileSync("postgresql-environment.json", JSON.stringify({ serverVersion: "17.12", serverVersionNum: version,
+  writeFileSync("postgresql-environment.json", JSON.stringify({ serverVersion: postgresServerVersion(version), serverVersionNum: version,
     driver: "pg", driverVersion, syntheticDataOnly: true, transport: "isolated-loopback-without-TLS",
     productionVerified: false, gatewayDispatchIntegrated: true, transportScope: "Node host, not deployed Worker",
     tlsFixtureRequired: true, signedAgentDelegation: true, terminalCodes: ["57014", "42501"],
@@ -121,6 +126,43 @@ async function governedFixture(test: (db: D1Database, file: string) => Promise<v
 }
 
 postgresCrashCases(governedFixture, admin, config);
+
+it("enforces stored and virtual generated-column boundaries on the selected server", async () => {
+  await admin.query(`CREATE TABLE metrics.generated_orders (
+    tenant_id text NOT NULL, amount bigint, derived bigint GENERATED ALWAYS AS (amount * 2) STORED);
+    INSERT INTO metrics.generated_orders (tenant_id,amount) VALUES ('tenant-a',1),('tenant-a',2),('tenant-b',100);
+    ALTER TABLE metrics.generated_orders ENABLE ROW LEVEL SECURITY;
+    CREATE POLICY tenant_access ON metrics.generated_orders TO reader_a USING (tenant_id='tenant-a');
+    GRANT SELECT ON metrics.generated_orders TO reader_a`);
+  const stored = await postgresRead({ ...d, table: { ...d.table, name: "generated_orders" },
+    measure: { aggregate: "SUM", column: "derived", type: "INT64" } });
+  stored.source.table = "generated_orders"; let claims = 0;
+  expect(await executePostgresMetric(config, stored, async () => { claims++; return true; }))
+    .toMatchObject({ outcome: "succeeded", value: "6", serverVersion: fixtureVersion });
+  expect(claims).toBe(1);
+  if (fixtureVersion !== "18.7") return;
+
+  await admin.query(`CREATE TABLE metrics.virtual_orders (
+    tenant_id text NOT NULL, amount bigint,
+    derived bigint GENERATED ALWAYS AS (amount * 2) VIRTUAL,
+    virtual_tenant text GENERATED ALWAYS AS (tenant_id) VIRTUAL);
+    INSERT INTO metrics.virtual_orders (tenant_id,amount) VALUES ('tenant-a',1),('tenant-b',100);
+    ALTER TABLE metrics.virtual_orders ENABLE ROW LEVEL SECURITY;
+    CREATE POLICY tenant_access ON metrics.virtual_orders TO reader_a USING (tenant_id='tenant-a');
+    GRANT SELECT ON metrics.virtual_orders TO reader_a`);
+  for (const use of ["measure", "filter", "tenant"]) {
+    const definition = { ...d, table: { ...d.table, name: "virtual_orders",
+      tenantColumn: use === "tenant" ? "virtual_tenant" : "tenant_id" },
+      measure: use === "measure" ? { aggregate: "SUM", column: "derived", type: "INT64" } : d.measure,
+      filters: use === "filter" ? { n: { column: "derived", type: "INT64" } } : {} };
+    const read = await postgresRead(definition, use === "filter" ? { n: "2" } : {});
+    read.source.table = "virtual_orders"; read.source.tenantColumn = definition.table.tenantColumn;
+    let virtualClaims = 0;
+    expect(await executePostgresMetric(config, read, async () => { virtualClaims++; return true; }))
+      .toMatchObject({ outcome: "not-submitted", claim: "not-attempted", reason: "preflight-rejected" });
+    expect(virtualClaims).toBe(0);
+  }
+});
 
 async function configuredFixture(file: string, changes: Record<string, unknown> = {}) {
   const listener = createServer();
@@ -583,7 +625,7 @@ it("executes a real isolated tenant count after a bound claim", async () => {
     binding = value;
     claims++; return true;
   });
-  expect(claims).toBe(1); expect(result).toMatchObject({ outcome: "succeeded", value: "3" });
+  expect(claims).toBe(1); expect(result).toMatchObject({ outcome: "succeeded", value: "3", serverVersion: fixtureVersion });
   expect(binding?.database).toBe(config.database); expect(binding?.role).toBe("reader_a");
   expect(binding?.statementDigest).toMatch(/^sha256:[a-f0-9]{64}$/); expect(Object.isFrozen(binding)).toBe(true);
 });

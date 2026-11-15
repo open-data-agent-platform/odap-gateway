@@ -21,6 +21,10 @@ is public metadata, never permission to inspect or execute a database request.
 The configured CLI (`postgresql:check` and `postgresql:serve`) validates explicit
 tenant/connection references, resolves only named secrets and drains the same host.
 It neither creates/migrates the control store nor enrolls identities or sources.
+The real-engine matrix covers exact PostgreSQL 15.20, 16.16, 17.12 and 18.7 builds
+with the same pinned driver and governance cases. Unknown builds and referenced
+virtual generated columns are refused; this is not compatibility with every
+PostgreSQL release, managed service or wire-compatible product.
 Cancellation intent is not terminal proof; an unavailable executor leaves it pending.
 Host-process crash recovery is tested without automatic replay. It is not deployed in the production
 Worker and does not offer monetary cost settlement or open-ended Agent grants. The inspector continues to reject it

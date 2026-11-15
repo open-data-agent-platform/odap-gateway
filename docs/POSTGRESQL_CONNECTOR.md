@@ -14,7 +14,8 @@ production migration restrictions still apply.
 
 ## Supported slice
 
-- Exact PostgreSQL 17.12 and `pg` 8.23.1. Other server versions fail closed.
+- Exact PostgreSQL 15.20, 16.16, 17.12 and 18.7 with `pg` 8.23.1.
+  Other server builds fail closed; a major-version match alone is insufficient.
 - One ordinary, non-inherited, non-partitioned table with active RLS.
 - Released single-table `COUNT_ROWS` or `SUM` of `smallint`/`integer`/`bigint`/`numeric`.
 - Equality filters for built-in `text`, `boolean`, `smallint`, `integer`, `bigint`,
@@ -27,6 +28,22 @@ production migration restrictions still apply.
   Empty COUNT is `"0"`; empty SUM is null. Nonfinite/over-256-character results
   fail closed. Arrays, JSON, floating-point, binary, domains, custom types, joins, arbitrary SQL,
   functions, views, foreign tables and pagination are not supported.
+
+Successful connector results report the actual checked server version. The CI
+matrix pins an official Linux amd64 image digest for every listed build and runs
+the same complete synthetic engine suite, including RLS, exact types, configured
+TLS/MCP, cancellation and eight process-crash cases. These observations do not
+certify a managed service, fork, replica topology or untested patch release.
+[PostgreSQL version policy](https://www.postgresql.org/support/versioning/).
+
+Referenced columns must be ordinary or stored generated columns with the exact
+built-in type. Virtual generated columns (introduced in PostgreSQL 18) are
+computed on reads and are refused before claim, whether used as a measure, filter
+or tenant discriminator. Unknown generation kinds also fail closed. Stored
+generated values are verified with the same numeric result rules. Database owners,
+generation expressions at write time and RLS policy functions remain trusted;
+this is not a sandbox for administrator-controlled database behavior.
+[Generated-column semantics](https://www.postgresql.org/docs/18/ddl-generated-columns.html).
 
 The local `odap.postgresql-metric.v1` definition contains `tenantId`,
 `sourceRevision`, `target`, `metricId`, `table`, `measure` and `filters`.
@@ -630,11 +647,14 @@ same connection, as used here.
 ## Verification and remaining work
 
 `npm test` runs pure compiler tests. `npm run test:postgresql` requires a new,
-disposable PostgreSQL 17.12 fixture at `127.0.0.1:55432`, database
+disposable supported PostgreSQL fixture at `127.0.0.1:55432`, database
 `odap_pg_fixture`, plus `ODAP_POSTGRES_FIXTURE=isolated-synthetic-only`.
+`ODAP_POSTGRES_VERSION` selects one exact listed build and defaults to `17.12`;
+the observed `server_version_num` must match. An unknown selector or a mismatched
+server is a failure, not a compatibility inference.
 Do not run it against an existing database: setup creates roles/schema/tables and
 intentionally fails if they already exist. The CI `postgresql-integration` job
-pins the official Linux amd64 image digest and publishes the real test and server
+pins each official Linux amd64 image digest and publishes separate real test and server
 reports. Missing service, wrong version, failed setup or process exit is a failure,
 not a skip. CI also generates an ephemeral synthetic TLS certificate, tests its
 trusted IP SAN and rejects untrusted CA/hostname mismatches before claims. Only

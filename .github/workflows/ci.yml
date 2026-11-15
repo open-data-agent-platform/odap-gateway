@@ -9,14 +9,28 @@ on:
 
 jobs:
   postgresql-integration:
+    name: postgresql-${{ matrix.version }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: '15.20'
+            image: postgres:15.20@sha256:8a7b3318a33b4c4b366d3ada884d5339d719114e837f0d43776835ff01dec927
+          - version: '16.16'
+            image: postgres:16.16@sha256:2d5c77ae9b0e0944ffb92f8d8fc2fa2edb215cb0976da8bac34df917af417e87
+          - version: '17.12'
+            image: postgres:17.12@sha256:6f7593c161689b6b02c78668b314af7da8811b592c5519108c57a49d0b6ad788
+          - version: '18.7'
+            image: postgres:18.7@sha256:c7fedce47eff6a78cb35dad6b627f0d684107f75ab15c0870e40c093766ba452
     services:
       postgres:
-        image: postgres:17.12@sha256:6f7593c161689b6b02c78668b314af7da8811b592c5519108c57a49d0b6ad788
+        image: ${{ matrix.image }}
         env:
           POSTGRES_DB: odap_pg_fixture
           POSTGRES_PASSWORD: synthetic-ci-only
+          PGDATA: /var/lib/postgresql/odap-fixture
         ports:
           - 55432:5432
         options: >-
@@ -38,22 +52,23 @@ jobs:
         run: |
           mkdir -p .tmp/postgresql-tls
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=odap-synthetic-postgresql' -addext 'subjectAltName=IP:127.0.0.1' -keyout .tmp/postgresql-tls/server.key -out .tmp/postgresql-tls/server.crt 2>/dev/null
-          docker cp .tmp/postgresql-tls/server.crt "$PG_CONTAINER:/var/lib/postgresql/data/server.crt"
-          docker cp .tmp/postgresql-tls/server.key "$PG_CONTAINER:/var/lib/postgresql/data/server.key"
-          docker exec "$PG_CONTAINER" chown postgres:postgres /var/lib/postgresql/data/server.key /var/lib/postgresql/data/server.crt
-          docker exec "$PG_CONTAINER" chmod 0600 /var/lib/postgresql/data/server.key
+          docker cp .tmp/postgresql-tls/server.crt "$PG_CONTAINER:/var/lib/postgresql/odap-fixture/server.crt"
+          docker cp .tmp/postgresql-tls/server.key "$PG_CONTAINER:/var/lib/postgresql/odap-fixture/server.key"
+          docker exec "$PG_CONTAINER" chown postgres:postgres /var/lib/postgresql/odap-fixture/server.key /var/lib/postgresql/odap-fixture/server.crt
+          docker exec "$PG_CONTAINER" chmod 0600 /var/lib/postgresql/odap-fixture/server.key
           docker exec -u postgres "$PG_CONTAINER" psql -d odap_pg_fixture -c "ALTER SYSTEM SET ssl = 'on'"
           docker exec -u postgres "$PG_CONTAINER" psql -d odap_pg_fixture -c 'SELECT pg_reload_conf()'
       - name: Verify PostgreSQL connector
         env:
           ODAP_POSTGRES_FIXTURE: isolated-synthetic-only
+          ODAP_POSTGRES_VERSION: ${{ matrix.version }}
           NODE_OPTIONS: --dns-result-order=ipv4first
         run: npm run test:postgresql
       - name: Preserve PostgreSQL results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: postgresql-integration-results
+          name: postgresql-integration-results-${{ matrix.version }}
           path: |
             postgresql-results.json
             postgresql-environment.json
@@ -87,13 +102,21 @@ jobs:
         run: npm run postgresql:build
 
       - name: Test non-native suites
-        run: npm run test -- --pool=forks --maxWorkers=2 --exclude '**/*-miniflare.test.ts'
+        run: npm run test -- --pool=forks --maxWorkers=2 --exclude '**/*-miniflare.test.ts' --reporter=default --reporter=json --outputFile=non-native-results.json
 
       - name: Complete native verification gate
         run: npm run test:native
 
       - name: Build
         run: npm run build
+
+      - name: Preserve non-native results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-non-native-results
+          path: non-native-results.json
+          if-no-files-found: error
 
   python-integrations:
     runs-on: ubuntu-latest

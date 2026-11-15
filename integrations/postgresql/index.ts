@@ -6,6 +6,7 @@ import { acknowledgePostgresFailure } from "./terminal";
 import type { PostgresFailureCode } from "../../lib/postgresql-terminal";
 import { monitorPostgresCancellation, sendPostgresCancellation, type PostgresBackendKey } from "./cancellation";
 import { postgresParameterTypes } from "../../lib/postgresql-parameter";
+import { postgresServerVersion, type PostgresServerVersion } from "./compatibility";
 
 export type PostgresHostConfig = Readonly<{
   host: string; port: number; database: string; user: string; password: string;
@@ -19,7 +20,7 @@ export type PostgresClaim = Readonly<{
   database: string; role: string; actionDigest: string; definitionDigest: string; statementDigest: string;
 }>;
 export type PostgresReadResult =
-  | { outcome: "succeeded"; claim: "confirmed"; value: string | null; serverVersion: "17.12"; statementDigest: string }
+  | { outcome: "succeeded"; claim: "confirmed"; value: string | null; serverVersion: PostgresServerVersion; statementDigest: string }
   | { outcome: "failed"; claim: "confirmed"; sqlState: PostgresFailureCode; statementDigest: string }
   | { outcome: "not-submitted" | "observation-required"; claim: "not-attempted" | "denied" | "unknown" | "confirmed";
       reason: "preflight-rejected" | "claim-unconfirmed" | "execution-unconfirmed" };
@@ -89,17 +90,20 @@ export async function executePostgresMetric(config: PostgresHostConfig, read: Po
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         JOIN pg_roles r ON r.rolname = current_user WHERE n.nspname = $1 AND c.relname = $2`, [source.schema, source.table]);
       const m = info.rows[0];
-      if (info.rows.length !== 1 || m.database !== c.database || m.role !== c.user || m.version !== "170012" ||
+      const serverVersion = postgresServerVersion(m?.version);
+      if (info.rows.length !== 1 || !serverVersion || m.database !== c.database || m.role !== c.user ||
           m.readonly !== "on" || m.privileged !== false || m.relkind !== "r" || m.relispartition !== false ||
           m.owner !== false || m.rls !== true || m.readable !== true || m.writable !== false || m.inherited !== false) {
         throw new Error("Unsupported PostgreSQL security or relation configuration");
       }
-      const metadata = await db.query(`SELECT a.attname AS name, a.atttypid AS oid
+      const metadata = await db.query(`SELECT a.attname AS name, a.atttypid AS oid, a.attgenerated AS generated
         FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped`, [source.schema, source.table]);
       for (const column of compiled.columns) {
         const actual = metadata.rows.find(r => r.name === column.name);
-        if (!actual || postgresParameterTypes[column.type].oid !== actual.oid) throw new Error("Unsupported PostgreSQL column type");
+        if (!actual || postgresParameterTypes[column.type].oid !== actual.oid || !["", "s"].includes(actual.generated)) {
+          throw new Error("Unsupported PostgreSQL column type or generation");
+        }
       }
       return async () => {
         if (stopped) throw new Error("Read stopped");
@@ -121,7 +125,7 @@ export async function executePostgresMetric(config: PostgresHostConfig, read: Po
         await db.query("ROLLBACK");
         if (stopped) throw new Error("Read acknowledgement unavailable");
         return { outcome: "succeeded" as const, claim: "confirmed" as const, value,
-          serverVersion: "17.12" as const, statementDigest: compiled.statementDigest };
+          serverVersion, statementDigest: compiled.statementDigest };
       };
     }, async () => {
       if (stopped) return false;
