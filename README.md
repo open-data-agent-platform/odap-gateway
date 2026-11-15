@@ -65,6 +65,11 @@ See [integrations](integrations/README.md) for runnable adapters, supported
 versions, and explicit validation boundaries. Framework evidence tools are
 separate from query execution and do not configure production authentication.
 
+The [offline database adapter inspector](docs/DATABASE_ADAPTERS.md) checks
+implementation capabilities and explicit resource requirements. Only BigQuery
+has an implemented business-query adapter; the inspector never grants authority
+or claims live provider verification for any engine.
+
 The [offline NVIDIA import adapter](docs/NVIDIA_IMPORT.md) stages version-pinned
 SQL attribute context and an explicit local metric mapping for candidate review.
 Upstream certification never grants Gateway approval or execution; live import
