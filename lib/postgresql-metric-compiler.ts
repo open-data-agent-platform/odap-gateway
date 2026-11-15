@@ -20,12 +20,19 @@ export function postgresIdentifier(value: unknown): string {
 
 const casts: Record<PostgresParameterType, string> = { INT64: "int8", DECIMAL: "numeric", BOOL: "bool", STRING: "text" };
 
+function postgresText(value: unknown, maximum: number): value is string {
+  // pg serializes UTF-8: reject lone surrogates rather than silently hashing
+  // one value and sending the Unicode replacement character to the database.
+  return typeof value === "string" && value.length <= maximum && !value.includes("\0") &&
+    new TextDecoder("utf-8", { ignoreBOM: true }).decode(new TextEncoder().encode(value)) === value;
+}
+
 function parameter(type: unknown, value: unknown): { cast: string; value: string | boolean | null } {
   if (typeof type !== "string" || !Object.hasOwn(casts, type)) throw new Error("Unsupported parameter type");
   const cast = "pg_catalog." + casts[type as PostgresParameterType];
   if (value === null) return { cast, value };
   if (type === "BOOL" && typeof value === "boolean") return { cast, value };
-  if (type === "STRING" && typeof value === "string" && value.length <= 4096 && !value.includes("\0")) return { cast, value };
+  if (type === "STRING" && postgresText(value, 4096)) return { cast, value };
   if (type === "INT64") {
     const text = typeof value === "number" && Number.isSafeInteger(value) && !Object.is(value, -0) ? String(value) : value;
     if (typeof text === "string" && /^-?(0|[1-9][0-9]{0,18})$/.test(text) && text !== "-0" &&
@@ -39,7 +46,7 @@ function parameter(type: unknown, value: unknown): { cast: string; value: string
 // A local Gateway engineering format, not an extension of the ODAP specification.
 export async function compilePostgresMetric(release: SemanticRelease, definitionJson: string,
   canonicalAction: string, source: PostgresSource) {
-  if (!isSemanticRelease(release) || release.state !== "released" || typeof definitionJson !== "string" ||
+  if (!isSemanticRelease(release) || !postgresText(release.tenantId, 256) || release.state !== "released" || typeof definitionJson !== "string" ||
       definitionJson.length > 32768 || typeof canonicalAction !== "string" || canonicalAction.length > 65536 ||
       !exact(source, ["database", "schema", "table", "tenantColumn"])) throw new Error("Invalid PostgreSQL read binding");
   for (const value of Object.values(source)) postgresIdentifier(value);

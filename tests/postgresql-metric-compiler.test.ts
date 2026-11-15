@@ -64,4 +64,16 @@ describe("PostgreSQL release-bound compiler", () => {
     const definition = { ...d, filters: { value: { column: "active", type: "BOOL" } } };
     expect((await compile(definition, { value: false })).statementDigest).not.toBe((await compile(definition, { value: null })).statementDigest);
   });
+  it.each([0xd800, 0xdc00])("refuses lone surrogate code unit %s before UTF-8 serialization", async code => {
+    const value = String.fromCharCode(code);
+    await expect(compile({ ...d, filters: { value: { column: "label", type: "STRING" } } }, { value })).rejects.toThrow();
+  });
+  it("preserves valid multilingual and supplementary text, including a leading BOM", async () => {
+    const value = "\ufeff\u4e2d\u6587\ud83d\ude80";
+    expect((await compile({ ...d, filters: { value: { column: "label", type: "STRING" } } }, { value })).values[1]).toBe(value);
+  });
+  it("refuses an ill-formed tenant parameter even when its definition and release agree", async () => {
+    const r = await postgresRead({ ...d, tenantId: "\ud800" }, {}, { tenantId: "\ud800" });
+    await expect(compilePostgresMetric(r.release, r.definitionJson, r.canonicalAction, r.source)).rejects.toThrow();
+  });
 });

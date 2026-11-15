@@ -32,9 +32,22 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Configure isolated PostgreSQL TLS
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          mkdir -p .tmp/postgresql-tls
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=odap-synthetic-postgresql' -addext 'subjectAltName=IP:127.0.0.1' -keyout .tmp/postgresql-tls/server.key -out .tmp/postgresql-tls/server.crt 2>/dev/null
+          docker cp .tmp/postgresql-tls/server.crt "$PG_CONTAINER:/var/lib/postgresql/data/server.crt"
+          docker cp .tmp/postgresql-tls/server.key "$PG_CONTAINER:/var/lib/postgresql/data/server.key"
+          docker exec "$PG_CONTAINER" chown postgres:postgres /var/lib/postgresql/data/server.key /var/lib/postgresql/data/server.crt
+          docker exec "$PG_CONTAINER" chmod 0600 /var/lib/postgresql/data/server.key
+          docker exec -u postgres "$PG_CONTAINER" psql -d odap_pg_fixture -c "ALTER SYSTEM SET ssl = 'on'"
+          docker exec -u postgres "$PG_CONTAINER" psql -d odap_pg_fixture -c 'SELECT pg_reload_conf()'
       - name: Verify PostgreSQL connector
         env:
           ODAP_POSTGRES_FIXTURE: isolated-synthetic-only
+          NODE_OPTIONS: --dns-result-order=ipv4first
         run: npm run test:postgresql
       - name: Preserve PostgreSQL results
         if: always()

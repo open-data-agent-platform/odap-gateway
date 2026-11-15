@@ -1,9 +1,19 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { Client } from "pg";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 import { executePostgresMetric, type PostgresClaim, type PostgresHostConfig } from "./index";
-import { postgresDefinition as d, postgresRead } from "../../tests/fixtures/postgresql";
+import { postgresDefinition as d, postgresRead, postgresSource } from "../../tests/fixtures/postgresql";
+import { executeGovernedPostgresRead, postgresConnectionDigest } from "./control";
+import { jobSqlite, jobTransactionalDatabase } from "../../tests/fixtures/job-sqlite";
+import { approvePostgresFixture, pgAccess, publishPostgresFixture, seedPostgresControl } from "../../tests/fixtures/postgresql-control";
+import { inspectPostgresRead } from "../../lib/postgresql-control";
+import type { D1Database } from "../../lib/d1";
+import { createPostgresGateway } from "./gateway";
+import { SESSION_COOKIE, signAuthPayload } from "../../lib/auth";
 
 // Fixed disposable fixture only: never accept a business endpoint or credentials.
 const config: PostgresHostConfig = { host: "127.0.0.1", port: 55432, database: "odap_pg_fixture",
@@ -51,9 +61,114 @@ beforeAll(async () => {
     GRANT SELECT ON metrics.domain_orders TO reader_a;`);
   writeFileSync("postgresql-environment.json", JSON.stringify({ serverVersion: "17.12", serverVersionNum: version,
     driver: "pg", driverVersion, syntheticDataOnly: true, transport: "isolated-loopback-without-TLS",
-    productionVerified: false, gatewayDispatchIntegrated: false }, null, 2) + "\n");
+    productionVerified: false, gatewayDispatchIntegrated: true, transportScope: "Node host, not deployed Worker",
+    tlsFixtureRequired: true, budgetUnit: "read-attempt", monetaryCost: "unpriced" }, null, 2) + "\n");
 });
 afterAll(async () => { await admin.end(); });
+
+async function governedFixture(test: (db: D1Database) => Promise<void>, c = config, definition = d) {
+  const directory = await mkdtemp(join(tmpdir(), "odap-pg-governed-"));
+  try {
+    const file = join(directory, "ledger.db");
+    await jobSqlite(file, "setup");
+    const db = jobTransactionalDatabase(() => file);
+    await seedPostgresControl(db, await postgresConnectionDigest("tenant-a", c), 2, { ...postgresSource, table: definition.table.name });
+    await publishPostgresFixture(db, definition); await approvePostgresFixture(db);
+    await test(db);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}
+
+it("executes with durable authority and a confirmed receipt, then refuses replay", async () => {
+  await governedFixture(async db => {
+    expect(await executeGovernedPostgresRead(pgAccess(db), "request", async () => config))
+      .toMatchObject({ outcome: "succeeded", value: "3", monetaryCost: "unpriced" });
+    const inspected = await inspectPostgresRead(pgAccess(db), "request");
+    expect(inspected).toMatchObject({ state: "succeeded", used_attempts: 1 }); expect(inspected.receiptIds).toHaveLength(2);
+    await expect(executeGovernedPostgresRead(pgAccess(db), "request", async () => config)).rejects.toThrow();
+  });
+});
+it("allows exactly one real-engine submission under concurrent governed execution", async () => {
+  await governedFixture(async db => {
+    const results = await Promise.allSettled([1, 2, 3].map(() => executeGovernedPostgresRead(pgAccess(db), "request", async () => config)));
+    expect(results.filter(r => r.status === "fulfilled" && r.value.outcome === "succeeded")).toHaveLength(1);
+    expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ used_attempts: 1 });
+  });
+});
+it("retains a consumed attempt and pending evidence after a real governed statement timeout", async () => {
+  const c = { ...config, statementTimeoutMs: 100, lockTimeoutMs: 50 };
+  await governedFixture(async db => {
+    const result = await executeGovernedPostgresRead(pgAccess(db), "request", async () => c);
+    expect(result).toMatchObject({ outcome: "observation-required", claim: "confirmed" });
+    expect(result).not.toHaveProperty("value");
+    expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ state: "observation-required", used_attempts: 1 });
+    await expect(executeGovernedPostgresRead(pgAccess(db), "request", async () => c)).rejects.toThrow();
+  }, c, { ...d, table: { ...d.table, name: "slow_orders" } });
+});
+it("rejects resolver role and endpoint substitution before connecting", async () => {
+  await governedFixture(async db => {
+    for (const c of [{ ...config, user: "reader_b" }, { ...config, port: 55433 }, { ...config, statementTimeoutMs: 500 }]) {
+      await expect(executeGovernedPostgresRead(pgAccess(db), "request", async () => c)).rejects.toThrow();
+    }
+    expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ used_attempts: 0 });
+  });
+});
+it.each(["claim", "observation"])("does not manufacture success after a lost %s acknowledgement", async phase => {
+  await governedFixture(async db => {
+    const fault: D1Database = { prepare(sql) {
+      const prepared = db.prepare(sql);
+      return { ...prepared, bind(...params) {
+        const statement = prepared.bind(...params);
+        return { ...statement, async first<T>() {
+          const value = await statement.first<T>();
+          if (sql.startsWith("INSERT INTO postgresql_read_" + (phase === "claim" ? "claims" : "observations"))) {
+            throw new Error("synthetic acknowledgement loss");
+          }
+          return value;
+        } };
+      } };
+    } };
+    const result = await executeGovernedPostgresRead(pgAccess(fault), "request", async () => config);
+    expect(result.outcome).toBe("observation-required"); expect(result).not.toHaveProperty("value");
+    expect(await inspectPostgresRead(pgAccess(db), "request"))
+      .toMatchObject({ state: phase === "claim" ? "observation-required" : "succeeded", used_attempts: 1 });
+    await expect(executeGovernedPostgresRead(pgAccess(db), "request", async () => config)).rejects.toThrow();
+  });
+});
+it("executes the same governed request through authenticated MCP and recovers through REST", async () => {
+  await governedFixture(async db => {
+    const secret = "synthetic-pg-mcp-only";
+    const cookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "reader", email: "test@example.test",
+      name: "Synthetic", role: "admin", expiresAt: Date.now() + 600000 }, secret);
+    const handler = createPostgresGateway({ origin: "https://gateway.test", env: { DB: db, AUTH_COOKIE_SECRET: secret }, resolve: async () => config });
+    const headers = { Origin: "https://gateway.test", "Content-Type": "application/json", Cookie: cookie };
+    const response = await handler(new Request("https://gateway.test/postgresql/tenant-a/mcp", { method: "POST", headers,
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "postgresql_execute", arguments: { requestId: "request" } } }) }));
+    const rpc = await response.json() as { result: { isError: boolean; content: { text: string }[] } };
+    expect(rpc.result.isError).toBe(false); expect(JSON.parse(rpc.result.content[0].text)).toMatchObject({ outcome: "succeeded", value: "3" });
+    const history = await handler(new Request("https://gateway.test/postgresql/tenant-a/inspect", { method: "POST", headers,
+      body: JSON.stringify({ requestId: "request" }) }));
+    expect(await history.json()).toMatchObject({ ok: true, result: { state: "succeeded", used_attempts: 1 } });
+  });
+});
+it("verifies the fixture CA and hostname for a governed TLS query", async () => {
+  const c = { ...config, tls: { ca: readFileSync(".tmp/postgresql-tls/server.crt", "utf8") } };
+  await governedFixture(async db => {
+    expect(await executeGovernedPostgresRead(pgAccess(db), "request", async () => c)).toMatchObject({ outcome: "succeeded", value: "3" });
+  }, c);
+});
+it.each(["untrusted", "hostname"])("rejects a TLS %s mismatch before any claim", async mode => {
+  const ca = readFileSync(".tmp/postgresql-tls/server.crt", "utf8");
+  const c = { ...config, host: mode === "hostname" ? "localhost" : "127.0.0.1", tls: mode === "hostname" ? { ca } : {} };
+  const probe = new Client({ host: c.host, port: c.port, database: c.database, user: c.user, password: c.password,
+    ssl: { rejectUnauthorized: true, ...(mode === "hostname" ? { ca } : {}) }, connectionTimeoutMillis: 5000 });
+  try {
+    await expect(probe.connect()).rejects.toMatchObject({ code: mode === "hostname" ? "ERR_TLS_CERT_ALTNAME_INVALID" : "DEPTH_ZERO_SELF_SIGNED_CERT" });
+  } finally { await probe.end(); }
+  let claims = 0;
+  expect(await executePostgresMetric(c, await postgresRead(), async () => { claims++; return true; }))
+    .toMatchObject({ outcome: "not-submitted", claim: "not-attempted" });
+  expect(claims).toBe(0);
+});
 
 it("executes a real isolated tenant count after a bound claim", async () => {
   let claims = 0;
