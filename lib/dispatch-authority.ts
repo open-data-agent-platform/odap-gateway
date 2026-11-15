@@ -4,6 +4,7 @@ import { canonicalControlJson, isApprovalContract, isSemanticRelease, sha256Text
 import { compileReleasedMetric } from "./metric-compiler";
 import { bigQueryByteCeiling } from "./bigquery-byte-ceiling";
 import type { ControlAccess } from "./control-storage";
+import { submitPreparedRead, type PreparedRead } from "./read-submission";
 
 export type MetricRead = {
   target: string;
@@ -21,7 +22,7 @@ export type ReadAdapter<T> = {
   loadDefinition(key: { tenantId: string; releaseId: string }): Promise<string>;
   // Prepare local request data and credentials only. No warehouse submission
   // until the dispatcher invokes the returned function after its atomic claim.
-  prepareRead(job: Submission): Promise<() => Promise<T>>;
+  prepareRead(job: Submission): Promise<PreparedRead<T>>;
 };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -80,16 +81,15 @@ export async function dispatchPreparedMetricRead<T>(access: ControlAccess, inten
   const definition = await loadDefinition({ tenantId, releaseId: release.id });
   const compiled = await compileReleasedMetric(release, definition, canonicalAction, projectId);
   const queryConfig = { ...compiled, maximumBytesBilled: String(ceiling) };
-  const submit = await prepare({ identity: job.identity, release, queryConfig });
-  if (typeof submit !== "function") throw new Error("Adapter failed to prepare submission");
   // Mutable facts and database time are reread under the claim's write lock.
   // Never retry submission after a conflict, timeout, or ambiguous storage result.
-  const claim = await db.prepare(`INSERT INTO dispatch_claims(tenant_id,intent_id,claimed_by,maximum_bytes_billed)
+  return submitPreparedRead(() => prepare({ identity: job.identity, release, queryConfig }), async () => {
+    const claim = await db.prepare(`INSERT INTO dispatch_claims(tenant_id,intent_id,claimed_by,maximum_bytes_billed)
     SELECT tenant_id,intent_id,?,? FROM dispatch_priced_reads WHERE ${scope} AND contract_payload=? AND release_payload=?
     AND reserved_units=? AND micro_usd_per_tib=? AND max_job_bytes=?
     AND NOT EXISTS(SELECT 1 FROM dispatch_claims WHERE tenant_id=? AND intent_id=?)`)
     .bind(operator, ceiling, ...args, row.contract_payload, row.release_payload,
       row.reserved_units, row.micro_usd_per_tib, row.max_job_bytes, tenantId, intentId).run();
-  if (!claim.success || claim.meta?.changes !== 1) throw new Error("Dispatch denied or already claimed");
-  return submit();
+    return claim.success === true && claim.meta?.changes === 1;
+  }, new Error("Dispatch denied or already claimed"));
 }

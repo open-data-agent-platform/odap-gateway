@@ -4,6 +4,7 @@ import { canonicalControlJson, isApprovalContract, isEvidenceReceipt, isSemantic
 import type { ControlAccess } from "./control-storage";
 import { bindMetricRead, type MetricRead } from "./dispatch-authority";
 import { compileReleasedMetric } from "./metric-compiler";
+import { submitPreparedRead } from "./read-submission";
 
 type Terms = {
   contract_payload: string; release_payload: string; receipt_payload: string; definition_json: string;
@@ -43,7 +44,15 @@ export async function handoffDelegatedRead(access: ControlAccess, intentId: stri
 
   // Claim after compilation. Only confirmed insertion of this exact snapshot
   // permits even one sender call; an ambiguous database response never does.
-  const claim = await db.prepare(`INSERT INTO dispatch_claims
+  return submitPreparedRead(async () => async () => {
+    try {
+      await sendOnce(body);
+      return { state: "handed-off" as const, jobReference, receiptId: receipt.id };
+    } catch {
+      return { state: "observation-required" as const, jobReference, receiptId: receipt.id };
+    }
+  }, async () => {
+    const claim = await db.prepare(`INSERT INTO dispatch_claims
     (tenant_id,intent_id,claimed_by,maximum_bytes_billed,delegation_audience,compiled_body_digest)
     SELECT tenant_id,intent_id,operator_id,byte_cap,audience,? FROM claimable_delegated_reads WHERE ${scope}
     AND job_id=? AND action_tag=? AND receipt_id=? AND project_id=? AND location=? AND byte_cap=?
@@ -52,11 +61,6 @@ export async function handoffDelegatedRead(access: ControlAccess, intentId: stri
     RETURNING compiled_body_digest AS digest`).bind(digest,...args,row.job_id,row.action_tag,row.receipt_id,row.project_id,
       row.location,cap,row.contract_payload,row.release_payload,row.receipt_payload,row.definition_json,row.reserved_units,
       row.micro_usd_per_tib,row.max_job_bytes).first<{ digest: string }>();
-  if (claim?.digest !== digest) throw new Error("Delegated handoff not confirmed");
-  try {
-    await sendOnce(body);
-    return { state: "handed-off" as const, jobReference, receiptId: receipt.id };
-  } catch {
-    return { state: "observation-required" as const, jobReference, receiptId: receipt.id };
-  }
+    return claim?.digest === digest;
+  }, new Error("Delegated handoff not confirmed"));
 }

@@ -73,3 +73,12 @@ Inventory changes require implementation and regression evidence. Each future
 engine must identify tested server/driver versions and deployment/catalog scope
 before claiming live compatibility. An unimplemented engine cannot become
 supported by merely changing a request or supplying a compatible driver.
+
+## Internal submission interface
+
+The existing owner and delegated BigQuery paths share a
+[prepared-read submission boundary](READ_SUBMISSION_BOUNDARY.md). It orders
+preparation, durable claim confirmation and a single send attempt. Authorization
+and budget decisions remain in the existing host storage operations; the offline
+inspector does not grant access to this interface. Shared SQLite conformance
+tests cover both paths without claiming a second database implementation.
