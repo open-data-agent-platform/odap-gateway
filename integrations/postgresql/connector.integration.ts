@@ -3,7 +3,8 @@ import { Client } from "pg";
 import { readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import { executePostgresMetric, type PostgresClaim, type PostgresHostConfig } from "./index";
 import { postgresDefinition as d, postgresRead, postgresSource, postgresBarrier } from "../../tests/fixtures/postgresql";
@@ -21,6 +22,7 @@ import { revokePostgresDelegation } from "../../lib/postgresql-agent";
 import { postgresCrashCases } from "../../tests/fixtures/postgresql-crash-cases";
 import { sendPostgresCancellation, type PostgresBackendKey } from "./cancellation";
 import { startPostgresHttpHost } from "./server";
+import { startConfiguredPostgresHost } from "./host";
 import { postgresHttpRequest } from "../../tests/fixtures/postgresql-http";
 import { connectPostgresMcpFixture } from "../../tests/fixtures/postgresql-mcp";
 
@@ -93,7 +95,7 @@ beforeAll(async () => {
     driver: "pg", driverVersion, syntheticDataOnly: true, transport: "isolated-loopback-without-TLS",
     productionVerified: false, gatewayDispatchIntegrated: true, transportScope: "Node host, not deployed Worker",
     tlsFixtureRequired: true, signedAgentDelegation: true, terminalCodes: ["57014", "42501"],
-    hostCrashFixture: "SIGKILL-execute/fresh-process-recovery", durableConcurrency: true, activeCancellation: true,
+    hostCrashFixture: "SIGKILL-execute/fresh-process-recovery", durableConcurrency: true, activeCancellation: true, configuredHost: true,
     controlStore: "node:sqlite", controlSchemaDigest: POSTGRES_CONTROL_SCHEMA_DIGEST, nodeVersion: process.versions.node,
     nodeHttpHost: "loopback-only-trusted-TLS-proxy-required",
     mcpSdkVersion: "2.4.0", mcpProtocols: ["2025-11-25", "2026-07-28"], mcpTransport: "stateless-official-client",
@@ -119,6 +121,66 @@ async function governedFixture(test: (db: D1Database, file: string) => Promise<v
 }
 
 postgresCrashCases(governedFixture, admin, config);
+
+async function configuredFixture(file: string, changes: Record<string, unknown> = {}) {
+  const listener = createServer();
+  await new Promise<void>(resolve => listener.listen(0, "127.0.0.1", resolve));
+  const address = listener.address(); if (!address || typeof address === "string") throw new Error("Fixture port unavailable");
+  await new Promise<void>((resolve, reject) => listener.close(error => error ? reject(error) : resolve()));
+  const path = join(dirname(file), "host.json");
+  writeFileSync(path, JSON.stringify({ schemaVersion: 1, origin: pgAgentOrigin, port: address.port, controlStorePath: file,
+    sessionSecretEnv: "ODAP_SESSION_SECRET", maxRequests: 8, maxConcurrentExecutions: 2, requestDeadlineMs: 10000,
+    shutdownGraceMs: 1000, connections: [{ tenantId: "tenant-a", connectionRef: "fixture", host: config.host, port: config.port,
+      database: config.database, role: config.user, passwordEnv: "ODAP_DATABASE_PASSWORD",
+      tls: { caFile: resolve(".tmp/postgresql-tls/server.crt") }, statementTimeoutMs: config.statementTimeoutMs,
+      lockTimeoutMs: config.lockTimeoutMs, deadlineMs: config.deadlineMs, ...changes }] }));
+  return startConfiguredPostgresHost(path, { ODAP_SESSION_SECRET: "synthetic-configured-session-secret-over-32-bytes",
+    ODAP_DATABASE_PASSWORD: "synthetic-fixture-only" });
+}
+
+it.each([false, true])("executes through the configured TLS host and official MCP client (Agent=%s)", async agent => {
+  const c = { ...config, tls: { ca: readFileSync(".tmp/postgresql-tls/server.crt", "utf8") } };
+  await governedFixture(async (db, file) => {
+    const a = agent ? await approvePostgresAgentFixture(db) : undefined;
+    const host = await configuredFixture(file);
+    let connection: Awaited<ReturnType<typeof connectPostgresMcpFixture>> | undefined;
+    try {
+      expect(host.bindings).toEqual([{ tenantId: "tenant-a", connectionRef: "fixture",
+        connectionDigest: await postgresConnectionDigest("tenant-a", c) }]);
+      const headers: Record<string, string> = { Origin: pgAgentOrigin };
+      if (!a) headers.Cookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "reader",
+        email: "synthetic@example.test", name: "Synthetic", expiresAt: Date.now() + 600000 },
+      "synthetic-configured-session-secret-over-32-bytes");
+      connection = await connectPostgresMcpFixture(host.address, pgAgentOrigin,
+        `/postgresql/tenant-a/${agent ? "agent-mcp-stream" : "mcp-stream"}`, headers, true);
+      const arguments_ = a ? { delegationId: a.delegationId, signature: a.signature } : { requestId: "request" };
+      const name = agent ? "postgresql_agent_execute" : "postgresql_execute";
+      const result = await connection.client.callTool({ name, arguments: arguments_ });
+      expect(result.isError).toBe(false);
+      expect(JSON.parse((result.content as { text: string }[])[0].text)).toMatchObject({ outcome: "succeeded", value: "3" });
+      expect(await inspectPostgresRead(pgAccess(db), a ? "agent-request" : "request")).toMatchObject({ state: "succeeded", used_attempts: 1 });
+      expect((await connection.client.callTool({ name, arguments: arguments_ })).isError).toBe(true);
+    } finally { await connection?.close(); expect(await host.close()).toEqual({ drained: true }); }
+  }, c);
+});
+
+it.each([{ tenantId: "tenant-b" }, { connectionRef: "other" }, { role: "reader_b" }])(
+  "refuses a configured authority mismatch before a real database claim (%j)", async changes => {
+  const c = { ...config, tls: { ca: readFileSync(".tmp/postgresql-tls/server.crt", "utf8") } };
+  await governedFixture(async (db, file) => {
+    const host = await configuredFixture(file, changes);
+    try {
+      const cookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "reader",
+        email: "synthetic@example.test", name: "Synthetic", expiresAt: Date.now() + 600000 },
+      "synthetic-configured-session-secret-over-32-bytes");
+      const reply = await postgresHttpRequest(host.address, "/postgresql/tenant-a/execute", { requestId: "request" },
+        { Host: "gateway.test", Origin: pgAgentOrigin, Cookie: cookie }).result;
+      expect(reply.status).toBe(409);
+      expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ used_attempts: 0, intent_id: null });
+      expect((await admin.query("SELECT pid FROM pg_stat_activity WHERE application_name='odap-postgresql-preview'")).rows).toEqual([]);
+    } finally { expect(await host.close()).toEqual({ drained: true }); }
+  }, c);
+});
 
 it.each([{ agent: false, modern: false }, { agent: true, modern: false }, { agent: false, modern: true }, { agent: true, modern: true }])(
   "executes a real governed read with the official MCP client (Agent=$agent modern=$modern)", async ({ agent, modern }) => {

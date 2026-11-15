@@ -18,6 +18,9 @@ proxy; it does not provision public routes or OAuth. The official MCP SDK transp
 adds stateless initialization/discovery and tools for session clients and scoped
 Agents, with 2025-11-25 and 2026-07-28 protocol tests. Static Agent tool discovery
 is public metadata, never permission to inspect or execute a database request.
+The configured CLI (`postgresql:check` and `postgresql:serve`) validates explicit
+tenant/connection references, resolves only named secrets and drains the same host.
+It neither creates/migrates the control store nor enrolls identities or sources.
 Cancellation intent is not terminal proof; an unavailable executor leaves it pending.
 Host-process crash recovery is tested without automatic replay. It is not deployed in the production
 Worker and does not offer monetary cost settlement or open-ended Agent grants. The inspector continues to reject it

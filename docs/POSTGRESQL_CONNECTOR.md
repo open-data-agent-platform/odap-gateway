@@ -250,6 +250,91 @@ match an older binary. If compatibility is unknown, leave execution disabled.
 More restrictive code may refuse newer semantic types; use a reviewed compatible
 release rather than silently coercing approved inputs.
 
+## Configured service entry point
+
+The Node 24.22.1 CLI assembles the existing SQLite control binding, fixed connection
+resolver and loopback HTTP/MCP listener. Build first, then validate an operator-owned
+configuration without contacting PostgreSQL, reading environment credentials or
+opening the ledger:
+
+```sh
+npm run postgresql:build
+npm run postgresql:check -- --config /absolute/path/to/host.json
+```
+
+`host.json` is strict UTF-8 JSON, at most 64 KiB. Every field below is required;
+unknown fields, duplicate keys/scopes, comments and trailing commas are rejected.
+Paths are absolute paths on the Node host. Windows paths must use JSON escaping
+or forward slashes. This example names references only, not working credentials:
+
+```json
+{
+  "schemaVersion": 1,
+  "origin": "https://gateway.example.test",
+  "port": 8789,
+  "controlStorePath": "/srv/odap/control.db",
+  "sessionSecretEnv": "ODAP_SESSION_SECRET",
+  "maxRequests": 64,
+  "maxConcurrentExecutions": 4,
+  "requestDeadlineMs": 30000,
+  "shutdownGraceMs": 5000,
+  "connections": [{
+    "tenantId": "tenant-a",
+    "connectionRef": "approved-postgresql",
+    "host": "database.example.test",
+    "port": 5432,
+    "database": "analytics",
+    "role": "odap_reader",
+    "passwordEnv": "ODAP_DATABASE_PASSWORD",
+    "tls": {},
+    "statementTimeoutMs": 5000,
+    "lockTimeoutMs": 1000,
+    "deadlineMs": 10000
+  }]
+}
+```
+
+`tls: {}` requires normal certificate and hostname verification with system trust.
+For an explicitly approved private CA use `tls: { "caFile": "/absolute/ca.pem" }`;
+the file must contain only CA certificates, not keys. Insecure fixture TLS, DSNs,
+arbitrary driver options and caller-selected connections are not CLI options.
+`passwordEnv` and `sessionSecretEnv` must be explicit, distinct `ODAP_...` names.
+The session signing secret must contain at least 32 UTF-8 bytes. Resolve them
+through the operator's approved secret delivery mechanism, never commit values
+or pass them in command arguments. The process snapshots only those references;
+ambient `PG*` variables are not fallback credentials. Restart to rotate secrets.
+
+After the separate authorization and provisioning prerequisites below are met:
+
+```sh
+npm run postgresql:serve -- --config /absolute/path/to/host.json
+```
+
+The listener binds only `127.0.0.1`. A trusted, separately configured TLS proxy
+must preserve the exact configured Host and authorized Origin; forwarded headers
+do not grant identity. There is no public-listener switch, demo mode, initial-admin
+inference or login endpoint. Existing valid session authority and registered Agent
+proofs are still mandatory. Configuration validation alone grants no authority.
+
+The existing local control store must already have the reviewed schema and trusted
+tenant/source/role/connection-digest, semantic release, permission and quota records.
+`serve` never creates, seeds or migrates it. Connection digests must match the
+approved registry; changing host, role, TLS or limits does not silently reauthorize
+existing requests. `configuredPostgresConnections()` exposes the digest-only binding
+list to trusted embedding code, never credentials or database results to a public
+route. This CLI does not authorize a production migration or source enrollment.
+
+On SIGINT/SIGTERM the host stops new admission and waits for the configured grace.
+An elapsed grace can abort transport, but is not a terminal database proof. The
+control store remains open until handlers finish; repeated drain checks do not
+refund or replay uncertain requests. A process supervisor may force termination
+after its own deadline, in which case normal stopped output is not guaranteed and
+the persisted uncertain state remains authoritative. Cooperative signal handling is
+tested in Linux CI; Windows forced process termination is not represented as a
+successful graceful drain. Logs contain bounded lifecycle events, not config or
+secret values. Supported SQL, types, versions and the remaining acceptance limits
+below are unchanged.
+
 ## Host responsibilities
 
 For governed use, call `executeGovernedPostgresRead(access, requestId, resolver,
@@ -583,6 +668,12 @@ fault asserted by a normally completing test runner, not a passing crashed test.
 Backend disappearance is fixture cleanup only, never a cancellation or success
 proof. This validates host-process death, not storage/power loss, replica failover,
 server restart or a generic distributed exactly-once guarantee.
+
+The configured entry point is additionally exercised through real PostgreSQL/TLS
+and the official MCP client for session/Agent calls, with configured tenant,
+connection-reference and role substitution rejected before a claim. Compiled CLI
+tests cover validation without secrets/storage, refusal to create a missing ledger
+and a normally exiting Linux SIGTERM drain. These do not configure a production host.
 
 SQLite also verifies upgrades retain prior contracts and receipts. These are
 author engineering tests, not independent

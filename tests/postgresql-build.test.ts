@@ -12,6 +12,8 @@ it("builds the Node host with declarations and loads it outside the TypeScript t
     const options = { windowsHide: true, timeout: 60000, maxBuffer: 1024 * 1024 };
     await run(process.execPath, ["node_modules/typescript/bin/tsc", "-p", "scripts/tsconfig.postgresql.json", "--outDir", output], options);
     expect(await readFile(join(output, "integrations/postgresql/gateway.d.ts"), "utf8")).toContain("maxConcurrentExecutions");
+    expect(await readFile(join(output, "integrations/postgresql/host.d.ts"), "utf8")).toContain("startConfiguredPostgresHost");
+    expect(await readFile(join(output, "integrations/postgresql/host-config.d.ts"), "utf8")).toContain("PostgresHostFile");
     const smoke = `
       const assert = require('node:assert/strict'), path = require('node:path');
       const entry = name => require(path.join(process.argv[1], 'integrations/postgresql', name + '.js'));
@@ -21,6 +23,8 @@ it("builds the Node host with declarations and loads it outside the TypeScript t
       assert.equal(typeof entry('sqlite-control').openPostgresSqliteControl, 'function');
       assert.equal(typeof entry('server').startPostgresHttpHost, 'function');
       assert.equal(typeof entry('mcp').createPostgresMcpGateway, 'function');
+      assert.equal(typeof entry('host').startConfiguredPostgresHost, 'function');
+      assert.equal(typeof entry('host-config').parsePostgresHostConfig, 'function');
       const handler = entry('gateway').createPostgresGateway({origin:'https://gateway.test',env:{},
         resolve:async()=>{throw new Error('Provider must not be used by smoke test');}});
       (async()=>{
