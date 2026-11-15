@@ -142,11 +142,12 @@ export async function inspectPostgresRead(access: ControlAccess, requestId: stri
   const row = required(await access.db.prepare(`SELECT q.id,q.requester_id,q.release_id,q.source_id,q.action_json,q.action_digest,
     a.contract_id,CASE WHEN d.id IS NULL THEN a.expires_at ELSE min(a.expires_at,d.expires_at) END AS expires_at,
     c.intent_id,c.claimed_at,o.outcome,s.stopped_at,
-    t.sql_state AS terminal_sql_state,
+    t.sql_state AS terminal_sql_state,u.limit_in_flight,u.unresolved_claims,
     d.id AS delegation_id,d.agent_id,d.key_id,d.audience,d.expires_at AS delegation_expires_at,d.revoked_at AS delegation_revoked_at,
     b.limit_attempts,(SELECT count(*) FROM postgresql_read_claims used WHERE used.tenant_id=q.tenant_id AND used.budget_id=v.budget_id) AS used_attempts
     FROM postgresql_read_requests q JOIN postgresql_source_versions v ON v.tenant_id=q.tenant_id AND v.id=q.source_id
     JOIN postgresql_read_budgets b ON b.tenant_id=v.tenant_id AND b.id=v.budget_id
+    JOIN postgresql_resource_usage u ON u.tenant_id=v.tenant_id AND u.budget_id=v.budget_id
     JOIN control_memberships m ON m.tenant_id=q.tenant_id AND m.principal_id=? AND m.active=1
       AND (m.principal_id=q.requester_id OR (m.principal_id=v.owner_id AND m.role='owner'))
     LEFT JOIN postgresql_read_approvals a ON a.tenant_id=q.tenant_id AND a.request_id=q.id
@@ -160,9 +161,9 @@ export async function inspectPostgresRead(access: ControlAccess, requestId: stri
       contract_id: string | null; expires_at: string | null; intent_id: string | null; claimed_at: string | null;
       delegation_id: string | null; agent_id: string | null; key_id: string | null; audience: string | null;
       delegation_expires_at: string | null; delegation_revoked_at: string | null;
-      terminal_sql_state: string | null;
+      terminal_sql_state: string | null; limit_in_flight: number | null; unresolved_claims: number;
       outcome: string | null; stopped_at: string | null; limit_attempts: number; used_attempts: number }>());
-  return { ...row, budgetUnit: "read-attempt" as const, monetaryCost: "unpriced" as const,
+  return { ...row, budgetUnit: "read-attempt" as const, resourceUnit: "unresolved-read-claim" as const, monetaryCost: "unpriced" as const,
     receiptIds: row.intent_id ? ["pg-pending-" + row.intent_id, ...(row.outcome ? ["pg-observed-" + row.intent_id] : []),
       ...(row.terminal_sql_state ? ["pg-failed-" + row.intent_id] : [])] : [],
     state: row.terminal_sql_state ? "failed" : row.outcome ?? (row.intent_id ? "observation-required" : row.stopped_at ? "stopped-before-claim" : "not-submitted") };

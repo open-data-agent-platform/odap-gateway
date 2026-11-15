@@ -74,6 +74,8 @@ export function postgresCrashCases(fixture: Fixture, admin: Client, config: Post
             expect(result).toMatchObject({ refused: true, resolverCalls: 0, inspected: { state, used_attempts: 1, monetaryCost: "unpriced" } });
             if (agent) expect(result.agentInspection).toMatchObject({ state });
             expect(result.inspected).not.toHaveProperty("value");
+            expect(result.inspected).toMatchObject({ unresolved_claims: state === "observation-required" ? 1 : 0,
+              resourceUnit: "unresolved-read-claim" });
             expect(await recovering.closed).toEqual({ code: 0, signal: null });
           } finally { await recovering.stop(); }
           expect(await db.prepare("SELECT count(*) AS n FROM postgresql_read_claims").bind().first()).toEqual({ n: 1 });

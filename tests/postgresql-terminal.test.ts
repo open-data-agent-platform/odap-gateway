@@ -24,6 +24,7 @@ describe("PostgreSQL acknowledged terminal failures on SQLite", { timeout: 30000
     await claimPostgresRead(pgAccess(database), row, "attempt"); await observePostgresRead(pgAccess(database), "request", "attempt", "succeeded");
     const sql = "SELECT json_group_array(payload) AS objects FROM (SELECT payload FROM approval_contracts UNION ALL SELECT payload FROM evidence_receipts)";
     const before = await jobSqlite(file, "readonly-first", sql); await jobSqlite(file, "apply-postgresql-terminals");
+    await jobSqlite(file, "apply-postgresql-concurrency");
     expect(await jobSqlite(file, "readonly-first", sql)).toEqual(before);
     expect(await inspectPostgresRead(pgAccess(database), "request")).toMatchObject({ state: "succeeded", used_attempts: 1, terminal_sql_state: null });
     expect(await jobSqlite(file, "readonly-first", "PRAGMA foreign_key_check")).toBeNull();

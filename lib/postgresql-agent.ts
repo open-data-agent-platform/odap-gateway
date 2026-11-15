@@ -104,8 +104,10 @@ export async function inspectPostgresAgent(access: ControlAccess, proof: Postgre
       bound.row.requester_id !== access.principalId) denied();
   // Same-statement current key/consent gate, not a reusable authorization boolean.
   const row = await access.db.prepare(`SELECT q.id AS requestId,q.delegation_id AS delegationId,q.agent_id AS agentId,
-    q.contract_id AS contractId,c.intent_id AS intentId,o.outcome,s.stopped_at AS stoppedAt,t.sql_state AS terminalSqlState
+    q.contract_id AS contractId,c.intent_id AS intentId,o.outcome,s.stopped_at AS stoppedAt,t.sql_state AS terminalSqlState,
+    u.limit_in_flight AS limitInFlight,u.unresolved_claims AS unresolvedClaims
     FROM postgresql_agent_scopes q
+    JOIN postgresql_resource_usage u ON u.tenant_id=q.tenant_id AND u.budget_id=q.budget_id
     LEFT JOIN postgresql_read_claims c ON c.tenant_id=q.tenant_id AND c.request_id=q.id
     LEFT JOIN postgresql_read_observations o ON o.tenant_id=q.tenant_id AND o.request_id=q.id
     LEFT JOIN postgresql_read_stops s ON s.tenant_id=q.tenant_id AND s.request_id=q.id
@@ -113,9 +115,10 @@ export async function inspectPostgresAgent(access: ControlAccess, proof: Postgre
     WHERE q.tenant_id=? AND q.delegation_id=? AND q.audience=? AND q.public_hex=? AND q.contract_id=?`)
     .bind(access.tenantId, bound.row.delegation_id, bound.row.audience, bound.row.public_hex, bound.row.contract_id)
     .first<{ requestId: string; delegationId: string; agentId: string; contractId: string;
-      intentId: string | null; outcome: string | null; stoppedAt: string | null; terminalSqlState: string | null }>();
+      intentId: string | null; outcome: string | null; stoppedAt: string | null; terminalSqlState: string | null;
+      limitInFlight: number | null; unresolvedClaims: number }>();
   if (!row) denied();
   return { ...row, state: row.terminalSqlState ? "failed" : row.outcome ?? (row.intentId ? "observation-required" : row.stoppedAt ? "stopped-before-claim" : "not-submitted"),
-    monetaryCost: "unpriced", receiptIds: row.intentId ? ["pg-pending-" + row.intentId, ...(row.outcome ? ["pg-observed-" + row.intentId] : []),
+    resourceUnit: "unresolved-read-claim", monetaryCost: "unpriced", receiptIds: row.intentId ? ["pg-pending-" + row.intentId, ...(row.outcome ? ["pg-observed-" + row.intentId] : []),
       ...(row.terminalSqlState ? ["pg-failed-" + row.intentId] : [])] : [] };
 }

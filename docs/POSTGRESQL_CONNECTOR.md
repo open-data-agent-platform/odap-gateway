@@ -5,8 +5,8 @@
 authenticated REST and post-initialization MCP command hooks. This is a **Node host
 integration**, not a deployed Cloudflare Worker query endpoint or full PostgreSQL
 SQL/type coverage. The offline inspector still refuses production Gateway dispatch.
-Migrations `0035_postgresql_control.sql`, `0036_postgresql_agent_delegations.sql`
-and `0037_postgresql_terminal_failures.sql`
+Migrations `0035_postgresql_control.sql`, `0036_postgresql_agent_delegations.sql`,
+`0037_postgresql_terminal_failures.sql` and `0038_postgresql_concurrency.sql`
 are opt-in and have not been applied to the production D1 database. Existing
 production migration restrictions still apply.
 
@@ -49,6 +49,9 @@ separate registered-key path below, not a human session impersonation.
 The operator provisions an immutable `postgresql_read_budgets` row and a
 `postgresql_source_versions` row for the explicit tenant, designated owner,
 connection reference, database/schema/table/tenant column, role, budget and expiry.
+An immutable `postgresql_concurrency_limits` row must also bind that tenant and
+budget to an integer `limit_in_flight` from 1 to 1000. No limit is inferred from
+the attempt quota. Missing concurrency configuration refuses new claims.
 The `postgresql_source_heads` pointer activates that version. No registry rows are
 automatically seeded. Source or role changes require a new version and fresh review.
 Use `postgresConnectionDigest(tenantId, config)` for the binding digest: it includes
@@ -68,7 +71,9 @@ Do not place passwords or connection strings in the registry or public evidence.
 3. `execute` resolves the bound host, preflights PostgreSQL, then atomically checks
    current tenant membership, source, owner, release, expiry, stop markers, contract
    state and quota. One unique claim consumes the contract and one read attempt,
-   and writes a pending EvidenceReceipt in the same transaction.
+   reserves one unresolved-read slot, and writes a pending EvidenceReceipt in the
+   same transaction. All sources and hosts sharing the same tenant/budget compete
+   for this durable capacity; session and Agent claims use the same guard.
 4. Successful query and cleanup acknowledgements append a success observation and
    receipt. No values, credentials or raw SQL are persisted in receipts. A lost
    storage acknowledgement suppresses the value response; `inspect` reads durable
@@ -84,6 +89,39 @@ and competing approved requests may be refused. All responses report monetary co
 as `unpriced`. The session client is labeled `postgresql-session`, not represented
 as an independently verified Agent. Formal cost settlement and open-ended policy
 grants remain unsupported and must not be inferred from this workflow.
+
+### Durable concurrency
+
+`postgresql_resource_usage` counts claims lacking a durable success observation
+or acknowledged terminal-failure record. The claim trigger checks this count
+against the immutable limit in the same write transaction as contract consumption
+and the pending receipt. There is no process-local semaphore or separate release
+counter to drift. A rolled-back claim/receipt reserves nothing. A terminal write
+whose receipt rolls back does not release capacity.
+
+Only persisted terminal evidence releases the unresolved-read slot. Timeout,
+disconnect, host death, stop, consent/key revocation and approval expiry alone do
+not release it. Lost terminal-write responses can still leave durable terminal
+evidence; read-only inspection reports that state without retrying the query.
+The consumed attempt and contract remain consumed even after capacity is freed.
+No age-based lease expiry, automatic refund or administrative force-release API
+is provided. Unresolvable claims can exhaust a scope until supported terminal
+evidence is available; never clear them based only on backend disappearance.
+
+Human `inspect` returns `limit_in_flight` and `unresolved_claims`; signed Agent
+inspection returns `limitInFlight` and `unresolvedClaims`. Both label the unit
+`unresolved-read-claim`. These are current budget-wide snapshots, not permission
+or a reservation for a later execution. Limits cannot be updated, deleted or
+replaced; changing a limit requires a separately reviewed budget/source version.
+
+The bound applies to governed metric claims, not provider preparation connections,
+all database activity, CPU/memory, billed costs or requests using independent
+control stores. Hosts must still limit HTTP concurrency and preflight connections.
+With read replicas, an inspection may lag; the final atomic primary-store claim
+remains authoritative. A compatible Node control binding must preserve these
+atomic-write semantics. Migration 0038 preserves existing claims and receipts,
+counts prior unresolved claims, and creates no concurrency configuration rows.
+Provision the explicit limits separately before enabling new execution.
 
 ### Bounded Agent execution
 
@@ -238,6 +276,8 @@ committed or uploaded. A local fixture needs the same TLS setup under
 SQLite and native D1 tests cover the persisted review/approval/claim/receipt path,
 tenant/owner isolation, concurrent claims, quota exhaustion, withdrawal of authority,
 append-only storage and receipt-write rollback. Real PostgreSQL tests exercise the
+shared durable concurrency guard, retained capacity for unknown execution and
+released capacity after confirmed completion, as well as the
 governed host path, session and signed Agent REST/MCP, concurrency, requester
 consent, owner/key/audience binding, revocation races, resolver substitution and
 lost claim, observation or terminal acknowledgements. Eight isolated real-engine

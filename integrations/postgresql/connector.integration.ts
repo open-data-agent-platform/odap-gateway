@@ -72,23 +72,48 @@ beforeAll(async () => {
     driver: "pg", driverVersion, syntheticDataOnly: true, transport: "isolated-loopback-without-TLS",
     productionVerified: false, gatewayDispatchIntegrated: true, transportScope: "Node host, not deployed Worker",
     tlsFixtureRequired: true, signedAgentDelegation: true, terminalCodes: ["57014", "42501"],
-    hostCrashFixture: "SIGKILL-execute/fresh-process-recovery", budgetUnit: "read-attempt", monetaryCost: "unpriced" }, null, 2) + "\n");
+    hostCrashFixture: "SIGKILL-execute/fresh-process-recovery", durableConcurrency: true,
+    resourceUnit: "unresolved-read-claim", budgetUnit: "read-attempt", monetaryCost: "unpriced" }, null, 2) + "\n");
 });
 afterAll(async () => { await admin.end(); });
 
-async function governedFixture(test: (db: D1Database, file: string) => Promise<void>, c = config, definition = d) {
+async function governedFixture(test: (db: D1Database, file: string) => Promise<void>, c = config, definition = d, concurrency = 2) {
   const directory = await mkdtemp(join(tmpdir(), "odap-pg-governed-"));
   try {
     const file = join(directory, "ledger.db");
     await jobSqlite(file, "setup");
     const db = jobTransactionalDatabase(() => file);
-    await seedPostgresControl(db, await postgresConnectionDigest("tenant-a", c), 2, { ...postgresSource, table: definition.table.name });
+    await seedPostgresControl(db, await postgresConnectionDigest("tenant-a", c), 2, { ...postgresSource, table: definition.table.name }, concurrency);
     await publishPostgresFixture(db, definition); await approvePostgresFixture(db);
     await test(db, file);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
 postgresCrashCases(governedFixture, admin, config);
+
+it.each([false, true])("enforces durable capacity across session and Agent hosts during a real query (Agent wins=%s)", async agentWins => {
+  const c = { ...config, statementTimeoutMs: 2000, deadlineMs: 8000 };
+  await governedFixture(async (db, file) => {
+    const a = await approvePostgresAgentFixture(db);
+    // A distinct control binding opens fresh SQLite connections, not a process-local semaphore.
+    const otherHost = jobTransactionalDatabase(() => file);
+    const agentRead = () => postgresAgentOperation(otherHost, pgAgentOrigin, "tenant-a", a.delegationId, a.signature, "execute", async () => c);
+    const sessionRead = () => executeGovernedPostgresRead(pgAccess(db), "request", async () => c);
+    const first = agentWins ? agentRead() : sessionRead();
+    try {
+      await expect.poll(async () => (await admin.query(`SELECT pid FROM pg_stat_activity
+        WHERE datname='odap_pg_fixture' AND usename='reader_a' AND application_name='odap-postgresql-preview'
+          AND state='active' AND wait_event='PgSleep' AND query LIKE '%AS metric_value FROM ONLY%crash_orders%'`)).rows.length,
+      { timeout: 5000, interval: 10 }).toBe(1);
+      expect(await (agentWins ? sessionRead() : agentRead())).toMatchObject({ outcome: "observation-required", claim: "unknown" });
+      expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ unresolved_claims: 1, used_attempts: 1, limit_in_flight: 1 });
+      expect(await first).toMatchObject({ outcome: "failed", sqlState: "57014" });
+      expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ unresolved_claims: 0, used_attempts: 1 });
+      expect(await (agentWins ? sessionRead() : agentRead())).toMatchObject({ outcome: "failed", sqlState: "57014" });
+      expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ unresolved_claims: 0, used_attempts: 2 });
+    } finally { await first; }
+  }, c, { ...d, table: { ...d.table, name: "crash_orders" } }, 1);
+}, 30000);
 
 it.each([false, true])("executes a signed delegated PostgreSQL read and recovers without resubmitting (MCP=%s)", async mcp => {
   await governedFixture(async db => {
@@ -105,7 +130,7 @@ it.each([false, true])("executes a signed delegated PostgreSQL read and recovers
     expect((await call("execute", a.signature)).status).toBe(403);
     const recovery = await (await call("inspect", a.inspectSignature)).json();
     expect(mcp ? JSON.parse(recovery.result.content[0].text) : recovery.result).toMatchObject({ state: "succeeded", agentId: "agent-one" });
-    expect(await inspectPostgresRead(pgAccess(db), "agent-request")).toMatchObject({ used_attempts: 1 });
+    expect(await inspectPostgresRead(pgAccess(db), "agent-request")).toMatchObject({ used_attempts: 1, unresolved_claims: 0 });
   });
 });
 it("does not submit when delegated consent is revoked during actual provider preparation", async () => {
@@ -181,7 +206,7 @@ it("recovers a terminal receipt after its write acknowledgement is lost", async 
     expect(await executeGovernedPostgresRead(pgAccess(fault), "request", async () => c))
       .toMatchObject({ outcome: "observation-required", claim: "confirmed" });
     expect(await inspectPostgresRead(pgAccess(db), "request"))
-      .toMatchObject({ state: "failed", terminal_sql_state: "57014", used_attempts: 1 });
+      .toMatchObject({ state: "failed", terminal_sql_state: "57014", used_attempts: 1, unresolved_claims: 0 });
     await expect(executeGovernedPostgresRead(pgAccess(db), "request", async () => c)).rejects.toThrow();
   }, c, { ...d, table: { ...d.table, name: "slow_orders" } });
 });
@@ -203,7 +228,8 @@ it.each(["claim", "observation"])("does not manufacture success after a lost %s 
     const result = await executeGovernedPostgresRead(pgAccess(fault), "request", async () => config);
     expect(result.outcome).toBe("observation-required"); expect(result).not.toHaveProperty("value");
     expect(await inspectPostgresRead(pgAccess(db), "request"))
-      .toMatchObject({ state: phase === "claim" ? "observation-required" : "succeeded", used_attempts: 1 });
+      .toMatchObject({ state: phase === "claim" ? "observation-required" : "succeeded", used_attempts: 1,
+        unresolved_claims: phase === "claim" ? 1 : 0 });
     await expect(executeGovernedPostgresRead(pgAccess(db), "request", async () => config)).rejects.toThrow();
   });
 });
@@ -386,6 +412,27 @@ it("aborts only its dedicated connection and does not claim terminal cancellatio
     setTimeout(() => controller.abort(), 30); return true;
   }, controller.signal)).toMatchObject({ outcome: "observation-required", claim: "confirmed" });
 });
+it("retains durable capacity after a real governed connection abort", async () => {
+  const c = { ...config, statementTimeoutMs: 2000, deadlineMs: 8000 };
+  await governedFixture(async db => {
+    await approvePostgresFixture(db, "second"); const controller = new AbortController();
+    const first = executeGovernedPostgresRead(pgAccess(db), "request", async () => c, controller.signal);
+    try {
+      await expect.poll(async () => (await admin.query(`SELECT pid FROM pg_stat_activity
+        WHERE datname='odap_pg_fixture' AND usename='reader_a' AND application_name='odap-postgresql-preview'
+        AND state='active' AND wait_event='PgSleep' AND query LIKE '%AS metric_value FROM ONLY%crash_orders%'`)).rows.length,
+      { timeout: 5000, interval: 10 }).toBe(1);
+      controller.abort();
+      expect(await first).toMatchObject({ outcome: "observation-required", claim: "confirmed" });
+      expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ unresolved_claims: 1, used_attempts: 1 });
+      expect(await executeGovernedPostgresRead(pgAccess(db), "second", async () => c))
+        .toMatchObject({ outcome: "observation-required", claim: "unknown" });
+      expect(await inspectPostgresRead(pgAccess(db), "second")).toMatchObject({ unresolved_claims: 1, used_attempts: 1, intent_id: null });
+    } finally { controller.abort(); await first; }
+    await expect.poll(async () => (await admin.query("SELECT pid FROM pg_stat_activity WHERE application_name='odap-postgresql-preview'")).rows.length,
+      { timeout: 7000, interval: 50 }).toBe(0);
+  }, c, { ...d, table: { ...d.table, name: "crash_orders" } }, 1);
+}, 30000);
 it("rejects an already aborted read before claim or connection", async () => {
   expect(await executePostgresMetric(config, await postgresRead(), async () => true, AbortSignal.abort()))
     .toMatchObject({ outcome: "not-submitted", claim: "not-attempted" });

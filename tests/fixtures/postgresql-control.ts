@@ -9,13 +9,18 @@ export const pgAccess = (db: D1Database, principal = "reader", tenantId = "tenan
   ({ db, tenantId, principalId: "google:" + principal });
 export const pgRun = (db: D1Database, sql: string, values: D1Value[] = []) => db.prepare(sql).bind(...values).run();
 
-export async function seedPostgresControl(db: D1Database, digest = "sha256:" + "a".repeat(64), limit = 2, source = postgresSource) {
+export async function seedPostgresControl(db: D1Database, digest = "sha256:" + "a".repeat(64), limit = 2, source = postgresSource,
+  concurrency: number | null = limit) {
   await pgRun(db, "INSERT INTO control_tenants VALUES('tenant-a','Synthetic A'),('tenant-b','Synthetic B')");
   await pgRun(db, `INSERT INTO control_memberships VALUES
     ('tenant-a','google:owner','owner',1),('tenant-a','google:reviewer','reviewer',1),
     ('tenant-a','google:reader','reader',1),('tenant-a','google:other-owner','owner',1),
     ('tenant-a','google:other-reader','reader',1),('tenant-b','google:owner','owner',1),('tenant-b','google:reader','reader',1)`);
   await pgRun(db, "INSERT INTO postgresql_read_budgets VALUES('tenant-a','budget',?)", [limit]);
+  // Historical upgrade fixtures deliberately start before the optional resource migration.
+  if (concurrency !== null && await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='postgresql_concurrency_limits'").bind().first()) {
+    await pgRun(db, "INSERT INTO postgresql_concurrency_limits VALUES('tenant-a','budget',?)", [concurrency]);
+  }
   await pgRun(db, `INSERT INTO postgresql_source_versions VALUES
     ('tenant-a','revision-1','orders','google:owner','fixture',?,?,'reader_a','budget','2099-01-01T00:00:00.000Z')`,
   [digest, canonicalControlJson(source)]);
