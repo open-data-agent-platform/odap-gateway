@@ -1,7 +1,9 @@
 # Database adapter inspection
 
 This repository currently implements a governed BigQuery metric-read transport.
-Other engines listed by the inspector are **not implemented**. Internal D1
+PostgreSQL has a separate [host connector preview](POSTGRESQL_CONNECTOR.md), not
+yet a Gateway-authorized dispatch path. The inspector continues to reject it
+as an unimplemented **Gateway adapter**. Other engines are not implemented. Internal D1
 storage, ecosystem integrations and wire-protocol compatibility do not establish
 business-query support. Provider verification and independent pilot acceptance
 are not asserted by this inventory.

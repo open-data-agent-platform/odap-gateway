@@ -29,3 +29,5 @@ __pycache__/
 artifacts/
 output/playwright/
 awesome-odap/
+postgresql-results.json
+postgresql-environment.json

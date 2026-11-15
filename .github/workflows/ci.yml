@@ -8,6 +8,44 @@ on:
       - 'codex/gateway-verified-*'
 
 jobs:
+  postgresql-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17.12@sha256:6f7593c161689b6b02c78668b314af7da8811b592c5519108c57a49d0b6ad788
+        env:
+          POSTGRES_DB: odap_pg_fixture
+          POSTGRES_PASSWORD: synthetic-ci-only
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d odap_pg_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify PostgreSQL connector
+        env:
+          ODAP_POSTGRES_FIXTURE: isolated-synthetic-only
+        run: npm run test:postgresql
+      - name: Preserve PostgreSQL results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgresql-integration-results
+          path: |
+            postgresql-results.json
+            postgresql-environment.json
+          if-no-files-found: error
+
   verify:
     runs-on: ubuntu-latest
     steps:
