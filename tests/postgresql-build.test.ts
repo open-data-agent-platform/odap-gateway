@@ -19,6 +19,8 @@ it("builds the Node host with declarations and loads it outside the TypeScript t
       assert.equal(typeof entry('control').executeGovernedPostgresRead, 'function');
       assert.equal(typeof entry('agent').signPostgresAgentCommand, 'function');
       assert.equal(typeof entry('sqlite-control').openPostgresSqliteControl, 'function');
+      assert.equal(typeof entry('server').startPostgresHttpHost, 'function');
+      assert.equal(typeof entry('mcp').createPostgresMcpGateway, 'function');
       const handler = entry('gateway').createPostgresGateway({origin:'https://gateway.test',env:{},
         resolve:async()=>{throw new Error('Provider must not be used by smoke test');}});
       (async()=>{

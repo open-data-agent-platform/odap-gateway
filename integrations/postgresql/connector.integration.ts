@@ -20,6 +20,9 @@ import { approvePostgresAgentFixture, pgAgentOrigin } from "../../tests/fixtures
 import { revokePostgresDelegation } from "../../lib/postgresql-agent";
 import { postgresCrashCases } from "../../tests/fixtures/postgresql-crash-cases";
 import { sendPostgresCancellation, type PostgresBackendKey } from "./cancellation";
+import { startPostgresHttpHost } from "./server";
+import { postgresHttpRequest } from "../../tests/fixtures/postgresql-http";
+import { connectPostgresMcpFixture } from "../../tests/fixtures/postgresql-mcp";
 
 // Fixed disposable fixture only: never accept a business endpoint or credentials.
 const config: PostgresHostConfig = { host: "127.0.0.1", port: 55432, database: "odap_pg_fixture",
@@ -92,6 +95,8 @@ beforeAll(async () => {
     tlsFixtureRequired: true, signedAgentDelegation: true, terminalCodes: ["57014", "42501"],
     hostCrashFixture: "SIGKILL-execute/fresh-process-recovery", durableConcurrency: true, activeCancellation: true,
     controlStore: "node:sqlite", controlSchemaDigest: POSTGRES_CONTROL_SCHEMA_DIGEST, nodeVersion: process.versions.node,
+    nodeHttpHost: "loopback-only-trusted-TLS-proxy-required",
+    mcpSdkVersion: "2.4.0", mcpProtocols: ["2025-11-25", "2026-07-28"], mcpTransport: "stateless-official-client",
     scalarTypes: ["INT16", "INT32", "INT64", "DECIMAL", "BOOL", "STRING", "UUID", "DATE", "TIME", "TIMESTAMP", "TIMESTAMPTZ"],
     resourceUnit: "unresolved-read-claim", budgetUnit: "read-attempt", monetaryCost: "unpriced" }, null, 2) + "\n");
 });
@@ -114,6 +119,107 @@ async function governedFixture(test: (db: D1Database, file: string) => Promise<v
 }
 
 postgresCrashCases(governedFixture, admin, config);
+
+it.each([{ agent: false, modern: false }, { agent: true, modern: false }, { agent: false, modern: true }, { agent: true, modern: true }])(
+  "executes a real governed read with the official MCP client (Agent=$agent modern=$modern)", async ({ agent, modern }) => {
+  await governedFixture(async db => {
+    const secret = "synthetic-mcp-integration-only", a = agent ? await approvePostgresAgentFixture(db) : undefined;
+    const host = await startPostgresHttpHost({ origin: pgAgentOrigin, port: 0, env: { DB: db, AUTH_COOKIE_SECRET: secret }, resolve: async () => config });
+    let connection: Awaited<ReturnType<typeof connectPostgresMcpFixture>> | undefined;
+    try {
+      const headers: Record<string, string> = { Origin: pgAgentOrigin };
+      if (!a) headers.Cookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "reader",
+        email: "synthetic@example.test", name: "Synthetic", expiresAt: Date.now() + 600000 }, secret);
+      connection = await connectPostgresMcpFixture(host.address, pgAgentOrigin,
+        `/postgresql/tenant-a/${agent ? "agent-mcp-stream" : "mcp-stream"}`, headers, modern);
+      const result = await connection.client.callTool({ name: agent ? "postgresql_agent_execute" : "postgresql_execute",
+        arguments: a ? { delegationId: a.delegationId, signature: a.signature } : { requestId: "request" } });
+      expect(result.isError).toBe(false);
+      const text = result.content as { type: string; text: string }[];
+      expect(JSON.parse(text[0].text)).toMatchObject({ outcome: "succeeded", value: "3" });
+      expect(await inspectPostgresRead(pgAccess(db), a ? "agent-request" : "request")).toMatchObject({ state: "succeeded", used_attempts: 1 });
+      const replay = await connection.client.callTool({ name: agent ? "postgresql_agent_execute" : "postgresql_execute",
+        arguments: a ? { delegationId: a.delegationId, signature: a.signature } : { requestId: "request" } });
+      expect(replay.isError).toBe(true);
+    } finally { await connection?.close(); expect(await host.close()).toEqual({ drained: true }); }
+  });
+});
+
+it("preserves real-query uncertainty after official MCP client disconnect", async () => {
+  const c = { ...config, statementTimeoutMs: 3000, deadlineMs: 6000 };
+  await governedFixture(async db => {
+    const secret = "synthetic-mcp-disconnect-only";
+    const cookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "reader",
+      email: "synthetic@example.test", name: "Synthetic", expiresAt: Date.now() + 600000 }, secret);
+    const host = await startPostgresHttpHost({ origin: pgAgentOrigin, port: 0, env: { DB: db, AUTH_COOKIE_SECRET: secret }, resolve: async () => c });
+    const connection = await connectPostgresMcpFixture(host.address, pgAgentOrigin, "/postgresql/tenant-a/mcp-stream", { Origin: pgAgentOrigin, Cookie: cookie }, true);
+    const pending = connection.client.callTool({ name: "postgresql_execute", arguments: { requestId: "request" } }).then(() => "response", () => "disconnected");
+    try {
+      await expect.poll(async () => (await admin.query(`SELECT pid FROM pg_stat_activity WHERE datname='odap_pg_fixture'
+        AND usename='reader_a' AND application_name='odap-postgresql-preview' AND state='active'
+        AND wait_event='PgSleep' AND query LIKE '%AS metric_value FROM ONLY%crash_orders%'`)).rows.length,
+      { timeout: 4000, interval: 10 }).toBe(1);
+      await connection.close(); expect(await pending).toBe("disconnected");
+      expect(await host.close()).toEqual({ drained: true });
+      expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ state: "observation-required", used_attempts: 1, unresolved_claims: 1 });
+      let calls = 0;
+      await expect(executeGovernedPostgresRead(pgAccess(db), "request", async () => { calls++; return c; })).rejects.toThrow();
+      expect(calls).toBe(0);
+      await expect.poll(async () => (await admin.query("SELECT pid FROM pg_stat_activity WHERE application_name='odap-postgresql-preview'")).rows.length,
+        { timeout: 5000, interval: 20 }).toBe(0);
+    } finally { await connection.close(); await pending; await host.close(); }
+  }, c, { ...d, table: { ...d.table, name: "crash_orders" } }, 1);
+});
+
+it.each([{ agent: false, mcp: false }, { agent: false, mcp: true }, { agent: true, mcp: false }, { agent: true, mcp: true }])(
+  "serves a governed real PostgreSQL read through the loopback listener (Agent=$agent MCP=$mcp)", async ({ agent, mcp }) => {
+  await governedFixture(async db => {
+    const secret = "synthetic-http-integration-only", a = agent ? await approvePostgresAgentFixture(db) : undefined;
+    const host = await startPostgresHttpHost({ origin: pgAgentOrigin, port: 0,
+      env: { DB: db, AUTH_COOKIE_SECRET: secret }, resolve: async () => config });
+    try {
+      const headers: Record<string, string> = { Host: "gateway.test", Origin: pgAgentOrigin };
+      if (!a) headers.Cookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "reader",
+        email: "synthetic@example.test", name: "Synthetic", expiresAt: Date.now() + 600000 }, secret);
+      const args = a ? { delegationId: a.delegationId, signature: a.signature } : { requestId: "request" };
+      const path = `/postgresql/tenant-a/${a ? "agent-" : ""}${mcp ? "mcp" : "execute"}`;
+      const reply = await postgresHttpRequest(host.address, path, mcp ? { jsonrpc: "2.0", id: "network", method: "tools/call",
+        params: { name: a ? "postgresql_agent_execute" : "postgresql_execute", arguments: args } } : args, headers).result;
+      expect(reply.status).toBe(200); const data = JSON.parse(reply.data);
+      expect(mcp ? JSON.parse(data.result.content[0].text) : data.result).toMatchObject({ outcome: "succeeded", value: "3" });
+      expect(await inspectPostgresRead(pgAccess(db), a ? "agent-request" : "request")).toMatchObject({ state: "succeeded", used_attempts: 1 });
+    } finally { expect(await host.close()).toEqual({ drained: true }); }
+  });
+});
+
+it("keeps a real read uncertain after HTTP client disconnect rather than replaying or refunding", async () => {
+  const c = { ...config, statementTimeoutMs: 3000, deadlineMs: 6000 };
+  await governedFixture(async db => {
+    const secret = "synthetic-http-disconnect-only";
+    const cookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "reader",
+      email: "synthetic@example.test", name: "Synthetic", expiresAt: Date.now() + 600000 }, secret);
+    const host = await startPostgresHttpHost({ origin: pgAgentOrigin, port: 0,
+      env: { DB: db, AUTH_COOKIE_SECRET: secret }, resolve: async () => c });
+    const pending = postgresHttpRequest(host.address, "/postgresql/tenant-a/execute", { requestId: "request" },
+      { Host: "gateway.test", Origin: pgAgentOrigin, Cookie: cookie });
+    const settled = pending.result.then(() => "response", () => "disconnected");
+    try {
+      await expect.poll(async () => (await admin.query(`SELECT pid FROM pg_stat_activity WHERE datname='odap_pg_fixture'
+        AND usename='reader_a' AND application_name='odap-postgresql-preview' AND state='active'
+        AND wait_event='PgSleep' AND query LIKE '%AS metric_value FROM ONLY%crash_orders%'`)).rows.length,
+      { timeout: 4000, interval: 10 }).toBe(1);
+      pending.destroy(); expect(await settled).toBe("disconnected");
+      expect(await host.close()).toEqual({ drained: true });
+      expect(await inspectPostgresRead(pgAccess(db), "request")).toMatchObject({ state: "observation-required", used_attempts: 1, unresolved_claims: 1 });
+      let calls = 0;
+      await expect(executeGovernedPostgresRead(pgAccess(db), "request", async () => { calls++; return c; })).rejects.toThrow();
+      expect(calls).toBe(0);
+      // Backend disappearance is fixture cleanup, not terminal/cancellation evidence.
+      await expect.poll(async () => (await admin.query("SELECT pid FROM pg_stat_activity WHERE application_name='odap-postgresql-preview'")).rows.length,
+        { timeout: 5000, interval: 20 }).toBe(0);
+    } finally { pending.destroy(); await settled; await host.close(); }
+  }, c, { ...d, table: { ...d.table, name: "crash_orders" } }, 1);
+});
 
 it("bounds host preparation without blocking signed inspection or consuming refused attempts", async () => {
   await governedFixture(async db => {

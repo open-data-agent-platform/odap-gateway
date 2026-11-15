@@ -20,6 +20,12 @@ const commandFields: Record<string, string[]> = {
   "approve-agent-read": ["requestId", "releaseId", "sourceId", "requesterId", "reviewedAction", "delegationId", "agentId", "keyId"],
 };
 const objectFields = new Set(["definition", "action", "reviewedAction"]);
+export const postgresSessionTools = () => Object.entries(commandFields).map(([name, keys]) => ({
+  name: "postgresql_" + name.replaceAll("-", "_"),
+  description: "Session-authenticated PostgreSQL control command: " + name + ". Agent execution requires separate scoped signatures. No monetary cost guarantee.",
+  inputSchema: { type: "object" as const, properties: Object.fromEntries(keys.map(key =>
+    [key, { type: objectFields.has(key) ? "object" : "string" }])), required: keys, additionalProperties: false },
+}));
 const json = (body: unknown, status = 200) => Response.json(body, {
   status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
 });
@@ -100,12 +106,7 @@ export function createPostgresGateway(options: {
       }
       const reply = (result: unknown) => json({ jsonrpc: "2.0", id: rpc.id, result });
       if (rpc.method === "tools/list" && (rpc.params === undefined || exactFields(rpc.params, []))) {
-        return reply({ tools: Object.entries(commandFields).map(([name, keys]) => ({
-          name: "postgresql_" + name.replaceAll("-", "_"),
-          description: "Session-authenticated PostgreSQL control command: " + name + ". Agent execution requires separate scoped signatures. No monetary cost guarantee.",
-          inputSchema: { type: "object", properties: Object.fromEntries(keys.map(key =>
-            [key, { type: objectFields.has(key) ? "object" : "string" }])), required: keys, additionalProperties: false },
-        })) });
+        return reply({ tools: postgresSessionTools() });
       }
       if (rpc.method !== "tools/call" || !exactFields(rpc.params, ["name", "arguments"]) || typeof rpc.params.name !== "string" ||
           !rpc.params.name.startsWith("postgresql_")) {
