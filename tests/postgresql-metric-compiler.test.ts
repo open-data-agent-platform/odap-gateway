@@ -50,7 +50,7 @@ describe("PostgreSQL release-bound compiler", () => {
     { ...d, table: { ...d.table, database: "other" } }, { ...d, table: { ...d.table, schema: "other" } },
     { ...d, table: { ...d.table, tenantColumn: "label" } }, { ...d, measure: { aggregate: "pg_sleep(10)" } },
     { ...d, measure: { aggregate: "SUM", column: "price", type: "FLOAT64" } },
-    { ...d, filters: { bad: { column: "label", type: "TIMESTAMP" } } },
+    { ...d, filters: { bad: { column: "label", type: "TIMETZ" } } },
   ])("rejects unsupported or mismatched definition", async definition => expect(compile(definition)).rejects.toThrow());
   it("rejects revoked release, digest/action drift and missing/extra parameters", async () => {
     const r = await postgresRead();

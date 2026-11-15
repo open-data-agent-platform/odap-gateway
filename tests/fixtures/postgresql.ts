@@ -1,5 +1,11 @@
 import { canonicalControlJson, sha256Text, type SemanticRelease } from "../../lib/control-objects";
 
+export function postgresBarrier() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
 export const postgresSource = { database: "odap_pg_fixture", schema: "metrics", table: "orders", tenantColumn: "tenant_id" };
 export const postgresDefinition = {
   profile: "odap.postgresql-metric.v1", tenantId: "tenant-a", sourceRevision: "revision-1", target: "orders", metricId: "total",

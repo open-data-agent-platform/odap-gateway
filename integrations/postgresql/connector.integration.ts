@@ -6,10 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { executePostgresMetric, type PostgresClaim, type PostgresHostConfig } from "./index";
-import { postgresDefinition as d, postgresRead, postgresSource } from "../../tests/fixtures/postgresql";
+import { postgresDefinition as d, postgresRead, postgresSource, postgresBarrier } from "../../tests/fixtures/postgresql";
 import { executeGovernedPostgresRead, postgresAgentOperation, postgresConnectionDigest } from "./control";
 import { jobSqlite, jobTransactionalDatabase } from "../../tests/fixtures/job-sqlite";
-import { approvePostgresFixture, pgAccess, publishPostgresFixture, seedPostgresControl } from "../../tests/fixtures/postgresql-control";
+import { approvePostgresFixture, pgAccess, pgAction, publishPostgresFixture, seedPostgresControl } from "../../tests/fixtures/postgresql-control";
 import { inspectPostgresRead } from "../../lib/postgresql-control";
 import type { D1Database } from "../../lib/d1";
 import { createPostgresGateway } from "./gateway";
@@ -69,28 +69,101 @@ beforeAll(async () => {
     ALTER TABLE metrics.domain_orders ENABLE ROW LEVEL SECURITY;
     CREATE POLICY domain_access ON metrics.domain_orders TO reader_a USING (true);
     GRANT SELECT ON metrics.domain_orders TO reader_a;`);
+  await admin.query(`CREATE TABLE metrics.typed_orders (tenant_id text, small_value smallint, integer_value integer,
+      day_value date, time_value time, local_value timestamp, instant_value timestamptz, uuid_value uuid);
+    INSERT INTO metrics.typed_orders VALUES
+      ('tenant-a',32767,2147483647,'2024-02-29','12:30:45.123456','2024-11-03T01:30:00.123456',
+        '2024-11-03T01:30:00.123456-04:00','00000000-0000-0000-0000-000000000001'),
+      ('tenant-a',-32768,-2147483648,'2000-02-29','12:30:45.123457','2024-11-03T01:30:00.123457',
+        '2024-11-03T01:30:00.123456-05:00','00000000-0000-0000-0000-000000000002'),
+      ('tenant-a',NULL,NULL,NULL,NULL,NULL,NULL,NULL),
+      ('tenant-b',32767,2147483647,'2024-02-29','12:30:45.123456','2024-11-03T01:30:00.123456',
+        '2024-11-03T01:30:00.123456-04:00','00000000-0000-0000-0000-000000000001');
+    ALTER TABLE metrics.typed_orders ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE metrics.typed_orders FORCE ROW LEVEL SECURITY;
+    CREATE POLICY typed_access ON metrics.typed_orders TO reader_a,reader_b USING
+      (tenant_id = CASE current_user WHEN 'reader_a' THEN 'tenant-a' WHEN 'reader_b' THEN 'tenant-b' END);
+    GRANT SELECT ON metrics.typed_orders TO reader_a,reader_b;`);
   writeFileSync("postgresql-environment.json", JSON.stringify({ serverVersion: "17.12", serverVersionNum: version,
     driver: "pg", driverVersion, syntheticDataOnly: true, transport: "isolated-loopback-without-TLS",
     productionVerified: false, gatewayDispatchIntegrated: true, transportScope: "Node host, not deployed Worker",
     tlsFixtureRequired: true, signedAgentDelegation: true, terminalCodes: ["57014", "42501"],
     hostCrashFixture: "SIGKILL-execute/fresh-process-recovery", durableConcurrency: true, activeCancellation: true,
+    scalarTypes: ["INT16", "INT32", "INT64", "DECIMAL", "BOOL", "STRING", "UUID", "DATE", "TIME", "TIMESTAMP", "TIMESTAMPTZ"],
     resourceUnit: "unresolved-read-claim", budgetUnit: "read-attempt", monetaryCost: "unpriced" }, null, 2) + "\n");
 });
 afterAll(async () => { await admin.end(); });
 
-async function governedFixture(test: (db: D1Database, file: string) => Promise<void>, c = config, definition = d, concurrency = 2) {
+async function governedFixture(test: (db: D1Database, file: string) => Promise<void>, c = config,
+  definition: Omit<typeof d, "measure"> & { measure: Record<string, unknown> } = d,
+  concurrency = 2, action: unknown = pgAction) {
   const directory = await mkdtemp(join(tmpdir(), "odap-pg-governed-"));
   try {
     const file = join(directory, "ledger.db");
     await jobSqlite(file, "setup");
     const db = jobTransactionalDatabase(() => file);
     await seedPostgresControl(db, await postgresConnectionDigest("tenant-a", c), 2, { ...postgresSource, table: definition.table.name }, concurrency);
-    await publishPostgresFixture(db, definition); await approvePostgresFixture(db);
+    await publishPostgresFixture(db, definition); await approvePostgresFixture(db, "request", action);
     await test(db, file);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
 postgresCrashCases(governedFixture, admin, config);
+
+it("bounds host preparation without blocking signed inspection or consuming refused attempts", async () => {
+  await governedFixture(async db => {
+    const a = await approvePostgresAgentFixture(db), secret = "synthetic-admission-only";
+    const entered = postgresBarrier(), release = postgresBarrier();
+    let resolutions = 0;
+    const handler = createPostgresGateway({ origin: pgAgentOrigin, env: { DB: db, AUTH_COOKIE_SECRET: secret },
+      maxConcurrentExecutions: 1, resolve: async () => { resolutions++; entered.resolve(); await release.promise; return config; } });
+    const cookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "reader", email: "test@example.test",
+      name: "Synthetic", role: "admin", expiresAt: Date.now() + 600000 }, secret);
+    const pending = handler(new Request(`${pgAgentOrigin}/postgresql/tenant-a/execute`, { method: "POST",
+      headers: { Origin: pgAgentOrigin, "Content-Type": "application/json", Cookie: cookie }, body: JSON.stringify({ requestId: "request" }) }));
+    const agent = (operation: "execute" | "inspect") => handler(new Request(`${pgAgentOrigin}/postgresql/tenant-a/agent-${operation}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ delegationId: a.delegationId, signature: operation === "execute" ? a.signature : a.inspectSignature }),
+    }));
+    try {
+      await entered.promise;
+      expect((await agent("execute")).status).toBe(429);
+      expect((await agent("inspect")).status).toBe(200);
+      expect(resolutions).toBe(1);
+      expect(await db.prepare("SELECT COUNT(*) AS n FROM postgresql_read_claims").bind().first()).toEqual({ n: 0 });
+    } finally { release.resolve(); await pending; }
+    expect(await (await pending).json()).toMatchObject({ ok: true, result: { outcome: "succeeded", value: "3" } });
+    expect(await (await agent("execute")).json()).toMatchObject({ ok: true, result: { outcome: "succeeded", value: "3" } });
+    expect(resolutions).toBe(2);
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM postgresql_read_claims").bind().first()).toEqual({ n: 2 });
+  });
+});
+
+it.each([
+  ["INT16", "small_value", "32767"], ["INT32", "integer_value", "2147483647"], ["DATE", "day_value", "2024-02-29"],
+  ["TIME", "time_value", "12:30:45.123456"], ["TIMESTAMP", "local_value", "2024-11-03T01:30:00.123456"],
+  ["TIMESTAMPTZ", "instant_value", "2024-11-03T01:30:00.123456-04:00"],
+  ["TIMESTAMPTZ", "instant_value", "2024-11-03T01:30:00.123456-05:00"],
+  ["TIMESTAMPTZ", "instant_value", "2024-11-03T05:30:00.123456Z"],
+  ["UUID", "uuid_value", "00000000-0000-0000-0000-000000000001"],
+])("preserves exact %s filter %s=%s on the real engine with tenant isolation", async (type, column, value) => {
+  const definition = { ...d, table: { ...d.table, name: "typed_orders" }, filters: { value: { column, type } } };
+  await governedFixture(async db => {
+    expect(await executeGovernedPostgresRead(pgAccess(db), "request", async () => config)).toMatchObject({ outcome: "succeeded", value: "1" });
+  }, config, definition, 2, { ...pgAction, parameters: { value } });
+});
+it.each([["INT16", "small_value"], ["INT32", "integer_value"]])("returns exact %s SUM on the real engine", async (type, column) => {
+  await governedFixture(async db => {
+    expect(await executeGovernedPostgresRead(pgAccess(db), "request", async () => config)).toMatchObject({ outcome: "succeeded", value: "-1" });
+  }, config, { ...d, table: { ...d.table, name: "typed_orders" }, measure: { aggregate: "SUM", column, type } });
+});
+it("rejects a temporal live OID mismatch before claiming", async () => {
+  const r = await postgresRead({ ...d, filters: { value: { column: "label", type: "DATE" } } }, { value: "2024-02-29" });
+  let claims = 0;
+  expect(await executePostgresMetric(config, r, async () => { claims++; return true; }))
+    .toMatchObject({ outcome: "not-submitted", claim: "not-attempted" });
+  expect(claims).toBe(0);
+});
 
 it.each([{ agent: false, mcp: false }, { agent: false, mcp: true }, { agent: true, mcp: false }, { agent: true, mcp: true }])(
   "delivers authorized active cancellation to the original query (Agent=$agent MCP/TLS=$mcp)", async ({ agent, mcp }) => {

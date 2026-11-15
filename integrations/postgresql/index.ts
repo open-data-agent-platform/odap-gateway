@@ -5,6 +5,7 @@ import type { SemanticRelease } from "../../lib/control-objects";
 import { acknowledgePostgresFailure } from "./terminal";
 import type { PostgresFailureCode } from "../../lib/postgresql-terminal";
 import { monitorPostgresCancellation, sendPostgresCancellation, type PostgresBackendKey } from "./cancellation";
+import { postgresParameterTypes } from "../../lib/postgresql-parameter";
 
 export type PostgresHostConfig = Readonly<{
   host: string; port: number; database: string; user: string; password: string;
@@ -22,8 +23,6 @@ export type PostgresReadResult =
   | { outcome: "failed"; claim: "confirmed"; sqlState: PostgresFailureCode; statementDigest: string }
   | { outcome: "not-submitted" | "observation-required"; claim: "not-attempted" | "denied" | "unknown" | "confirmed";
       reason: "preflight-rejected" | "claim-unconfirmed" | "execution-unconfirmed" };
-
-const typeOids = { STRING: [25], BOOL: [16], INT64: [20], DECIMAL: [1700] };
 
 function validateConfig(c: PostgresHostConfig) {
   if (!c || typeof c.host !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$/.test(c.host) ||
@@ -100,7 +99,7 @@ export async function executePostgresMetric(config: PostgresHostConfig, read: Po
         WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped`, [source.schema, source.table]);
       for (const column of compiled.columns) {
         const actual = metadata.rows.find(r => r.name === column.name);
-        if (!actual || !typeOids[column.type].includes(actual.oid)) throw new Error("Unsupported PostgreSQL column type");
+        if (!actual || postgresParameterTypes[column.type].oid !== actual.oid) throw new Error("Unsupported PostgreSQL column type");
       }
       return async () => {
         if (stopped) throw new Error("Read stopped");

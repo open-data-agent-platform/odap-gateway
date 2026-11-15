@@ -15,25 +15,100 @@ production migration restrictions still apply.
 
 - Exact PostgreSQL 17.12 and `pg` 8.23.1. Other server versions fail closed.
 - One ordinary, non-inherited, non-partitioned table with active RLS.
-- Released single-table `COUNT_ROWS` or `SUM` of `bigint`/`numeric`.
-- Equality filters for built-in `text`, `boolean`, `bigint`, `numeric` only.
+- Released single-table `COUNT_ROWS` or `SUM` of `smallint`/`integer`/`bigint`/`numeric`.
+- Equality filters for built-in `text`, `boolean`, `smallint`, `integer`, `bigint`,
+  `numeric`, `uuid`, `date`, `time`, `timestamp`, `timestamptz` only.
   NULL matches NULL using `IS NOT DISTINCT FROM`; false is not NULL.
   Text and tenant parameters reject NUL and ill-formed Unicode before UTF-8 encoding.
 - Tenant predicate is mandatory, uses a bound parameter and `C` collation,
   and supplements rather than replaces database RLS.
 - Aggregates return exact decimal strings or null, never floating-point numbers.
   Empty COUNT is `"0"`; empty SUM is null. Nonfinite/over-256-character results
-  fail closed. Date/time, arrays, JSON, domains, custom types, joins, arbitrary SQL,
+  fail closed. Arrays, JSON, floating-point, binary, domains, custom types, joins, arbitrary SQL,
   functions, views, foreign tables and pagination are not supported.
 
 The local `odap.postgresql-metric.v1` definition contains `tenantId`,
 `sourceRevision`, `target`, `metricId`, `table`, `measure` and `filters`.
 `table` binds `database`, `schema`, `name`, `tenantColumn`.
 `measure` is `{aggregate:"COUNT_ROWS"}` or
-`{aggregate:"SUM",column:"amount",type:"INT64"}` (also `DECIMAL`).
+`{aggregate:"SUM",column:"amount",type:"INT64"}` (also `INT16`, `INT32`, `DECIMAL`).
 Each filter binds `{column,type}`. Identifiers are strict ASCII, at most 63 bytes.
 The release digest and `odap.metric-read.v1` action are checked before connecting.
 These are local engineering formats, not changes to the ODAP specification.
+
+### Exact parameter types
+
+The compiler and live metadata checks share one immutable built-in cast/OID
+registry. A column with a domain, extension or merely compatible representation
+does not inherit support. Parameter strings are bound, never interpolated.
+
+| Definition type | Accepted non-null input |
+| --- | --- |
+| `INT16`, `INT32`, `INT64` | Safe JavaScript integer or canonical integer string within the exact signed width; no negative zero, leading zeros or exponents |
+| `DECIMAL` | Plain decimal string, at most 128 characters; no exponent, NaN or Infinity |
+| `BOOL`, `STRING` | Boolean, or well-formed Unicode text of at most 4096 UTF-16 code units without NUL |
+| `UUID` | Lowercase canonical `8-4-4-4-12` hexadecimal string |
+| `DATE` | Valid Gregorian `YYYY-MM-DD`, years 0001-9999 |
+| `TIME` | `HH:MM:SS` with optional 1-6 fractional digits, no time zone |
+| `TIMESTAMP` | Valid date, `T`, and the supported time; wall time without a zone |
+| `TIMESTAMPTZ` | Valid timestamp plus `Z` or explicit offset through +/-14:00; `-00:00` (unknown offset) rejected |
+
+Every supported type accepts null as a distinct value. Temporal inputs are not
+converted to JavaScript `Date`: microseconds and explicit offsets reach PostgreSQL
+unchanged. Locale formats, relative dates, year zero, 24:00, leap seconds, named
+zones and extra precision fail closed. Timestamp equality uses PostgreSQL's
+instant semantics; different offsets can denote the same instant. The action
+and statement digests still bind the exact supplied representation.
+[PostgreSQL date/time types](https://www.postgresql.org/docs/17/datatype-datetime.html),
+[UUID type](https://www.postgresql.org/docs/17/datatype-uuid.html).
+
+## Build and operate the host module
+
+With the repository's locked dependencies and supported Node runtime:
+
+```sh
+npm ci
+npm run postgresql:build
+```
+
+This emits CommonJS JavaScript and TypeScript declarations under
+`dist/postgresql/`. It does not start a server, read environment credentials,
+create a database or apply migrations. The standalone smoke test loads these
+files in a new Node process, outside Vitest's TypeScript loader. Use the whole
+output tree, not an individual file, and retain the pinned runtime dependencies.
+The CI fixture runtime is Node 24.22.1; other runtime/provider combinations need
+their own verification.
+
+```js
+const { createPostgresGateway } = require('./dist/postgresql/integrations/postgresql/gateway.js');
+// env and resolve come from the authenticated host's trusted configuration.
+const handler = createPostgresGateway({
+  origin: 'https://your-approved-host.example', env, resolve,
+  maxConcurrentExecutions: 8,
+});
+```
+
+Mount this single long-lived handler in the host's existing Request/Response
+bridge; do not instantiate a new handler per request. No listener, OAuth provider,
+control-store implementation or public deployment is provisioned by this module.
+Use an explicitly authorized deployment, trusted durable control binding and
+secret resolver; the example is not authorization to configure production.
+
+Before enabling traffic, verify the exact engine/driver version, TLS trust,
+read-only role/RLS, schema migration level and explicit source/budget/concurrency
+rows. Apply migrations 0035-0039 in order only on an authorized target after
+backup/restore validation. This release adds no migration. Never apply a schema
+file merely to make a health check pass on an existing production database.
+
+For upgrades, stop new execution admission at the host, allow in-flight operations
+to finish within their existing deadlines, then preserve and inspect the durable
+ledger. Deploy the pinned build and verify authenticated inspect before reopening
+execution. Never replay unresolved reads during an upgrade. For rollback, restore
+a previously verified code build compatible with the current schema; do not drop
+append-only tables, delete receipts, refund attempts or reverse migrations to
+match an older binary. If compatibility is unknown, leave execution disabled.
+More restrictive code may refuse newer semantic types; use a reviewed compatible
+release rather than silently coercing approved inputs.
 
 ## Host responsibilities
 
@@ -42,7 +117,7 @@ signal)` or mount `createPostgresGateway({origin, env, resolve})` in an authenti
 Node host. `env` uses the existing session verifier and D1-compatible control-store
 interface; Node hosts must provide a durable compatible binding. There is no
 fallback to demo identity, CLI email, caller principal, or an Agent permission flag.
-The host must bound concurrent requests and supply TLS termination, OAuth session
+The host must bound total HTTP requests and supply TLS termination, OAuth session
 issuance, and MCP session/protocol initialization. This hook does not implement a
 standalone MCP server or an OAuth provider. Bounded Agent execution uses the
 separate registered-key path below, not a human session impersonation.
@@ -59,6 +134,27 @@ Use `postgresConnectionDigest(tenantId, config)` for the binding digest: it incl
 endpoint, role, TLS trust and timeouts, but excludes the password. The resolver
 receives the stored tenant/reference, not request-supplied connection parameters.
 Do not place passwords or connection strings in the registry or public evidence.
+
+### Local preparation admission
+
+One gateway handler permits at most `maxConcurrentExecutions` active execution
+operations (default 8, integer 1-1000). The bound includes authorization/preparation,
+provider resolution and the eventual execution. All tenants, human/Agent calls
+and REST/MCP execution hooks share this local capacity. There is no wait queue or
+automatic retry. REST and Agent overload responses use HTTP 429 with
+`postgresql_host_busy`; session MCP returns a tool error stating that no execution
+was admitted. Refusal does not call the execution service or consume a contract.
+
+Inspect, cancellation, stop, revocation and other control commands do not acquire
+an execution slot. Existing authentication and authorization checks still apply.
+The slot is released in `finally` after the governed operation settles, including
+errors; a local abort alone does not decrement the counter while work remains.
+This is not a global database connection pool, rate limit or durable claim limit.
+Multiple handlers/processes have independent local counters; the shared durable
+limit below remains authoritative for metric claims. Low-level API users must
+provide their own admission bound. Hosts must additionally bound incoming bodies,
+slow clients and control-store traffic, and avoid allocating provider connections
+inside a configuration resolver.
 
 ### Governed lifecycle
 

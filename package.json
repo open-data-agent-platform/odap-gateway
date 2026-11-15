@@ -12,6 +12,7 @@
     "test": "node node_modules/vitest/vitest.mjs run --environment node",
     "test:native": "node scripts/native-d1-gate.mjs",
     "test:postgresql": "node node_modules/vitest/vitest.mjs run --config integrations/postgresql/vitest.config.ts",
+    "postgresql:build": "tsc -p scripts/tsconfig.postgresql.json",
     "adapters:build": "tsc -p scripts/tsconfig.adapters.json",
     "adapters:inspect": "node dist/adapters/scripts/inspect-database-adapter.js",
     "evidence:build": "tsc -p scripts/tsconfig.evidence.json",

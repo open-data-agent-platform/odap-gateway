@@ -5,6 +5,10 @@ PostgreSQL has a separate [governed Node host integration](POSTGRESQL_CONNECTOR.
 with persisted session authority, scoped requester/owner-approved Agent signatures,
 attempt quotas, durable unresolved-read concurrency limits, append-only
 acknowledged-failure receipts, authorized active-query cancellation and REST/MCP hooks.
+It has an independent Node build (`npm run postgresql:build`), shared local
+execution/preparation admission, and exact integer-width, decimal, boolean, text,
+UUID and temporal equality parameters with built-in OID validation. Results remain
+single numeric aggregates; this is not arbitrary SQL or general row extraction.
 Cancellation intent is not terminal proof; an unavailable executor leaves it pending.
 Host-process crash recovery is tested without automatic replay. It is not deployed in the production
 Worker and does not offer monetary cost settlement or open-ended Agent grants. The inspector continues to reject it

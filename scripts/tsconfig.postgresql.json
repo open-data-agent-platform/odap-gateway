@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmitOnError": true,
+    "declaration": true,
+    "rootDir": "..",
+    "outDir": "../dist/postgresql",
+    "types": ["node"]
+  },
+  "files": [
+    "../integrations/postgresql/index.ts",
+    "../integrations/postgresql/control.ts",
+    "../integrations/postgresql/gateway.ts",
+    "../integrations/postgresql/agent.ts"
+  ]
+}

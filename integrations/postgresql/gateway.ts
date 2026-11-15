@@ -6,6 +6,7 @@ import { approvePostgresAgentRead, postgresControlCommand, PostgresControlDenied
 import { readBoundedRequestJson } from "../../lib/request-json";
 import { executeGovernedPostgresRead, postgresAgentOperation, type PostgresConnectionResolver } from "./control";
 import { delegatePostgresRead, postgresAgentAudience, postgresAgentChallenges, revokePostgresDelegation } from "../../lib/postgresql-agent";
+import { postgresHostAdmission, PostgresHostBusy } from "./admission";
 
 const commandFields: Record<string, string[]> = {
   propose: ["revisionId", "provenanceRef", "definition"], review: ["revisionId"],
@@ -29,9 +30,11 @@ const json = (body: unknown, status = 200) => Response.json(body, {
  */
 export function createPostgresGateway(options: {
   origin: string; env: AuthEnv & AdminStorageEnv; resolve: PostgresConnectionResolver;
+  maxConcurrentExecutions?: number;
 }) {
   const origin = new URL(options.origin).origin;
   if (origin !== options.origin) throw new Error("Canonical PostgreSQL host origin required");
+  const admit = postgresHostAdmission(options.maxConcurrentExecutions);
   return async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     const match = /^\/postgresql\/([A-Za-z0-9_-]{1,128})\/([a-z-]+)$/.exec(url.pathname);
@@ -62,11 +65,15 @@ export function createPostgresGateway(options: {
         }
         if (!exactFields(args, ["delegationId", "signature"]) || typeof args.delegationId !== "string" || typeof args.signature !== "string" ||
             !["execute", "inspect"].includes(operation)) throw new PostgresControlDenied();
-        const result = await postgresAgentOperation(db, origin, tenant, args.delegationId, args.signature,
+        const run = () => postgresAgentOperation(db, origin, tenant, args.delegationId as string, args.signature as string,
           operation as "execute" | "inspect", options.resolve, request.signal);
+        const result = operation === "execute" ? await admit(run, request.signal) : await run();
         return rpcId === undefined ? json({ ok: true, result }) :
           json({ jsonrpc: "2.0", id: rpcId, result: { content: [{ type: "text", text: JSON.stringify(result) }], isError: false } });
-      } catch { return json({ ok: false, code: "postgresql_agent_unavailable" }, 403); }
+      } catch (error) {
+        return error instanceof PostgresHostBusy ? json({ ok: false, code: "postgresql_host_busy" }, 429) :
+          json({ ok: false, code: "postgresql_agent_unavailable" }, 403);
+      }
     }
     const invalid = commandRequestError(request, tenant);
     if (invalid) return invalid;
@@ -83,7 +90,7 @@ export function createPostgresGateway(options: {
         if (name === "approve-agent-read") return approvePostgresAgentRead(auth.access, origin, args as Parameters<typeof approvePostgresAgentRead>[2]);
         if (name !== "execute") return postgresControlCommand(auth.access, name, args);
         if (typeof args.requestId !== "string" || !routeId.test(args.requestId)) throw new PostgresControlDenied();
-        return executeGovernedPostgresRead(auth.access, args.requestId, options.resolve, request.signal);
+        return admit(() => executeGovernedPostgresRead(auth.access, args.requestId as string, options.resolve, request.signal), request.signal);
       };
       if (command !== "mcp") return json({ ok: true, result: await call(command, body.value) });
       const rpc = body.value;
@@ -107,10 +114,13 @@ export function createPostgresGateway(options: {
       try {
         const value = await call(rpc.params.name.slice(11).replaceAll("_", "-"), rpc.params.arguments);
         return reply({ content: [{ type: "text", text: JSON.stringify(value) }], isError: false });
-      } catch {
-        return reply({ content: [{ type: "text", text: "PostgreSQL operation unavailable; inspect the request before retrying." }], isError: true });
+      } catch (error) {
+        return reply({ content: [{ type: "text", text: error instanceof PostgresHostBusy ?
+          "PostgreSQL host busy; no execution was admitted." :
+          "PostgreSQL operation unavailable; inspect the request before retrying." }], isError: true });
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof PostgresHostBusy) return json({ ok: false, code: "postgresql_host_busy" }, 429);
       return json({ ok: false, code: "postgresql_operation_unavailable" }, 409);
     }
   };

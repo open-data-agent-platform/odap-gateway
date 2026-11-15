@@ -7,6 +7,8 @@ import { createPostgresGateway } from "../integrations/postgresql/gateway";
 import { jobSqlite, jobTransactionalDatabase } from "./fixtures/job-sqlite";
 import { approvePostgresFixture, pgAccess, pgAction, pgRun, publishPostgresFixture, seedPostgresControl } from "./fixtures/postgresql-control";
 import { claimPostgresRead, preparePostgresDispatch } from "../lib/postgresql-control";
+import { approvePostgresAgentFixture } from "./fixtures/postgresql-agent";
+import { postgresBarrier } from "./fixtures/postgresql";
 
 let dir: string;
 const db = () => jobTransactionalDatabase(() => join(dir, "control.db"));
@@ -30,6 +32,41 @@ describe("authenticated PostgreSQL REST/MCP host hook", { timeout: 30000 }, () =
     await seedPostgresControl(db()); await publishPostgresFixture(db());
   });
   afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  it.each([false, true])("shares host admission across session and Agent while keeping control commands available (MCP=%s)", async mcp => {
+    const database = db(); await approvePostgresFixture(database);
+    const agent = await approvePostgresAgentFixture(database);
+    const entered = postgresBarrier(), release = postgresBarrier();
+    const resolve = vi.fn(async () => { entered.resolve(); await release.promise; throw new Error("synthetic-preparation-failure"); });
+    const handler = createPostgresGateway({ origin: "https://gateway.test", env: { DB: database, AUTH_COOKIE_SECRET: secret },
+      resolve, maxConcurrentExecutions: 1 });
+    const session = async (command: string) => handler(new Request(`https://gateway.test/postgresql/tenant-a/${mcp ? "mcp" : command}`, {
+      method: "POST", headers: { Origin: "https://gateway.test", "Content-Type": "application/json", Cookie: await cookie("reader") },
+      body: JSON.stringify(mcp ? { jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: { name: "postgresql_" + command, arguments: { requestId: "request" } } } : { requestId: "request" }),
+    }));
+    const pending = session("execute");
+    try {
+      await entered.promise;
+      const busy = await session("execute"), body = await busy.json();
+      expect(mcp ? body.result.isError : busy.status).toBe(mcp ? true : 429);
+      if (mcp) expect(body.result.content[0].text).toContain("no execution was admitted");
+      const args = { delegationId: agent.delegationId, signature: agent.signature };
+      const agentResponse = await handler(new Request(`https://gateway.test/postgresql/tenant-a/${mcp ? "agent-mcp" : "agent-execute"}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mcp ? {
+          jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "postgresql_agent_execute", arguments: args },
+        } : args),
+      }));
+      expect(agentResponse.status).toBe(429);
+      expect(await agentResponse.json()).toEqual({ ok: false, code: "postgresql_host_busy" });
+      const inspection = await (await session("inspect")).json();
+      expect(mcp ? inspection.result.isError : inspection.ok).toBe(!mcp);
+      const stopped = await (await session("stop")).json();
+      expect(mcp ? stopped.result.isError : stopped.ok).toBe(!mcp);
+      expect(resolve).toHaveBeenCalledOnce();
+      expect(await database.prepare("SELECT COUNT(*) AS n FROM postgresql_read_claims").bind().first()).toEqual({ n: 0 });
+    } finally { release.resolve(); await pending; }
+  });
 
   it.each([false, true])("binds request and approval to current session identities (MCP=%s)", async mcp => {
     const input = { requestId: "request", releaseId: "release", action: pgAction };
