@@ -65,10 +65,14 @@ See [integrations](integrations/README.md) for runnable adapters, supported
 versions, and explicit validation boundaries. Framework evidence tools are
 separate from query execution and do not configure production authentication.
 
-The [offline database adapter inspector](docs/DATABASE_ADAPTERS.md) checks
-implementation capabilities and explicit resource requirements. Only BigQuery
-has an implemented business-query adapter; the inspector never grants authority
-or claims live provider verification for any engine.
+The [database adapter matrix](docs/DATABASE_ADAPTERS.md) separates the BigQuery
+adapter from the [governed PostgreSQL Node host](docs/POSTGRESQL_CONNECTOR.md).
+PostgreSQL supports released, single-table COUNT/SUM reads with tenant RLS,
+approval, signed Agent delegation, bounded cancellation, durable recovery and
+detached local evidence verification. Synthetic real-engine CI covers exact
+15.20, 16.16, 17.12 and 18.7 builds. This is not arbitrary SQL support, a deployed
+Worker PostgreSQL endpoint, independent acceptance or a production pilot.
+The offline inspector never grants authority or claims live provider verification.
 
 The [offline NVIDIA import adapter](docs/NVIDIA_IMPORT.md) stages version-pinned
 SQL attribute context and an explicit local metric mapping for candidate review.

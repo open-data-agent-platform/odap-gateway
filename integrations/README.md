@@ -6,6 +6,7 @@ Gateway login, authorize a query, or complete a pilot.
 
 | Integration | Implemented surface | Validation boundary |
 | --- | --- | --- |
+| [PostgreSQL](../docs/POSTGRESQL_CONNECTOR.md) | Governed Node HTTP/MCP host for released COUNT/SUM reads, approval, signed delegation, cancellation and local evidence | Synthetic real-engine CI on exact 15.20/16.16/17.12/18.7; no arbitrary SQL, public Worker route, production setup or independent pilot |
 | [OpenLineage](openlineage/README.md) | Export pinned settled evidence as retrospective attempt events | Offline schema/client checks; no collector acceptance or physical table lineage |
 | [NVIDIA Auto Ontology](nvidia/README.md) | Stage pinned SQL attribute context and explicit local mapping for candidate review | Synthetic pinned-source checks; no live import or automatic approval |
 | [Cube](cube/README.md) | Stage a selected REST metadata measure plus explicit local definition for candidate review | Offline selected-envelope, pin, CLI and local admission checks; no Cube query or live import |
@@ -28,7 +29,11 @@ recorded query outcome, which can still be `failed` or `cancelled`.
 
 Live Cube/dbt semantic imports, DataHub/OpenMetadata receiver acceptance,
 ClickHouse/other warehouse execution, automatic event delivery, and hosted
-framework authentication are not supplied here. Existing OpenLineage DataHub
+framework authentication are not supplied here. The PostgreSQL host is separate
+from the framework evidence tools and requires explicit authenticated host and
+source configuration. Its local evidence profile does not automatically inherit
+compatibility with the historical-evidence exporters listed above.
+Existing OpenLineage DataHub
 notes remain source-review findings; the separate DataHub SDK adapter does not
 validate that receiver's OpenLineage ingestion behavior. A generic MCP
 tool does not establish compatibility with every MCP product.
