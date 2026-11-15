@@ -5,6 +5,7 @@ import { exactFields, routeId } from "./control-command-request";
 import { promoteSemanticRevision, retireSemanticRelease } from "./semantic-candidate-storage";
 import { postgresAgentAudience, postgresAgentBinding, type PostgresAgentProof } from "./postgresql-agent";
 import { exportPostgresEvidence } from "./postgresql-evidence-export";
+import { recordPostgresMissingRelease } from "./postgresql-preapproval-denial";
 
 export class PostgresControlDenied extends Error {
   constructor() { super("PostgreSQL control operation unavailable"); }
@@ -126,6 +127,16 @@ export async function previewPostgresRead(access: ControlAccess, releaseId: stri
 
 export async function requestPostgresRead(access: ControlAccess, input: { requestId: string; releaseId: string; action: unknown }) {
   postgresControlId(input.requestId);
+  postgresControlId(input.releaseId);
+  const release = await access.db.prepare("SELECT id FROM semantic_releases WHERE tenant_id=? AND id=?")
+    .bind(access.tenantId, input.releaseId).first<{ id: string }>();
+  if (!release) {
+    // The existing trigger atomically rechecks absence and current membership.
+    // All outcomes remain the same opaque refusal, including a failed audit write.
+    try { await recordPostgresMissingRelease(access, input.releaseId, input.action); }
+    catch { throw new PostgresControlDenied(); }
+    throw new PostgresControlDenied();
+  }
   const { row, compiled, actionJson } = await previewPostgresRead(access, input.releaseId, input.action);
   required(await access.db.prepare(`INSERT INTO postgresql_read_requests
     (tenant_id,id,requester_id,release_id,source_id,action_json,action_digest,statement_digest)

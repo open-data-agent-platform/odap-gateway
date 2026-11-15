@@ -225,6 +225,28 @@ it.each([{ tenantId: "tenant-b" }, { connectionRef: "other" }, { role: "reader_b
   }, c);
 });
 
+it.each([false, true])("records missing-release refusal before provider access through official MCP (modern=%s)", async modern => {
+  await governedFixture(async db => {
+    const secret = "synthetic-refusal-only";
+    let providerCalls = 0;
+    const host = await startPostgresHttpHost({ origin: pgAgentOrigin, port: 0, env: { DB: db, AUTH_COOKIE_SECRET: secret },
+      resolve: async () => { providerCalls++; return config; } });
+    let connection: Awaited<ReturnType<typeof connectPostgresMcpFixture>> | undefined;
+    try {
+      const cookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "reader",
+        email: "synthetic@example.test", name: "Synthetic", expiresAt: Date.now() + 600000 }, secret);
+      connection = await connectPostgresMcpFixture(host.address, pgAgentOrigin, "/postgresql/tenant-a/mcp-stream",
+        { Origin: pgAgentOrigin, Cookie: cookie }, modern);
+      const reply = await connection.client.callTool({ name: "postgresql_request",
+        arguments: { requestId: "missing-request", releaseId: "missing", action: pgAction } });
+      expect(reply.isError).toBe(true); expect(providerCalls).toBe(0);
+      expect(await db.prepare("SELECT count(*) AS n FROM missing_release_denials").first("n")).toBe(1);
+      expect(await db.prepare("SELECT count(*) AS n FROM postgresql_read_claims").first("n")).toBe(0);
+      expect((await admin.query("SELECT pid FROM pg_stat_activity WHERE application_name='odap-postgresql-preview'")).rows).toEqual([]);
+    } finally { await connection?.close(); expect(await host.close()).toEqual({ drained: true }); }
+  });
+});
+
 it.each([false, true])("exports verified local evidence for a real acknowledged read via official MCP (Agent=%s)", async agent => {
   await governedFixture(async db => {
     const a = agent ? await approvePostgresAgentFixture(db) : undefined, requestId = agent ? "agent-request" : "request";

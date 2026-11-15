@@ -7,7 +7,7 @@ import { startPostgresHttpHost } from "../integrations/postgresql/server";
 import { openPostgresSqliteControl } from "../integrations/postgresql/sqlite-control";
 import { SESSION_COOKIE, signAuthPayload } from "../lib/auth";
 import { initializePostgresLocalFixture } from "./fixtures/postgresql-local-store";
-import { seedPostgresControl, publishPostgresFixture, approvePostgresFixture } from "./fixtures/postgresql-control";
+import { seedPostgresControl, publishPostgresFixture, approvePostgresFixture, pgAction, pgRun } from "./fixtures/postgresql-control";
 import { approvePostgresAgentFixture } from "./fixtures/postgresql-agent";
 import { connectPostgresMcpFixture } from "./fixtures/postgresql-mcp";
 import { postgresHttpRequest } from "./fixtures/postgresql-http";
@@ -45,6 +45,17 @@ async function client(agent = false, modern = false, tenant = "tenant-a", header
 function text(result: { content?: unknown }) {
   return (result.content as { type: string; text: string }[])[0].text;
 }
+it.each([false, true])("records missing-release denial without disclosing existence through official MCP (modern=%s)", async modern => {
+  await pgRun(store.db, "UPDATE postgresql_source_heads SET active=0 WHERE tenant_id='tenant-a'");
+  const c = (await client(false, modern)).client;
+  const call = (releaseId: string) => c.callTool({ name: "postgresql_request",
+    arguments: { requestId: "new-request", releaseId, action: pgAction } });
+  const missing = await call("missing"), retired = await call("release");
+  expect(missing.isError).toBe(true); expect(retired.isError).toBe(true); expect(text(missing)).toBe(text(retired));
+  expect(await store.db.prepare("SELECT count(*) AS n FROM missing_release_denials").first("n")).toBe(1);
+  expect(await store.db.prepare("SELECT count(*) AS n FROM postgresql_read_claims").first("n")).toBe(0);
+  expect(resolve).not.toHaveBeenCalled();
+});
 it.each([false, true])("exports a current-owner snapshot through the official MCP client (modern=%s)", async modern => {
   const access = pgAccess(store.db), { row } = await preparePostgresDispatch(access, "request");
   await claimPostgresRead(access, row, "intent");

@@ -650,6 +650,22 @@ same connection, as used here.
 
 ## Read-only evidence export
 
+Authenticated human requests with a structurally valid action and a missing
+tenant-local semantic release now append an existing-format denied receipt before
+refusing the request. Each refused attempt has a server-assigned opaque ID, the
+current principal, the `postgresql-session` human marker and the action digest;
+parameter values are not persisted. The shared audit trigger atomically rechecks
+membership and release absence, and rolls back if the receipt cannot be appended.
+No contract, claim, resource reservation or provider access is created.
+
+External REST/MCP errors remain identical for missing and unavailable releases;
+receipt IDs are not exposed as an existence probe. A concurrent publication or a
+failed/lost audit acknowledgement still refuses the request without automatic
+execution or retry. This is a bounded missing-release audit path, not a claim that
+all malformed, unauthenticated or other policy refusals have durable receipts.
+The claim export below does not include these pre-approval attempts; they remain
+in the existing tenant-scoped receipt/audit storage.
+
 The source's named, currently active owner can call the human REST command
 `export-evidence` with `{ "requestId": "..." }` or the standard MCP tool
 `postgresql_export_evidence`. The response is `{ "json": "...", "digest": "sha256:..." }`.
