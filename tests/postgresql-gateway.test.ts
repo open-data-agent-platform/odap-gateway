@@ -81,7 +81,7 @@ describe("authenticated PostgreSQL REST/MCP host hook", { timeout: 30000 }, () =
       headers: { Origin: "https://gateway.test", "Content-Type": "application/json", Cookie: await cookie("reader") },
       body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/list" }) }));
     const body = await response.json();
-    expect(body.result.tools).toHaveLength(11);
+    expect(body.result.tools).toHaveLength(15);
     expect(body.result.tools.map((t: { name: string }) => t.name)).not.toContain("postgresql_observe");
     expect(body.result.tools.find((t: { name: string }) => t.name === "postgresql_execute").inputSchema)
       .toEqual({ type: "object", properties: { requestId: { type: "string" } }, required: ["requestId"], additionalProperties: false });

@@ -5,8 +5,9 @@
 authenticated REST and post-initialization MCP command hooks. This is a **Node host
 integration**, not a deployed Cloudflare Worker query endpoint or full PostgreSQL
 SQL/type coverage. The offline inspector still refuses production Gateway dispatch.
-Migration `0035_postgresql_control.sql` is opt-in and has not been applied to the
-production D1 database. Existing production migration restrictions still apply.
+Migrations `0035_postgresql_control.sql` and `0036_postgresql_agent_delegations.sql`
+are opt-in and have not been applied to the production D1 database. Existing
+production migration restrictions still apply.
 
 ## Supported slice
 
@@ -41,7 +42,8 @@ interface; Node hosts must provide a durable compatible binding. There is no
 fallback to demo identity, CLI email, caller principal, or an Agent permission flag.
 The host must bound concurrent requests and supply TLS termination, OAuth session
 issuance, and MCP session/protocol initialization. This hook does not implement a
-standalone MCP server, autonomous-agent delegation or an OAuth provider.
+standalone MCP server or an OAuth provider. Bounded Agent execution uses the
+separate registered-key path below, not a human session impersonation.
 
 The operator provisions an immutable `postgresql_read_budgets` row and a
 `postgresql_source_versions` row for the explicit tenant, designated owner,
@@ -78,8 +80,67 @@ Quotas are explicitly **read-attempt counts, not currency or scanned-row limits*
 Approvals do not reserve a future slot; quota is atomically acquired with the claim,
 and competing approved requests may be refused. All responses report monetary cost
 as `unpriced`. The session client is labeled `postgresql-session`, not represented
-as an independently verified Agent. Formal cost settlement and autonomous-agent
-authority remain unsupported and must not be inferred from this workflow.
+as an independently verified Agent. Formal cost settlement and open-ended policy
+grants remain unsupported and must not be inferred from this workflow.
+
+### Bounded Agent execution
+
+The operator enrolls the Agent's uncompressed P-256 public point in the existing
+tenant-scoped `agent_verification_keys` registry. No self-enrollment endpoint or
+private-key storage is provided. Disabling a key blocks new execution and Agent
+inspection; re-enablement is not supported. A new key needs fresh consent.
+
+1. The authenticated requester creates a read request, then calls `delegate` with
+   `requestId`, `agentId`, `keyId`. Only that requester can consent. Consent has a
+   database-clock ten-minute lifetime and cannot be attached after approval.
+2. The resource's named owner inspects the request, including delegation terms,
+   then calls `approve-agent-read` with the normal exact review fields plus
+   `delegationId`, `agentId`, `keyId`. The audience is the configured HTTPS host,
+   never client-selected. The ordinary `approve-read` cannot silently convert a
+   delegated request to a session request. The contract records the original
+   requester and actual Agent, with expiry no later than the consent.
+3. The requester calls `agent-challenges` with `delegationId` and passes the
+   canonical signing bytes and independently retained approved terms to the
+   enrolled Agent through an authenticated channel. Execute and inspect have
+   different purposes. Their signatures bind audience, tenant, requester, Agent,
+   key, delegation nonce, request, release, source, contract, action/statement/
+   definition/connection digests, role, quota scope, target and expiry.
+4. `integrations/postgresql/agent.ts` supplies `signPostgresAgentCommand(challenge,
+   expectedTerms, operation, privateKey)`. It requires exact canonical agreement
+   with trusted terms before Web Crypto ECDSA/P-256/SHA-256 signing; returns
+   `{delegationId, signature}` (64-byte signature encoded as 128 lowercase hex
+   characters). Never populate trusted terms merely from an untrusted challenge.
+   The private CryptoKey stays in the Agent host; do not serialize or log it.
+5. Send that object to POST `/postgresql/{tenant}/agent-execute` or
+   `/postgresql/{tenant}/agent-inspect`. These routes require no browser session
+   and reject Cookie/Authorization headers and foreign Origin headers. When an
+   Origin is present it must exactly match the host. HTTPS termination and host
+   concurrency/rate limits remain mandatory.
+
+The post-initialization `/postgresql/{tenant}/agent-mcp` hook accepts JSON-RPC
+`tools/call` for `postgresql_agent_execute` or `postgresql_agent_inspect`, with the
+same two signed arguments and the same service as REST. The host registers those
+two tools and handles MCP initialization/discovery; this hook is not a complete
+MCP server. Human consent/review/challenge/revocation commands remain available
+through the session REST/MCP hooks, never through the Agent endpoint.
+
+The signature is verified before provider resolution. After asynchronous signature
+verification and PostgreSQL preparation, the atomic claim checks current key,
+consent, membership, source, release, contract, stop and quota state again. A
+signature does not create a reusable permission boolean. Concurrent replays have
+at most one durable claim; session execution cannot consume Agent authority.
+Pending receipts and consumed attempts are retained on unknown outcomes.
+
+`revoke-delegation` is requester-only and idempotent, including after expiry or
+key disablement. It blocks future claims, not an already-running query. Agent
+inspection is read-only and permitted after retirement while its own consent,
+key and requester remain eligible; after expiry/revocation the requester still
+uses session `inspect`. Inspection never retries execution or returns stored
+query values. Possession of a historical receipt grants no permission.
+
+These are local host formats, not a new ODAP protocol revision or universal Agent
+framework compatibility claim. The cryptographic implementation uses the standard
+[Node Web Crypto API](https://nodejs.org/docs/latest-v24.x/api/webcrypto.html).
 
 ### Transport contract
 
@@ -155,12 +216,14 @@ committed or uploaded. A local fixture needs the same TLS setup under
 SQLite and native D1 tests cover the persisted review/approval/claim/receipt path,
 tenant/owner isolation, concurrent claims, quota exhaustion, withdrawal of authority,
 append-only storage and receipt-write rollback. Real PostgreSQL tests exercise the
-governed host path, REST/MCP, concurrency, resolver substitution and lost claim or
-observation acknowledgements. These are author engineering tests, not independent
+governed host path, session and signed Agent REST/MCP, concurrency, requester
+consent, owner/key/audience binding, revocation races, resolver substitution and
+lost claim or observation acknowledgements. SQLite also verifies upgrades retain
+prior session contracts. These are author engineering tests, not independent
 signoff, formal scoring or a real pilot.
 
 Still required for full acceptance: approved production catalog/auth/host setup and
-schema rollout; autonomous Agent delegation; independently verifiable terminal
+schema rollout; open-ended policy/Agent grants where required; independently verifiable terminal
 cancellation/reconciliation; a reviewed monetary pricing/settlement model; broader
 SQL/type/version coverage where required; independent review and an authorized
 pilot. Do not enable the general adapter inspector by merely listing this host hook.

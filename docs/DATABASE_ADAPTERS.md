@@ -2,9 +2,9 @@
 
 This repository currently implements a governed BigQuery metric-read transport.
 PostgreSQL has a separate [governed Node host integration](POSTGRESQL_CONNECTOR.md)
-with persisted session authority, attempt quotas, receipts and REST/MCP hooks.
-It is not deployed in the production Worker and does not offer monetary cost
-settlement or autonomous-agent delegation. The inspector continues to reject it
+with persisted session authority, scoped requester/owner-approved Agent signatures,
+attempt quotas, receipts and REST/MCP hooks. It is not deployed in the production
+Worker and does not offer monetary cost settlement or open-ended Agent grants. The inspector continues to reject it
 as an unimplemented **Gateway adapter**. Other engines are not implemented. Internal D1
 storage, ecosystem integrations and wire-protocol compatibility do not establish
 business-query support. Provider verification and independent pilot acceptance

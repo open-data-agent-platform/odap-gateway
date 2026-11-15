@@ -3,6 +3,7 @@ import type { ControlAccess } from "./control-storage";
 import { compilePostgresMetric, type PostgresSource } from "./postgresql-metric-compiler";
 import { exactFields, routeId } from "./control-command-request";
 import { promoteSemanticRevision, retireSemanticRelease } from "./semantic-candidate-storage";
+import { postgresAgentAudience, postgresAgentBinding, type PostgresAgentProof } from "./postgresql-agent";
 
 export class PostgresControlDenied extends Error {
   constructor() { super("PostgreSQL control operation unavailable"); }
@@ -15,6 +16,8 @@ const label = (v: unknown, max = 1024): v is string =>
 function required<T>(v: T | null): T { if (!v) throw new PostgresControlDenied(); return v; }
 
 export type PostgresControlRead = {
+  tenant_id: string; target: string; expires_at: string;
+  delegation_id: string | null; agent_id: string | null; key_id: string | null; audience: string | null; public_hex: string | null;
   id: string; source_id: string; release_id: string; requester_id: string; owner_id: string;
   connection_ref: string; connection_digest: string; source_json: string; role_name: string; budget_id: string;
   release_json: string; definition_json: string; definition_digest: string;
@@ -137,7 +140,9 @@ export async function requestPostgresRead(access: ControlAccess, input: { reques
 export async function inspectPostgresRead(access: ControlAccess, requestId: string) {
   postgresControlId(requestId);
   const row = required(await access.db.prepare(`SELECT q.id,q.requester_id,q.release_id,q.source_id,q.action_json,q.action_digest,
-    a.contract_id,a.expires_at,c.intent_id,c.claimed_at,o.outcome,s.stopped_at,
+    a.contract_id,CASE WHEN d.id IS NULL THEN a.expires_at ELSE min(a.expires_at,d.expires_at) END AS expires_at,
+    c.intent_id,c.claimed_at,o.outcome,s.stopped_at,
+    d.id AS delegation_id,d.agent_id,d.key_id,d.audience,d.expires_at AS delegation_expires_at,d.revoked_at AS delegation_revoked_at,
     b.limit_attempts,(SELECT count(*) FROM postgresql_read_claims used WHERE used.tenant_id=q.tenant_id AND used.budget_id=v.budget_id) AS used_attempts
     FROM postgresql_read_requests q JOIN postgresql_source_versions v ON v.tenant_id=q.tenant_id AND v.id=q.source_id
     JOIN postgresql_read_budgets b ON b.tenant_id=v.tenant_id AND b.id=v.budget_id
@@ -147,28 +152,45 @@ export async function inspectPostgresRead(access: ControlAccess, requestId: stri
     LEFT JOIN postgresql_read_claims c ON c.tenant_id=q.tenant_id AND c.request_id=q.id
     LEFT JOIN postgresql_read_observations o ON o.tenant_id=q.tenant_id AND o.request_id=q.id
     LEFT JOIN postgresql_read_stops s ON s.tenant_id=q.tenant_id AND s.request_id=q.id
+    LEFT JOIN postgresql_agent_delegations d ON d.tenant_id=q.tenant_id AND d.request_id=q.id
     WHERE q.tenant_id=? AND q.id=?`).bind(access.principalId, access.tenantId, requestId)
     .first<{ id: string; requester_id: string; release_id: string; source_id: string; action_json: string; action_digest: string;
       contract_id: string | null; expires_at: string | null; intent_id: string | null; claimed_at: string | null;
+      delegation_id: string | null; agent_id: string | null; key_id: string | null; audience: string | null;
+      delegation_expires_at: string | null; delegation_revoked_at: string | null;
       outcome: string | null; stopped_at: string | null; limit_attempts: number; used_attempts: number }>());
   return { ...row, budgetUnit: "read-attempt" as const, monetaryCost: "unpriced" as const,
     receiptIds: row.intent_id ? ["pg-pending-" + row.intent_id, ...(row.outcome ? ["pg-observed-" + row.intent_id] : [])] : [],
     state: row.outcome ?? (row.intent_id ? "observation-required" : row.stopped_at ? "stopped-before-claim" : "not-submitted") };
 }
 
-export async function approvePostgresRead(access: ControlAccess, input: {
+type PostgresApprovalInput = {
   requestId: string; releaseId: string; sourceId: string; requesterId: string; reviewedAction: unknown;
-}) {
+};
+export async function approvePostgresRead(access: ControlAccess, input: PostgresApprovalInput) {
+  return approveRead(access, input);
+}
+export async function approvePostgresAgentRead(access: ControlAccess, audience: string,
+  input: PostgresApprovalInput & { delegationId: string; agentId: string; keyId: string }) {
+  for (const value of [input.delegationId, input.agentId, input.keyId]) postgresControlId(value);
+  return approveRead(access, input, { ...input, audience: postgresAgentAudience(audience) });
+}
+async function approveRead(access: ControlAccess, input: PostgresApprovalInput,
+  agent?: { delegationId: string; agentId: string; keyId: string; audience: string }) {
   for (const id of [input.requestId, input.releaseId, input.sourceId]) postgresControlId(id);
   const actionJson = canonicalControlJson(input.reviewedAction);
   const digest = await sha256Text(actionJson), contractId = crypto.randomUUID();
-  required(await access.db.prepare(`INSERT INTO postgresql_read_approvals(tenant_id,request_id,contract_id,approved_by)
-    SELECT q.tenant_id,q.id,?,q.owner_id FROM postgresql_current_requests q
+  required(await access.db.prepare(`INSERT INTO postgresql_read_approvals(tenant_id,request_id,contract_id,approved_by,delegation_id)
+    SELECT q.tenant_id,q.id,?,q.owner_id,? FROM postgresql_current_requests q
     WHERE q.tenant_id=? AND q.id=? AND q.release_id=? AND q.source_id=? AND q.requester_id=?
       AND q.action_json=? AND q.action_digest=? AND q.owner_id=? AND q.owner_id<>q.requester_id
       AND NOT EXISTS(SELECT 1 FROM postgresql_read_stops s WHERE s.tenant_id=q.tenant_id AND s.request_id=q.id)
-    RETURNING contract_id`).bind(contractId, access.tenantId, input.requestId, input.releaseId, input.sourceId,
-    input.requesterId, actionJson, digest, access.principalId).first());
+      AND ${agent ? `EXISTS(SELECT 1 FROM postgresql_agent_delegations d WHERE d.tenant_id=q.tenant_id AND d.request_id=q.id
+        AND d.id=? AND d.agent_id=? AND d.key_id=? AND d.audience=?)` :
+    "NOT EXISTS(SELECT 1 FROM postgresql_agent_delegations d WHERE d.tenant_id=q.tenant_id AND d.request_id=q.id)"}
+    RETURNING contract_id`).bind(contractId, agent?.delegationId ?? null, access.tenantId, input.requestId, input.releaseId, input.sourceId,
+    input.requesterId, actionJson, digest, access.principalId,
+    ...(agent ? [agent.delegationId, agent.agentId, agent.keyId, agent.audience] : [])).first());
   return { contractId };
 }
 
@@ -183,10 +205,11 @@ export async function stopPostgresRead(access: ControlAccess, requestId: string)
   return { requestId, status: "future-claim-blocked" as const, cancellationConfirmed: false };
 }
 
-export async function preparePostgresDispatch(access: ControlAccess, requestId: string) {
+export async function preparePostgresDispatch(access: ControlAccess, requestId: string, proof?: PostgresAgentProof) {
   postgresControlId(requestId);
   const row = required(await access.db.prepare(`SELECT * FROM postgresql_claimable_reads
     WHERE tenant_id=? AND id=? AND requester_id=?`).bind(access.tenantId, requestId, access.principalId).first<PostgresControlRead>());
+  postgresAgentBinding(access, row, proof);
   const release: unknown = JSON.parse(row.release_json);
   if (!isSemanticRelease(release) || release.tenantId !== access.tenantId || release.id !== row.release_id ||
       release.owner !== row.owner_id || release.sourceRevision !== row.source_id) throw new PostgresControlDenied();
@@ -198,17 +221,18 @@ export async function preparePostgresDispatch(access: ControlAccess, requestId: 
 }
 
 // The claim rechecks the entire authority view in its atomic write, after PG preflight.
-export async function claimPostgresRead(access: ControlAccess, row: PostgresControlRead, intentId: string) {
+export async function claimPostgresRead(access: ControlAccess, row: PostgresControlRead, intentId: string, proof?: PostgresAgentProof) {
   postgresControlId(intentId);
+  const agent = postgresAgentBinding(access, row, proof);
   const result = await access.db.prepare(`INSERT INTO postgresql_read_claims
     (tenant_id,request_id,intent_id,claimed_by,budget_id,statement_digest)
     SELECT q.tenant_id,q.id,?,q.requester_id,q.budget_id,q.statement_digest FROM postgresql_claimable_reads q
     WHERE q.tenant_id=? AND q.id=? AND q.requester_id=? AND q.source_id=? AND q.release_id=?
       AND q.connection_digest=? AND q.action_json=? AND q.action_digest=? AND q.definition_digest=?
-      AND q.statement_digest=? AND q.contract_id=? RETURNING intent_id`)
+      AND q.statement_digest=? AND q.contract_id=? AND q.delegation_id IS ? AND q.public_hex IS ? RETURNING intent_id`)
     .bind(intentId, access.tenantId, row.id, access.principalId, row.source_id, row.release_id,
       row.connection_digest, row.action_json, row.action_digest, row.definition_digest,
-      row.statement_digest, row.contract_id).first<{ intent_id: string }>();
+      row.statement_digest, row.contract_id, agent.delegationId, agent.publicHex).first<{ intent_id: string }>();
   return result?.intent_id === intentId;
 }
 

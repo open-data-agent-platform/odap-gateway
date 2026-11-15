@@ -2,6 +2,8 @@ import { canonicalControlJson, sha256Text } from "../../lib/control-objects";
 import type { ControlAccess } from "../../lib/control-storage";
 import { claimPostgresRead, observePostgresRead, preparePostgresDispatch, PostgresControlDenied } from "../../lib/postgresql-control";
 import { executePostgresMetric, type PostgresHostConfig } from "./index";
+import { verifyPostgresAgent, inspectPostgresAgent, type PostgresAgentProof, type PostgresAgentOperation } from "../../lib/postgresql-agent";
+import type { D1Database } from "../../lib/d1";
 
 export type PostgresConnectionResolver = (tenantId: string, connectionRef: string) => Promise<PostgresHostConfig>;
 
@@ -25,8 +27,8 @@ async function bounded<T>(promise: Promise<T>, ms = 5000): Promise<T> {
 
 // The trusted resolver is never selected by a client-supplied host, URL, role or password.
 export async function executeGovernedPostgresRead(access: ControlAccess, requestId: string,
-  resolve: PostgresConnectionResolver, signal?: AbortSignal) {
-  const { row, compiled, read } = await bounded(preparePostgresDispatch(access, requestId));
+  resolve: PostgresConnectionResolver, signal?: AbortSignal, proof?: PostgresAgentProof) {
+  const { row, compiled, read } = await bounded(preparePostgresDispatch(access, requestId, proof));
   const resolved = await bounded(resolve(access.tenantId, row.connection_ref));
   const config = { ...resolved, tls: { ...resolved.tls } };
   if (signal?.aborted || config.user !== row.role_name || config.database !== read.source.database ||
@@ -36,7 +38,7 @@ export async function executeGovernedPostgresRead(access: ControlAccess, request
     if (signal?.aborted || binding.database !== read.source.database || binding.role !== row.role_name ||
         binding.actionDigest !== compiled.actionDigest || binding.definitionDigest !== compiled.definitionDigest ||
         binding.statementDigest !== compiled.statementDigest) return false;
-    return bounded(claimPostgresRead(access, row, intentId));
+    return bounded(claimPostgresRead(access, row, intentId, proof));
   }, signal);
   if (result.claim !== "confirmed") {
     return { outcome: result.claim === "unknown" ? "observation-required" : "not-submitted",
@@ -52,4 +54,11 @@ export async function executeGovernedPostgresRead(access: ControlAccess, request
   }
   return { outcome: "succeeded", claim: "confirmed", requestId, intentId, value: result.value,
     receiptId: "pg-observed-" + intentId, statementDigest: compiled.statementDigest, monetaryCost: "unpriced" as const };
+}
+
+export async function postgresAgentOperation(db: D1Database, audience: string, tenantId: string,
+  delegationId: string, signature: string, operation: PostgresAgentOperation, resolve: PostgresConnectionResolver, signal?: AbortSignal) {
+  const verified = await bounded(verifyPostgresAgent(db, audience, tenantId, delegationId, signature, operation));
+  return operation === "inspect" ? bounded(inspectPostgresAgent(verified.access, verified.proof)) :
+    executeGovernedPostgresRead(verified.access, verified.requestId, resolve, signal, verified.proof);
 }

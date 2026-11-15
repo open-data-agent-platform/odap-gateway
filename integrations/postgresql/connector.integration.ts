@@ -7,13 +7,15 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import { executePostgresMetric, type PostgresClaim, type PostgresHostConfig } from "./index";
 import { postgresDefinition as d, postgresRead, postgresSource } from "../../tests/fixtures/postgresql";
-import { executeGovernedPostgresRead, postgresConnectionDigest } from "./control";
+import { executeGovernedPostgresRead, postgresAgentOperation, postgresConnectionDigest } from "./control";
 import { jobSqlite, jobTransactionalDatabase } from "../../tests/fixtures/job-sqlite";
 import { approvePostgresFixture, pgAccess, publishPostgresFixture, seedPostgresControl } from "../../tests/fixtures/postgresql-control";
 import { inspectPostgresRead } from "../../lib/postgresql-control";
 import type { D1Database } from "../../lib/d1";
 import { createPostgresGateway } from "./gateway";
 import { SESSION_COOKIE, signAuthPayload } from "../../lib/auth";
+import { approvePostgresAgentFixture, pgAgentOrigin } from "../../tests/fixtures/postgresql-agent";
+import { revokePostgresDelegation } from "../../lib/postgresql-agent";
 
 // Fixed disposable fixture only: never accept a business endpoint or credentials.
 const config: PostgresHostConfig = { host: "127.0.0.1", port: 55432, database: "odap_pg_fixture",
@@ -62,7 +64,7 @@ beforeAll(async () => {
   writeFileSync("postgresql-environment.json", JSON.stringify({ serverVersion: "17.12", serverVersionNum: version,
     driver: "pg", driverVersion, syntheticDataOnly: true, transport: "isolated-loopback-without-TLS",
     productionVerified: false, gatewayDispatchIntegrated: true, transportScope: "Node host, not deployed Worker",
-    tlsFixtureRequired: true, budgetUnit: "read-attempt", monetaryCost: "unpriced" }, null, 2) + "\n");
+    tlsFixtureRequired: true, signedAgentDelegation: true, budgetUnit: "read-attempt", monetaryCost: "unpriced" }, null, 2) + "\n");
 });
 afterAll(async () => { await admin.end(); });
 
@@ -77,6 +79,46 @@ async function governedFixture(test: (db: D1Database) => Promise<void>, c = conf
     await test(db);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
+
+it.each([false, true])("executes a signed delegated PostgreSQL read and recovers without resubmitting (MCP=%s)", async mcp => {
+  await governedFixture(async db => {
+    const a = await approvePostgresAgentFixture(db);
+    const handler = createPostgresGateway({ origin: pgAgentOrigin, env: { DB: db }, resolve: async () => config });
+    const call = (operation: string, signature: string) => handler(new Request(`${pgAgentOrigin}/postgresql/tenant-a/${mcp ? "agent-mcp" : "agent-" + operation}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mcp ? {
+        jsonrpc: "2.0", id: "agent", method: "tools/call", params: { name: "postgresql_agent_" + operation, arguments: { delegationId: a.delegationId, signature } },
+      } : { delegationId: a.delegationId, signature }),
+    }));
+    const response = await call("execute", a.signature); expect(response.status).toBe(200);
+    const body = await response.json(); const result = mcp ? JSON.parse(body.result.content[0].text) : body.result;
+    expect(result).toMatchObject({ outcome: "succeeded", value: "3" });
+    expect((await call("execute", a.signature)).status).toBe(403);
+    const recovery = await (await call("inspect", a.inspectSignature)).json();
+    expect(mcp ? JSON.parse(recovery.result.content[0].text) : recovery.result).toMatchObject({ state: "succeeded", agentId: "agent-one" });
+    expect(await inspectPostgresRead(pgAccess(db), "agent-request")).toMatchObject({ used_attempts: 1 });
+  });
+});
+it("does not submit when delegated consent is revoked during actual provider preparation", async () => {
+  await governedFixture(async db => {
+    const a = await approvePostgresAgentFixture(db);
+    const result = await postgresAgentOperation(db, pgAgentOrigin, "tenant-a", a.delegationId, a.signature, "execute", async () => {
+      await revokePostgresDelegation(pgAccess(db), pgAgentOrigin, a.delegationId); return config;
+    });
+    expect(result).toMatchObject({ outcome: "not-submitted", claim: "denied" });
+    expect(await inspectPostgresRead(pgAccess(db), "agent-request")).toMatchObject({ used_attempts: 0, state: "not-submitted" });
+  });
+});
+it("retains delegated claims and pending receipts after a real statement timeout", async () => {
+  const c = { ...config, statementTimeoutMs: 100, lockTimeoutMs: 50 };
+  await governedFixture(async db => {
+    const a = await approvePostgresAgentFixture(db);
+    expect(await postgresAgentOperation(db, pgAgentOrigin, "tenant-a", a.delegationId, a.signature, "execute", async () => c))
+      .toMatchObject({ outcome: "observation-required", claim: "confirmed" });
+    expect(await postgresAgentOperation(db, pgAgentOrigin, "tenant-a", a.delegationId, a.inspectSignature, "inspect", async () => c))
+      .toMatchObject({ state: "observation-required" });
+    await expect(postgresAgentOperation(db, pgAgentOrigin, "tenant-a", a.delegationId, a.signature, "execute", async () => c)).rejects.toThrow();
+  }, c, { ...d, table: { ...d.table, name: "slow_orders" } });
+});
 
 it("executes with durable authority and a confirmed receipt, then refuses replay", async () => {
   await governedFixture(async db => {
