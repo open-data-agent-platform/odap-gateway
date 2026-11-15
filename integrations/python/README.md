@@ -1,7 +1,8 @@
 # Python evidence integrations
 
-Preview 0.1.0. This independent, ODAP-maintained package provides local evidence
-tools for FastMCP, LangChain, LangGraph and LlamaIndex. No upstream contribution
+Preview 0.2.0. This independent, ODAP-maintained package provides local evidence
+tools for FastMCP, LangChain, LangGraph and LlamaIndex, plus SDK projections for
+DataHub, OpenMetadata and OpenTelemetry. No upstream contribution
 or endorsement is implied. Python 3.11+ and the Gateway's supported Node runtime
 are required; compatibility checks use Python 3.12.
 
@@ -15,7 +16,8 @@ npm run evidence:build
 python -m pip install './integrations/python[fastmcp]'
 ```
 
-Other extras are `langchain`, `langgraph`, and `llamaindex`. The base package
+Other extras are `langchain`, `langgraph`, `llamaindex`, `datahub`, `openmetadata`
+and `opentelemetry`. The base package
 uses only the Python standard library; extras import their official framework.
 Select just the extras needed by the host. No package registry publication is
 implied by this source-install command.
@@ -83,6 +85,10 @@ once at construction; supply an explicit trusted executable if required.
 
 ## Validate
 
+The four framework extras and three catalog/telemetry extras have separate test
+environments. Combining all seven extras in one environment is not a verified
+compatibility claim; upstream dependencies can impose different versions.
+
 ```sh
 python -m pip install -r integrations/python/requirements-test.lock
 python -m pip install --no-deps ./integrations/python
@@ -96,3 +102,55 @@ Set `NO_PROXY=127.0.0.1,localhost` when local requests would otherwise use a
 proxy. The suite uses the real built verifier and framework packages, a
 synthetic fixture, and loopback HTTP. It does not call an LLM, a warehouse,
 LangSmith, or a production Gateway, and is not independent acceptance.
+
+## Catalog and telemetry evidence reader
+
+The three new adapters use `AttemptReader` with the built
+`dist/evidence/scripts/export-openlineage.js`, not the framework summary CLI:
+
+```python
+from pathlib import Path
+from odap_integrations import EvidenceSource
+from odap_integrations.attempts import AttemptReader
+
+root = Path.cwd()
+reader = AttemptReader(
+    root / 'dist/evidence/scripts/export-openlineage.js',
+    {'sample': EvidenceSource(
+        root / 'tests/fixtures/settled-job.json',
+        root / 'tests/pins/settled-job.sha256', 't', 'i',
+    )},
+    namespace='https://gateway.example/gateway',
+)
+attempt = await reader.read('sample', 'example-correlation')
+```
+
+The canonical deployment namespace is host configuration, not a receiver URL.
+The same trusted exporter validates bundle/pin/scope before emitting anything.
+The Python reader checks the exact event-pair envelope, outcome, timestamps and
+allowlisted evidence facet. It rejects unexpected fields and duplicate JSON
+keys. It shares bounded output, concurrency, sanitized errors and process
+cancellation with the framework verifier, but is not a framework verifier API.
+
+`AttemptEvidence` is immutable; its snapshot UUID binds deployment, recorded run
+ID and evidence digest. It identifies a view of historical evidence, not a new
+query. A revised digest gets a different snapshot UUID while the run ID remains
+unchanged. No issuer authentication or execution authority is granted. The
+times are Gateway claim/terminal-observation times, not warehouse execution
+times. Correlation labels are not authenticated users and are only emitted to
+the explicitly supplied telemetry logger, not catalog state.
+
+In a separate Python 3.12 environment:
+
+```sh
+python -m pip install -r integrations/python/requirements-catalog-test.lock
+python -m pip install --no-deps ./integrations/python
+python -m pip check
+python -m ruff check integrations/python/src integrations/python/catalog_tests
+python -m mypy --ignore-missing-imports --follow-imports=silent --check-untyped-defs integrations/python/src
+python integrations/python/catalog_tests/run_tests.py --report catalog-results.json
+```
+
+These tests use real SDK models and an in-memory log exporter. There is no
+DataHub/OpenMetadata server, collector, service account, dataset mapping or live
+pilot. See each adapter's README for lossy status mappings and delivery limits.

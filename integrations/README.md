@@ -10,6 +10,9 @@ Gateway login, authorize a query, or complete a pilot.
 | [NVIDIA Auto Ontology](nvidia/README.md) | Stage pinned SQL attribute context and explicit local mapping for candidate review | Synthetic pinned-source checks; no live import or automatic approval |
 | [Cube](cube/README.md) | Stage a selected REST metadata measure plus explicit local definition for candidate review | Offline selected-envelope, pin, CLI and local admission checks; no Cube query or live import |
 | [dbt](dbt/README.md) | Stage a selected manifest v12 metric plus explicit local definition for candidate review | Offline selected-envelope, pin, CLI and local admission checks; no dbt invocation or MetricFlow translation |
+| [DataHub](datahub/README.md) | Stage official SDK proposals for a pinned historical evidence snapshot | SDK wire roundtrips; no receiver write, dataset lineage or authenticated issuer |
+| [OpenMetadata / Collate](openmetadata/README.md) | Stage official SDK statuses for explicitly mapped ODAP attempt histories | SDK roundtrips and within-batch collision rejection; no receiver write or Collate Cloud validation |
+| [OpenTelemetry](opentelemetry/README.md) | Emit an allowlisted historical observation through a host-supplied logger | Real SDK in-memory export; no collector acceptance, fabricated spans or guaranteed delivery |
 | [FastMCP](fastmcp/README.md) | Register the local evidence verifier as an MCP tool | Actual client/server tests; no public authenticated endpoint or query dispatch |
 | [LangChain](langchain/README.md) | Async structured evidence-verification tool | Actual tool invocation; no LLM or hosted LangSmith call |
 | [LangGraph](langgraph/README.md) | Model-free evidence ToolNode graph | Actual graph invocation, including tool error status; no agent planning benchmark |
@@ -26,7 +29,8 @@ recorded query outcome, which can still be `failed` or `cancelled`.
 Live Cube/dbt semantic imports, DataHub/OpenMetadata receiver acceptance,
 ClickHouse/other warehouse execution, automatic event delivery, and hosted
 framework authentication are not supplied here. Existing OpenLineage DataHub
-notes are source-review findings, not a DataHub receiver adapter. A generic MCP
+notes remain source-review findings; the separate DataHub SDK adapter does not
+validate that receiver's OpenLineage ingestion behavior. A generic MCP
 tool does not establish compatibility with every MCP product.
 
 Keep independently retained pins and evidence in access-controlled storage.
