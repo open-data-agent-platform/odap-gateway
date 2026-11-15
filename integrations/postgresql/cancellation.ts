@@ -10,13 +10,14 @@ type CancelConnection = Connection & {
   cancel(processID: number, secretKey: number): void;
 };
 export type PostgresBackendKey = Readonly<{ processID: number; secretKey: number }>;
+export type PostgresCancellationDelivery = "not-sent" | "write-attempted" | "stopped";
 
-// No startup/authentication, SQL, administrative role, retry or plaintext TLS fallback.
+// No startup/authentication, SQL, administrative role or plaintext TLS fallback.
 // Connection closure is not a cancellation acknowledgement; only the original query can supply that.
-export function sendPostgresCancellation(config: PostgresHostConfig, key: PostgresBackendKey, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
+export function sendPostgresCancellation(config: PostgresHostConfig, key: PostgresBackendKey, signal: AbortSignal): Promise<PostgresCancellationDelivery> {
+  if (signal.aborted) return Promise.resolve("stopped");
   const plain = "insecureLoopback" in config.tls;
-  if (plain && (config.host !== "127.0.0.1" || config.tls.insecureLoopback !== true)) return Promise.resolve();
+  if (plain && (config.host !== "127.0.0.1" || config.tls.insecureLoopback !== true)) return Promise.resolve("stopped");
   return new Promise(resolve => {
     const connection = new Connection({ ssl: plain ? false : {
       rejectUnauthorized: true, ...("ca" in config.tls && config.tls.ca ? { ca: config.tls.ca } : {}),
@@ -25,7 +26,7 @@ export function sendPostgresCancellation(config: PostgresHostConfig, key: Postgr
     const finish = () => {
       if (done) return;
       done = true; clearTimeout(timer); signal.removeEventListener("abort", finish);
-      connection.stream.destroy(); resolve();
+      connection.stream.destroy(); resolve(signal.aborted ? "stopped" : sent ? "write-attempted" : "not-sent");
     };
     const timer = setTimeout(finish, 1500);
     const send = () => {
@@ -61,15 +62,20 @@ async function boundedCheck(check: () => Promise<boolean>, signal: AbortSignal) 
   } finally { clearTimeout(timer); signal.removeEventListener("abort", abort); }
 }
 
-// One serial poll per second, bounded by the query lifetime. Unresponsive storage stops delivery.
-export async function monitorPostgresCancellation(check: () => Promise<boolean>, send: () => Promise<void>, signal: AbortSignal) {
+// Retry only before any CancelRequest write attempt, at most three channels for this query.
+// Every attempt rechecks durable intent; uncertainty after a write is never retried.
+export async function monitorPostgresCancellation(check: () => Promise<boolean>, send: () => Promise<PostgresCancellationDelivery>, signal: AbortSignal) {
+  let attempts = 0;
   try {
     while (!signal.aborted) {
       // A timed-out check must not overlap a subsequent check or send after query completion.
       let settled = false;
       const requested = await boundedCheck(async () => { const result = await check(); settled = true; return result; }, signal);
       if (signal.aborted || !settled) return;
-      if (requested === true) { await send(); return; }
+      if (requested === true) {
+        const delivery = await send();
+        if (signal.aborted || delivery !== "not-sent" || ++attempts >= 3) return;
+      }
       await delay(1000, undefined, { signal });
     }
   } catch { /* A delivery failure is not a terminal query result. */ }

@@ -4,6 +4,7 @@ import { compilePostgresMetric, type PostgresSource } from "./postgresql-metric-
 import { exactFields, routeId } from "./control-command-request";
 import { promoteSemanticRevision, retireSemanticRelease } from "./semantic-candidate-storage";
 import { postgresAgentAudience, postgresAgentBinding, type PostgresAgentProof } from "./postgresql-agent";
+import { exportPostgresEvidence } from "./postgresql-evidence-export";
 
 export class PostgresControlDenied extends Error {
   constructor() { super("PostgreSQL control operation unavailable"); }
@@ -291,6 +292,7 @@ export async function postgresControlCommand(access: ControlAccess, command: str
     case "request": { const d = fields(["requestId", "releaseId", "action"]); return requestPostgresRead(access, d as Parameters<typeof requestPostgresRead>[1]); }
     case "approve-read": { const d = fields(["requestId", "releaseId", "sourceId", "requesterId", "reviewedAction"]); return approvePostgresRead(access, d as Parameters<typeof approvePostgresRead>[1]); }
     case "inspect": return inspectPostgresRead(access, fields(["requestId"]).requestId as string);
+    case "export-evidence": return exportPostgresEvidence(access, fields(["requestId"]).requestId as string);
     case "stop": return stopPostgresRead(access, fields(["requestId"]).requestId as string);
     case "cancel": return cancelPostgresRead(access, fields(["requestId"]).requestId as string);
     default: throw new PostgresControlDenied();

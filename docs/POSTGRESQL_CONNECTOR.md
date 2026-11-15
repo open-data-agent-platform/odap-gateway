@@ -483,9 +483,13 @@ Cancellation intent does not release concurrency, refund quota or rearm a contra
 
 The live original executor checks its own claim once per second while the metric
 is in flight. Checks are serial with a one-second deadline; storage failure stops
-this delivery monitor without inventing an outcome. A matching request triggers
-at most one bounded (1.5-second) protocol CancelRequest on a separate connection
-to the same bound host. Only the original dedicated connection's in-memory backend
+this delivery monitor without inventing an outcome. A matching request opens a
+bounded (1.5-second) cancellation channel to the same bound host. A channel failure
+before attempting the CancelRequest write may be retried after one second, with
+at most three serial channels for this query. Each retry rechecks durable intent
+and repeats TLS validation. Once a write is attempted, including a throwing write,
+delivery is uncertain and is not retried. No query submission is replayed.
+Only the original dedicated connection's in-memory backend
 key is used. No PID/key is accepted from a caller, persisted, returned or logged.
 The channel uses `pg`'s protocol encoding and the same certificate/hostname checks,
 waiting for verified TLS before sending; there is no plaintext fallback. The only
@@ -505,7 +509,7 @@ Previously authorized cleanup intent remains deliverable after approval expiry,
 retirement or membership revocation, but does not authorize another query. If the
 original executor dies or the cancellation channel fails, this is pending evidence,
 not proof that the provider stopped. There is no cross-process backend lookup,
-PID-only cancellation, durable delivery retry or forced slot release. A stale read
+PID-only cancellation, restart-surviving delivery retry or forced slot release. A stale read
 replica can delay delivery; the host must provide a sufficiently fresh control
 binding. Production enablement and migration remain separately gated.
 
@@ -644,6 +648,47 @@ money conversion is made. Node-postgres requires all transaction operations on t
 same connection, as used here.
 [Driver transaction guidance](https://node-postgres.com/features/transactions).
 
+## Read-only evidence export
+
+The source's named, currently active owner can call the human REST command
+`export-evidence` with `{ "requestId": "..." }` or the standard MCP tool
+`postgresql_export_evidence`. The response is `{ "json": "...", "digest": "sha256:..." }`.
+Requesters, reviewers, other owners and Agents cannot export through this command.
+Historical export remains available after source retirement; it does not restore
+execution authority. No database connection or credential resolver is invoked.
+
+The bounded canonical snapshot includes the semantic definition, approved action,
+source relation/role and connection digest, contract, original claim, optional
+observations/failure/cancellation request and their original receipts. It excludes
+credentials, endpoints, backend cancellation keys and query results. Definitions
+and action filters may still contain sensitive business metadata: treat the bundle
+as tenant-confidential and do not publish it by default. It is a selected-record
+snapshot, not a complete audit export or a ledger backup.
+
+Build and verify a detached export with an independently retained digest:
+
+```sh
+npm run evidence:build
+npm run evidence:verify-postgresql -- bundle.json TENANT REQUEST INTENT expected.sha256
+```
+
+The `expected.sha256` file contains the independently retained `sha256:` digest.
+The CLI accepts at most 256 KiB of canonical UTF-8 JSON and requires the expected
+tenant/request/intent and checksum. Exit 0 means the selected records are internally
+consistent and match the supplied checksum; exit 1 rejects invalid input and exit 2
+reports invalid usage. A checksum from the same untrusted bundle cannot establish
+issuer identity. The verifier recompiles the metric bindings and checks receipt
+identity, outcome and chronology. It does not contact PostgreSQL, validate an Agent
+signature, establish issuer identity, certify provider truth or grant execution
+authority. Those limitations are explicit false flags in its output.
+
+Unknown outcomes remain `observation-required`; money remains `unpriced`. A
+cancellation intent and even SQLSTATE `57014` do not prove that a particular caller
+caused cancellation. Export and verification never release capacity, refund quota,
+replay the query or make a formal scoring/independent-signoff claim. The profile
+`odap.gateway.local.postgresql-read-evidence.v1` is a local engineering format,
+not a protocol change.
+
 ## Verification and remaining work
 
 `npm test` runs pure compiler tests. `npm run test:postgresql` requires a new,
@@ -670,8 +715,11 @@ append-only storage and receipt-write rollback. Real PostgreSQL tests exercise t
 shared durable concurrency guard, retained capacity for unknown execution and
 released capacity after confirmed completion, active cancellation of session and
 Agent queries through human REST/MCP, cancellation TLS rejection without fallback,
-and isolation from an unrelated live query, as well as the
-governed host path, session and signed Agent REST/MCP, concurrency, requester
+and isolation from an unrelated live query, as well as
+bounded retry after a dropped pre-TLS cancellation channel for both session and
+Agent queries. The real proxy test observes retained capacity before delivery,
+exactly one query claim and release only after the original failure receipt. Other
+cases cover the governed host path, session and signed Agent REST/MCP, concurrency, requester
 consent, owner/key/audience binding, revocation races, resolver substitution and
 lost claim, observation or terminal acknowledgements. Socket tests cover HTTP
 boundaries, admission retention and bounded draining; real-engine tests also send

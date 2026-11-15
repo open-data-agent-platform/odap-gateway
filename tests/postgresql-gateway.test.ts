@@ -33,6 +33,19 @@ describe("authenticated PostgreSQL REST/MCP host hook", { timeout: 30000 }, () =
   });
   afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
+  it.each([false, true])("exports owner-bound evidence through the shared command without provider access (MCP=%s)", async mcp => {
+    const database = db(); await approvePostgresFixture(database);
+    const { row } = await preparePostgresDispatch(pgAccess(database), "request");
+    expect(await claimPostgresRead(pgAccess(database), row, "intent")).toBe(true);
+    const denied = await (await call("export-evidence", { requestId: "request" }, "reader", "tenant-a", mcp)).json();
+    expect(mcp ? denied.result.isError : denied.ok).toBe(mcp ? true : false);
+    const response = await call("export-evidence", { requestId: "request" }, "owner", "tenant-a", mcp), body = await response.json();
+    expect(response.status).toBe(200);
+    const bundle = mcp ? JSON.parse(body.result.content[0].text) : body.result;
+    expect(JSON.parse(bundle.json).intentId).toBe("intent"); expect(bundle.digest).toMatch(/^sha256:/);
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])("shares host admission across session and Agent while keeping control commands available (MCP=%s)", async mcp => {
     const database = db(); await approvePostgresFixture(database);
     const agent = await approvePostgresAgentFixture(database);
@@ -120,7 +133,7 @@ describe("authenticated PostgreSQL REST/MCP host hook", { timeout: 30000 }, () =
       headers: { Origin: "https://gateway.test", "Content-Type": "application/json", Cookie: await cookie("reader") },
       body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/list" }) }));
     const body = await response.json();
-    expect(body.result.tools).toHaveLength(16);
+    expect(body.result.tools).toHaveLength(17);
     expect(body.result.tools.map((t: { name: string }) => t.name)).not.toContain("postgresql_observe");
     expect(body.result.tools.find((t: { name: string }) => t.name === "postgresql_execute").inputSchema)
       .toEqual({ type: "object", properties: { requestId: { type: "string" } }, required: ["requestId"], additionalProperties: false });

@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { createServer } from "node:net";
+import { createConnection, createServer, type Socket } from "node:net";
 import { createRequire } from "node:module";
 import { executePostgresMetric, type PostgresClaim, type PostgresHostConfig } from "./index";
 import { postgresDefinition as d, postgresRead, postgresSource, postgresBarrier } from "../../tests/fixtures/postgresql";
@@ -13,7 +13,7 @@ import { jobTransactionalDatabase } from "../../tests/fixtures/job-sqlite";
 import { initializePostgresLocalFixture } from "../../tests/fixtures/postgresql-local-store";
 import { openPostgresSqliteControl, POSTGRES_CONTROL_SCHEMA_DIGEST } from "./sqlite-control";
 import { approvePostgresFixture, pgAccess, pgAction, publishPostgresFixture, seedPostgresControl } from "../../tests/fixtures/postgresql-control";
-import { inspectPostgresRead } from "../../lib/postgresql-control";
+import { cancelPostgresRead, inspectPostgresRead } from "../../lib/postgresql-control";
 import type { D1Database } from "../../lib/d1";
 import { createPostgresGateway } from "./gateway";
 import { SESSION_COOKIE, signAuthPayload } from "../../lib/auth";
@@ -26,6 +26,7 @@ import { startConfiguredPostgresHost } from "./host";
 import { POSTGRES_SERVER_VERSIONS, postgresServerVersion } from "./compatibility";
 import { postgresHttpRequest } from "../../tests/fixtures/postgresql-http";
 import { connectPostgresMcpFixture } from "../../tests/fixtures/postgresql-mcp";
+import { verifyPostgresEvidence } from "../../lib/postgresql-evidence";
 
 // Fixed disposable fixture only: never accept a business endpoint or credentials.
 const fixtureVersion = process.env.ODAP_POSTGRES_VERSION ?? "17.12";
@@ -222,6 +223,33 @@ it.each([{ tenantId: "tenant-b" }, { connectionRef: "other" }, { role: "reader_b
       expect((await admin.query("SELECT pid FROM pg_stat_activity WHERE application_name='odap-postgresql-preview'")).rows).toEqual([]);
     } finally { expect(await host.close()).toEqual({ drained: true }); }
   }, c);
+});
+
+it.each([false, true])("exports verified local evidence for a real acknowledged read via official MCP (Agent=%s)", async agent => {
+  await governedFixture(async db => {
+    const a = agent ? await approvePostgresAgentFixture(db) : undefined, requestId = agent ? "agent-request" : "request";
+    const result = a ? await postgresAgentOperation(db, pgAgentOrigin, "tenant-a", a.delegationId, a.signature, "execute", async () => config) :
+      await executeGovernedPostgresRead(pgAccess(db), requestId, async () => config);
+    expect(result).toMatchObject({ outcome: "succeeded", value: "3" });
+    const inspected = await inspectPostgresRead(pgAccess(db), requestId), secret = "synthetic-evidence-owner-only";
+    let providerCalls = 0;
+    const host = await startPostgresHttpHost({ origin: pgAgentOrigin, port: 0, env: { DB: db, AUTH_COOKIE_SECRET: secret },
+      resolve: async () => { providerCalls++; throw new Error("Export cannot contact provider"); } });
+    let connection: Awaited<ReturnType<typeof connectPostgresMcpFixture>> | undefined;
+    try {
+      const cookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "owner",
+        email: "synthetic@example.test", name: "Synthetic", expiresAt: Date.now() + 600000 }, secret);
+      connection = await connectPostgresMcpFixture(host.address, pgAgentOrigin, "/postgresql/tenant-a/mcp-stream",
+        { Origin: pgAgentOrigin, Cookie: cookie }, true);
+      const reply = await connection.client.callTool({ name: "postgresql_export_evidence", arguments: { requestId } });
+      expect(reply.isError).toBe(false);
+      const bundle = JSON.parse((reply.content as { text: string }[])[0].text);
+      expect(await verifyPostgresEvidence(bundle.json, { tenantId: "tenant-a", requestId, intentId: inspected.intent_id! }, bundle.digest))
+        .toMatchObject({ state: "succeeded", consistent: true, issuerAuthenticated: false, agentSignatureVerified: false,
+          providerVerified: false, authorizationGranted: false, monetaryCost: "unpriced" });
+      expect(providerCalls).toBe(0); expect(JSON.parse(bundle.json).receipts).toHaveLength(2);
+    } finally { await connection?.close(); expect(await host.close()).toEqual({ drained: true }); }
+  });
 });
 
 it.each([{ agent: false, modern: false }, { agent: true, modern: false }, { agent: false, modern: true }, { agent: true, modern: true }])(
@@ -439,6 +467,55 @@ it.each(["untrusted", "hostname"])("refuses cancellation TLS %s mismatch without
     expect(await query).toBe(true);
   } finally { key = undefined; await probe.end(); }
 });
+
+it.each([false, true])("retries a lost pre-TLS cancellation channel without replaying the query (Agent=%s)", async agent => {
+  const sockets = new Set<Socket>(); let channels = 0;
+  const track = (socket: Socket) => {
+    sockets.add(socket); socket.on("error", () => socket.destroy());
+    socket.once("close", () => sockets.delete(socket)); return socket;
+  };
+  // Fixed loopback proxy drops only the first cancellation channel before TLS.
+  // It never parses or records traffic, backend keys or authentication messages.
+  const proxy = createServer(socket => {
+    track(socket);
+    if (++channels === 2) { socket.destroy(); return; }
+    const upstream = track(createConnection({ host: "127.0.0.1", port: 55432 }));
+    socket.once("close", () => upstream.destroy()); upstream.once("close", () => socket.destroy());
+    socket.pipe(upstream).pipe(socket);
+  });
+  await new Promise<void>(resolve => proxy.listen(0, "127.0.0.1", resolve));
+  const address = proxy.address();
+  if (!address || typeof address === "string") throw new Error("Missing fixture proxy");
+  const c: PostgresHostConfig = { ...config, port: address.port, statementTimeoutMs: 15000, deadlineMs: 20000,
+    tls: { ca: readFileSync(".tmp/postgresql-tls/server.crt", "utf8") } };
+  try {
+    await governedFixture(async (db, file) => {
+      const otherHost = jobTransactionalDatabase(() => file);
+      const a = agent ? await approvePostgresAgentFixture(db) : undefined, requestId = agent ? "agent-request" : "request";
+      const running = a ? postgresAgentOperation(db, pgAgentOrigin, "tenant-a", a.delegationId, a.signature, "execute", async () => c) :
+        executeGovernedPostgresRead(pgAccess(db), requestId, async () => c);
+      try {
+        await expect.poll(async () => (await admin.query(`SELECT pid FROM pg_stat_activity
+          WHERE application_name='odap-postgresql-preview' AND datname='odap_pg_fixture' AND usename='reader_a'
+            AND state='active' AND wait_event='PgSleep' AND query LIKE '%AS metric_value FROM ONLY%crash_orders%'`)).rows.length,
+        { timeout: 5000, interval: 10 }).toBe(1);
+        expect(await cancelPostgresRead(pgAccess(otherHost), requestId)).toMatchObject({ cancellationConfirmed: false });
+        await expect.poll(() => channels, { timeout: 4000, interval: 10 }).toBe(2);
+        expect(await inspectPostgresRead(pgAccess(otherHost), requestId)).toMatchObject({
+          state: "observation-required", unresolved_claims: 1, used_attempts: 1 });
+        expect(await running).toMatchObject({ outcome: "failed", sqlState: "57014", claim: "confirmed" });
+        expect(channels).toBe(3);
+        const inspected = await inspectPostgresRead(pgAccess(otherHost), requestId);
+        expect(inspected).toMatchObject({ state: "failed", unresolved_claims: 0, used_attempts: 1 });
+        expect(inspected.receiptIds).toContain("pg-cancel-" + inspected.intent_id);
+        expect(inspected.receiptIds).toContain("pg-failed-" + inspected.intent_id);
+      } finally { await running; }
+    }, c, { ...d, table: { ...d.table, name: "crash_orders" } });
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve, reject) => proxy.close(error => error ? reject(error) : resolve()));
+  }
+}, 30000);
 
 it.each([false, true])("enforces durable capacity across session and Agent hosts during a real query (Agent wins=%s)", async agentWins => {
   const c = { ...config, statementTimeoutMs: 2000, deadlineMs: 8000 };

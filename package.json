@@ -20,6 +20,7 @@
     "evidence:build": "tsc -p scripts/tsconfig.evidence.json",
     "evidence:verify": "node dist/evidence/scripts/verify-settled-evidence.js",
     "evidence:verify-costs": "node dist/evidence/scripts/verify-auxiliary-cost-evidence.js",
+    "evidence:verify-postgresql": "node dist/evidence/scripts/verify-postgresql-evidence.js",
     "evidence:export-openlineage": "node dist/evidence/scripts/export-openlineage.js",
     "ci": "npm run lint && npm run typecheck && npm run test && npm run build",
     "worker:dry-run": "npx wrangler deploy --config wrangler.example.jsonc --dry-run",

@@ -14,6 +14,8 @@ import { postgresHttpRequest } from "./fixtures/postgresql-http";
 import { postgresBarrier } from "./fixtures/postgresql";
 import { revokePostgresDelegation } from "../lib/postgresql-agent";
 import { pgAccess } from "./fixtures/postgresql-control";
+import { claimPostgresRead, preparePostgresDispatch } from "../lib/postgresql-control";
+import { verifyPostgresEvidence } from "../lib/postgresql-evidence";
 
 const origin = "https://gateway.test", secret = "synthetic-mcp-host-only";
 let directory: string, store: ReturnType<typeof openPostgresSqliteControl>, cookie: string;
@@ -43,6 +45,20 @@ async function client(agent = false, modern = false, tenant = "tenant-a", header
 function text(result: { content?: unknown }) {
   return (result.content as { type: string; text: string }[])[0].text;
 }
+it.each([false, true])("exports a current-owner snapshot through the official MCP client (modern=%s)", async modern => {
+  const access = pgAccess(store.db), { row } = await preparePostgresDispatch(access, "request");
+  await claimPostgresRead(access, row, "intent");
+  const reader = await client(false, modern);
+  expect((await reader.client.callTool({ name: "postgresql_export_evidence", arguments: { requestId: "request" } })).isError).toBe(true);
+  const ownerCookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "owner",
+    email: "synthetic@example.test", name: "Synthetic", expiresAt: Date.now() + 600000 }, secret);
+  const owner = await client(false, modern, "tenant-a", { Origin: origin, Cookie: ownerCookie });
+  const result = await owner.client.callTool({ name: "postgresql_export_evidence", arguments: { requestId: "request" } });
+  expect(result.isError).toBe(false); const bundle = JSON.parse(text(result));
+  expect(await verifyPostgresEvidence(bundle.json, { tenantId: "tenant-a", requestId: "request", intentId: "intent" }, bundle.digest))
+    .toMatchObject({ consistent: true, state: "observation-required", providerVerified: false });
+  expect(resolve).not.toHaveBeenCalled();
+});
 it.each([false, true])("initializes the official session client and shares current control authority (modern=%s)", async modern => {
   const connection = await client(false, modern);
   expect(connection.methods).toContain(modern ? "server/discover" : "initialize");
