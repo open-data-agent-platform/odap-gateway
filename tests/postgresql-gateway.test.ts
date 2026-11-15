@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION_COOKIE, signAuthPayload } from "../lib/auth";
 import { createPostgresGateway } from "../integrations/postgresql/gateway";
 import { jobSqlite, jobTransactionalDatabase } from "./fixtures/job-sqlite";
-import { pgAction, pgRun, publishPostgresFixture, seedPostgresControl } from "./fixtures/postgresql-control";
+import { approvePostgresFixture, pgAccess, pgAction, pgRun, publishPostgresFixture, seedPostgresControl } from "./fixtures/postgresql-control";
+import { claimPostgresRead, preparePostgresDispatch } from "../lib/postgresql-control";
 
 let dir: string;
 const db = () => jobTransactionalDatabase(() => join(dir, "control.db"));
@@ -50,6 +51,7 @@ describe("authenticated PostgreSQL REST/MCP host hook", { timeout: 30000 }, () =
       ["execute", { requestId: "request", permissionGranted: true }],
       ["observe", { requestId: "request", outcome: "succeeded" }],
       ["register-source", { host: "business-db.example.test" }],
+      ["cancel", { requestId: "request", pid: 123 }],
     ] as const) {
       const body = await (await call(command, input, "reader", "tenant-a", mcp)).json();
       expect(mcp ? body.result.isError : body.ok).toBe(mcp);
@@ -81,10 +83,20 @@ describe("authenticated PostgreSQL REST/MCP host hook", { timeout: 30000 }, () =
       headers: { Origin: "https://gateway.test", "Content-Type": "application/json", Cookie: await cookie("reader") },
       body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/list" }) }));
     const body = await response.json();
-    expect(body.result.tools).toHaveLength(15);
+    expect(body.result.tools).toHaveLength(16);
     expect(body.result.tools.map((t: { name: string }) => t.name)).not.toContain("postgresql_observe");
     expect(body.result.tools.find((t: { name: string }) => t.name === "postgresql_execute").inputSchema)
       .toEqual({ type: "object", properties: { requestId: { type: "string" } }, required: ["requestId"], additionalProperties: false });
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("exposes authorized cancellation intent without provider access (MCP=%s)", async mcp => {
+    const database = db(); await approvePostgresFixture(database);
+    const { row } = await preparePostgresDispatch(pgAccess(database), "request"); await claimPostgresRead(pgAccess(database), row, "one");
+    const denied = await (await call("cancel", { requestId: "request" }, "other-owner", "tenant-a", mcp)).json();
+    expect(mcp ? denied.result.isError : denied.ok).toBe(mcp);
+    const body = await (await call("cancel", { requestId: "request" }, "reader", "tenant-a", mcp)).json();
+    expect(mcp ? JSON.parse(body.result.content[0].text) : body.result).toMatchObject({ status: "cancellation-requested", cancellationConfirmed: false });
     expect(resolver).not.toHaveBeenCalled();
   });
 });

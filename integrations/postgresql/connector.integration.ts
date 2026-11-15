@@ -17,6 +17,7 @@ import { SESSION_COOKIE, signAuthPayload } from "../../lib/auth";
 import { approvePostgresAgentFixture, pgAgentOrigin } from "../../tests/fixtures/postgresql-agent";
 import { revokePostgresDelegation } from "../../lib/postgresql-agent";
 import { postgresCrashCases } from "../../tests/fixtures/postgresql-crash-cases";
+import { sendPostgresCancellation, type PostgresBackendKey } from "./cancellation";
 
 // Fixed disposable fixture only: never accept a business endpoint or credentials.
 const config: PostgresHostConfig = { host: "127.0.0.1", port: 55432, database: "odap_pg_fixture",
@@ -72,7 +73,7 @@ beforeAll(async () => {
     driver: "pg", driverVersion, syntheticDataOnly: true, transport: "isolated-loopback-without-TLS",
     productionVerified: false, gatewayDispatchIntegrated: true, transportScope: "Node host, not deployed Worker",
     tlsFixtureRequired: true, signedAgentDelegation: true, terminalCodes: ["57014", "42501"],
-    hostCrashFixture: "SIGKILL-execute/fresh-process-recovery", durableConcurrency: true,
+    hostCrashFixture: "SIGKILL-execute/fresh-process-recovery", durableConcurrency: true, activeCancellation: true,
     resourceUnit: "unresolved-read-claim", budgetUnit: "read-attempt", monetaryCost: "unpriced" }, null, 2) + "\n");
 });
 afterAll(async () => { await admin.end(); });
@@ -90,6 +91,66 @@ async function governedFixture(test: (db: D1Database, file: string) => Promise<v
 }
 
 postgresCrashCases(governedFixture, admin, config);
+
+it.each([{ agent: false, mcp: false }, { agent: false, mcp: true }, { agent: true, mcp: false }, { agent: true, mcp: true }])(
+  "delivers authorized active cancellation to the original query (Agent=$agent MCP/TLS=$mcp)", async ({ agent, mcp }) => {
+  const c: PostgresHostConfig = { ...config, statementTimeoutMs: 15000, deadlineMs: 20000,
+    tls: mcp ? { ca: readFileSync(".tmp/postgresql-tls/server.crt", "utf8") } : { insecureLoopback: true } };
+  await governedFixture(async (db, file) => {
+    const otherHost = jobTransactionalDatabase(() => file), secret = "synthetic-pg-cancel-only";
+    const a = agent ? await approvePostgresAgentFixture(db) : undefined, requestId = agent ? "agent-request" : "request";
+    const handler = createPostgresGateway({ origin: pgAgentOrigin, env: { DB: otherHost, AUTH_COOKIE_SECRET: secret }, resolve: async () => c });
+    const cancel = async (principal: string) => {
+      const cookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: principal, email: "test@example.test",
+        name: "Synthetic", role: "admin", expiresAt: Date.now() + 600000 }, secret);
+      const response = await handler(new Request(`${pgAgentOrigin}/postgresql/tenant-a/${mcp ? "mcp" : "cancel"}`, { method: "POST",
+        headers: { Origin: pgAgentOrigin, "Content-Type": "application/json", Cookie: cookie },
+        body: JSON.stringify(mcp ? { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "postgresql_cancel", arguments: { requestId } } } : { requestId }) }));
+      const body = await response.json();
+      return { ok: mcp ? !body.result.isError : body.ok, result: mcp && !body.result.isError ? JSON.parse(body.result.content[0].text) : body.result };
+    };
+    const started = Date.now();
+    const running = a ? postgresAgentOperation(db, pgAgentOrigin, "tenant-a", a.delegationId, a.signature, "execute", async () => c) :
+      executeGovernedPostgresRead(pgAccess(db), requestId, async () => c);
+    const unrelated = new Client({ host: config.host, port: config.port, database: config.database, user: config.user,
+      password: config.password, ssl: false, connectionTimeoutMillis: 3000, statement_timeout: 5000 });
+    try {
+      await expect.poll(async () => (await admin.query(`SELECT pid FROM pg_stat_activity
+        WHERE application_name='odap-postgresql-preview' AND datname='odap_pg_fixture' AND usename='reader_a'
+          AND state='active' AND wait_event='PgSleep' AND query LIKE '%AS metric_value FROM ONLY%crash_orders%'`)).rows.length,
+      { timeout: 5000, interval: 10 }).toBe(1);
+      expect((await cancel("other-owner")).ok).toBe(false);
+      await unrelated.connect(); const unaffected = unrelated.query("SELECT pg_sleep(2)");
+      // Attach immediately so a faulty cancellation implementation cannot create an unhandled rejection.
+      const unaffectedResult = unaffected.then(() => true, () => false);
+      const requested = await cancel(mcp ? "owner" : "reader");
+      expect(requested).toMatchObject({ ok: true, result: { status: "cancellation-requested", cancellationConfirmed: false } });
+      expect(await running).toMatchObject({ outcome: "failed", sqlState: "57014", claim: "confirmed" });
+      expect(Date.now() - started).toBeLessThan(10000); // Below the configured 15-second statement timeout.
+      expect(await unaffectedResult).toBe(true);
+      const inspected = await inspectPostgresRead(pgAccess(otherHost), requestId);
+      expect(inspected).toMatchObject({ state: "failed", terminal_sql_state: "57014", unresolved_claims: 0, used_attempts: 1,
+        cancellation_requested_at: expect.any(String) });
+      expect(inspected.receiptIds).toContain("pg-cancel-" + inspected.intent_id);
+      expect(inspected.receiptIds).toContain("pg-failed-" + inspected.intent_id);
+      expect((await cancel("reader")).result).toMatchObject({ cancellationConfirmed: false });
+    } finally { await running; await unrelated.end(); }
+  }, c, { ...d, table: { ...d.table, name: "crash_orders" } });
+}, 30000);
+
+it.each(["untrusted", "hostname"])("refuses cancellation TLS %s mismatch without plaintext fallback", async mode => {
+  const probe = new Client({ host: config.host, port: config.port, database: config.database, user: config.user,
+    password: config.password, ssl: false, connectionTimeoutMillis: 3000, statement_timeout: 5000 });
+  let key: PostgresBackendKey | undefined;
+  probe.connection.once("backendKeyData", (value: PostgresBackendKey) => { key = value; });
+  try {
+    await probe.connect(); expect(key).toBeDefined();
+    const query = probe.query("SELECT pg_sleep(2)").then(() => true, () => false);
+    await sendPostgresCancellation({ ...config, host: mode === "hostname" ? "localhost" : "127.0.0.1",
+      tls: mode === "hostname" ? { ca: readFileSync(".tmp/postgresql-tls/server.crt", "utf8") } : {} }, key!, new AbortController().signal);
+    expect(await query).toBe(true);
+  } finally { key = undefined; await probe.end(); }
+});
 
 it.each([false, true])("enforces durable capacity across session and Agent hosts during a real query (Agent wins=%s)", async agentWins => {
   const c = { ...config, statementTimeoutMs: 2000, deadlineMs: 8000 };

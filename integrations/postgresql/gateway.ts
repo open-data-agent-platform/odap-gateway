@@ -14,7 +14,7 @@ const commandFields: Record<string, string[]> = {
   publish: ["releaseId", "approvalId", "revisionId"], retire: ["releaseId", "reason"],
   request: ["requestId", "releaseId", "action"],
   "approve-read": ["requestId", "releaseId", "sourceId", "requesterId", "reviewedAction"],
-  inspect: ["requestId"], stop: ["requestId"], execute: ["requestId"],
+  inspect: ["requestId"], stop: ["requestId"], cancel: ["requestId"], execute: ["requestId"],
   delegate: ["requestId", "agentId", "keyId"], "revoke-delegation": ["delegationId"], "agent-challenges": ["delegationId"],
   "approve-agent-read": ["requestId", "releaseId", "sourceId", "requesterId", "reviewedAction", "delegationId", "agentId", "keyId"],
 };

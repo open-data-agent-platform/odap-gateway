@@ -4,6 +4,7 @@ import { submitPreparedRead } from "../../lib/read-submission";
 import type { SemanticRelease } from "../../lib/control-objects";
 import { acknowledgePostgresFailure } from "./terminal";
 import type { PostgresFailureCode } from "../../lib/postgresql-terminal";
+import { monitorPostgresCancellation, sendPostgresCancellation, type PostgresBackendKey } from "./cancellation";
 
 export type PostgresHostConfig = Readonly<{
   host: string; port: number; database: string; user: string; password: string;
@@ -41,12 +42,15 @@ function validateConfig(c: PostgresHostConfig) {
 // Trusted host API only. The claim must atomically authorize/persist this exact read.
 // There is no HTTP/Agent entry point and no fallback to environment credentials.
 export async function executePostgresMetric(config: PostgresHostConfig, read: PostgresRead,
-  claim: (binding: PostgresClaim) => Promise<boolean>, signal?: AbortSignal): Promise<PostgresReadResult> {
+  claim: (binding: PostgresClaim) => Promise<boolean>, signal?: AbortSignal,
+  cancellationRequested?: () => Promise<boolean>): Promise<PostgresReadResult> {
   let client: Client | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false, sent = false;
+  let backendKey: PostgresBackendKey | undefined;
+  const cancellation = new AbortController();
   let claimState: "not-attempted" | "denied" | "unknown" | "confirmed" = "not-attempted";
-  const stop = () => { stopped = true; void client?.end().catch(() => undefined); };
+  const stop = () => { stopped = true; cancellation.abort(); void client?.end().catch(() => undefined); };
   try {
     validateConfig(config);
     const c = { ...config, tls: { ...config.tls } }, source = { ...read.source };
@@ -59,6 +63,9 @@ export async function executePostgresMetric(config: PostgresHostConfig, read: Po
       statement_timeout: c.statementTimeoutMs, lock_timeout: c.lockTimeoutMs,
       idle_in_transaction_session_timeout: c.deadlineMs });
     const db = client;
+    db.connection.once("backendKeyData", (key: PostgresBackendKey) => {
+      backendKey = { processID: key.processID, secretKey: key.secretKey };
+    });
     db.on("error", stop);
     signal?.addEventListener("abort", stop, { once: true });
     timer = setTimeout(stop, c.deadlineMs);
@@ -98,8 +105,11 @@ export async function executePostgresMetric(config: PostgresHostConfig, read: Po
       return async () => {
         if (stopped) throw new Error("Read stopped");
         sent = true;
-        const result = await db.query({ text: compiled.text, values: [...compiled.values], rowMode: "array",
-          types: { getTypeParser: () => (value: string) => value } }).catch(async error => {
+        const query = db.query({ text: compiled.text, values: [...compiled.values], rowMode: "array",
+          types: { getTypeParser: () => (value: string) => value } });
+        const monitor = cancellationRequested && backendKey ? monitorPostgresCancellation(cancellationRequested,
+          () => sendPostgresCancellation(c, backendKey!, cancellation.signal), cancellation.signal) : Promise.resolve();
+        const result = await query.finally(async () => { cancellation.abort(); await monitor; }).catch(async error => {
           const failure = await acknowledgePostgresFailure(error, () => db.query("ROLLBACK"), () => stopped);
           if (!failure) throw error;
           return failure;
@@ -125,6 +135,7 @@ export async function executePostgresMetric(config: PostgresHostConfig, read: Po
     return { outcome: sent ? "observation-required" : "not-submitted", claim: claimState,
       reason: sent ? "execution-unconfirmed" : claimState === "not-attempted" ? "preflight-rejected" : "claim-unconfirmed" };
   } finally {
+    cancellation.abort(); backendKey = undefined;
     if (timer) clearTimeout(timer);
     signal?.removeEventListener("abort", stop);
     await client?.end().catch(() => undefined);

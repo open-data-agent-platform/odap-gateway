@@ -1,6 +1,6 @@
 import { canonicalControlJson, sha256Text } from "../../lib/control-objects";
 import type { ControlAccess } from "../../lib/control-storage";
-import { claimPostgresRead, observePostgresRead, preparePostgresDispatch, PostgresControlDenied } from "../../lib/postgresql-control";
+import { claimPostgresRead, observePostgresRead, preparePostgresDispatch, PostgresControlDenied, postgresCancellationRequested } from "../../lib/postgresql-control";
 import { executePostgresMetric, type PostgresHostConfig } from "./index";
 import { verifyPostgresAgent, inspectPostgresAgent, type PostgresAgentProof, type PostgresAgentOperation } from "../../lib/postgresql-agent";
 import type { D1Database } from "../../lib/d1";
@@ -40,7 +40,7 @@ export async function executeGovernedPostgresRead(access: ControlAccess, request
         binding.actionDigest !== compiled.actionDigest || binding.definitionDigest !== compiled.definitionDigest ||
         binding.statementDigest !== compiled.statementDigest) return false;
     return bounded(claimPostgresRead(access, row, intentId, proof));
-  }, signal);
+  }, signal, () => postgresCancellationRequested(access, requestId, intentId));
   if (result.claim !== "confirmed") {
     return { outcome: result.claim === "unknown" ? "observation-required" : "not-submitted",
       claim: result.claim, requestId, monetaryCost: "unpriced" as const };

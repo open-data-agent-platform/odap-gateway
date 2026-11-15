@@ -32,6 +32,7 @@ describe("PostgreSQL durable concurrency on SQLite", { timeout: 30000 }, () => {
     await claimPostgresRead(pgAccess(database), row, "old-attempt");
     const sql = "SELECT json_group_array(payload) AS objects FROM (SELECT payload FROM approval_contracts UNION ALL SELECT payload FROM evidence_receipts)";
     const before = await jobSqlite(file, "readonly-first", sql); await jobSqlite(file, "apply-postgresql-concurrency");
+    await jobSqlite(file, "apply-postgresql-cancellation");
     expect(await jobSqlite(file, "readonly-first", sql)).toEqual(before);
     expect(await inspectPostgresRead(pgAccess(database), "request")).toMatchObject({ unresolved_claims: 1, limit_in_flight: null });
     const second = (await preparePostgresDispatch(pgAccess(database), "second")).row;

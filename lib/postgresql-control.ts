@@ -142,7 +142,7 @@ export async function inspectPostgresRead(access: ControlAccess, requestId: stri
   const row = required(await access.db.prepare(`SELECT q.id,q.requester_id,q.release_id,q.source_id,q.action_json,q.action_digest,
     a.contract_id,CASE WHEN d.id IS NULL THEN a.expires_at ELSE min(a.expires_at,d.expires_at) END AS expires_at,
     c.intent_id,c.claimed_at,o.outcome,s.stopped_at,
-    t.sql_state AS terminal_sql_state,u.limit_in_flight,u.unresolved_claims,
+    t.sql_state AS terminal_sql_state,u.limit_in_flight,u.unresolved_claims,k.requested_at AS cancellation_requested_at,
     d.id AS delegation_id,d.agent_id,d.key_id,d.audience,d.expires_at AS delegation_expires_at,d.revoked_at AS delegation_revoked_at,
     b.limit_attempts,(SELECT count(*) FROM postgresql_read_claims used WHERE used.tenant_id=q.tenant_id AND used.budget_id=v.budget_id) AS used_attempts
     FROM postgresql_read_requests q JOIN postgresql_source_versions v ON v.tenant_id=q.tenant_id AND v.id=q.source_id
@@ -155,17 +155,19 @@ export async function inspectPostgresRead(access: ControlAccess, requestId: stri
     LEFT JOIN postgresql_read_observations o ON o.tenant_id=q.tenant_id AND o.request_id=q.id
     LEFT JOIN postgresql_read_stops s ON s.tenant_id=q.tenant_id AND s.request_id=q.id
     LEFT JOIN postgresql_terminal_failures t ON t.tenant_id=q.tenant_id AND t.request_id=q.id
+    LEFT JOIN postgresql_cancellation_requests k ON k.tenant_id=q.tenant_id AND k.request_id=q.id
     LEFT JOIN postgresql_agent_delegations d ON d.tenant_id=q.tenant_id AND d.request_id=q.id
     WHERE q.tenant_id=? AND q.id=?`).bind(access.principalId, access.tenantId, requestId)
     .first<{ id: string; requester_id: string; release_id: string; source_id: string; action_json: string; action_digest: string;
       contract_id: string | null; expires_at: string | null; intent_id: string | null; claimed_at: string | null;
       delegation_id: string | null; agent_id: string | null; key_id: string | null; audience: string | null;
       delegation_expires_at: string | null; delegation_revoked_at: string | null;
-      terminal_sql_state: string | null; limit_in_flight: number | null; unresolved_claims: number;
+      terminal_sql_state: string | null; limit_in_flight: number | null; unresolved_claims: number; cancellation_requested_at: string | null;
       outcome: string | null; stopped_at: string | null; limit_attempts: number; used_attempts: number }>());
   return { ...row, budgetUnit: "read-attempt" as const, resourceUnit: "unresolved-read-claim" as const, monetaryCost: "unpriced" as const,
     receiptIds: row.intent_id ? ["pg-pending-" + row.intent_id, ...(row.outcome ? ["pg-observed-" + row.intent_id] : []),
-      ...(row.terminal_sql_state ? ["pg-failed-" + row.intent_id] : [])] : [],
+      ...(row.terminal_sql_state ? ["pg-failed-" + row.intent_id] : []),
+      ...(row.cancellation_requested_at ? ["pg-cancel-" + row.intent_id] : [])] : [],
     state: row.terminal_sql_state ? "failed" : row.outcome ?? (row.intent_id ? "observation-required" : row.stopped_at ? "stopped-before-claim" : "not-submitted") };
 }
 
@@ -225,6 +227,31 @@ export async function preparePostgresDispatch(access: ControlAccess, requestId: 
   return { row, compiled, read: { release, source, definitionJson: row.definition_json, canonicalAction: row.action_json } };
 }
 
+// Authority is rechecked in the insert. Repeated requests never rewrite intent or evidence.
+export async function cancelPostgresRead(access: ControlAccess, requestId: string) {
+  postgresControlId(requestId);
+  await access.db.prepare(`INSERT INTO postgresql_cancellation_requests(tenant_id,request_id,intent_id,requested_by)
+    SELECT c.tenant_id,c.request_id,c.intent_id,m.principal_id FROM postgresql_cancellable_reads c
+    JOIN control_memberships m ON m.tenant_id=c.tenant_id AND m.active=1 AND m.principal_id=?
+      AND (m.principal_id=c.requester_id OR (m.principal_id=c.owner_id AND m.role='owner'))
+    WHERE c.tenant_id=? AND c.request_id=? AND NOT EXISTS(
+      SELECT 1 FROM postgresql_cancellation_requests k WHERE k.tenant_id=c.tenant_id AND k.request_id=c.request_id)`)
+    .bind(access.principalId, access.tenantId, requestId).run();
+  // Also gates idempotent replies after terminal completion or membership changes.
+  const inspected = await inspectPostgresRead(access, requestId);
+  if (!inspected.cancellation_requested_at || !inspected.intent_id) throw new PostgresControlDenied();
+  return { requestId, status: "cancellation-requested" as const, cancellationConfirmed: false,
+    receiptId: "pg-cancel-" + inspected.intent_id };
+}
+
+// Executor-only polling for its own immutable claim; no backend identity leaves the Node process.
+export async function postgresCancellationRequested(access: ControlAccess, requestId: string, intentId: string) {
+  return !!await access.db.prepare(`SELECT k.intent_id FROM postgresql_cancellation_requests k
+    JOIN postgresql_read_claims c ON c.tenant_id=k.tenant_id AND c.request_id=k.request_id AND c.intent_id=k.intent_id
+    WHERE k.tenant_id=? AND k.request_id=? AND k.intent_id=? AND c.claimed_by=?`)
+    .bind(access.tenantId, requestId, intentId, access.principalId).first();
+}
+
 // The claim rechecks the entire authority view in its atomic write, after PG preflight.
 export async function claimPostgresRead(access: ControlAccess, row: PostgresControlRead, intentId: string, proof?: PostgresAgentProof) {
   postgresControlId(intentId);
@@ -265,6 +292,7 @@ export async function postgresControlCommand(access: ControlAccess, command: str
     case "approve-read": { const d = fields(["requestId", "releaseId", "sourceId", "requesterId", "reviewedAction"]); return approvePostgresRead(access, d as Parameters<typeof approvePostgresRead>[1]); }
     case "inspect": return inspectPostgresRead(access, fields(["requestId"]).requestId as string);
     case "stop": return stopPostgresRead(access, fields(["requestId"]).requestId as string);
+    case "cancel": return cancelPostgresRead(access, fields(["requestId"]).requestId as string);
     default: throw new PostgresControlDenied();
   }
 }

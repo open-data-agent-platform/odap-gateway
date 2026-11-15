@@ -4,7 +4,8 @@ This repository currently implements a governed BigQuery metric-read transport.
 PostgreSQL has a separate [governed Node host integration](POSTGRESQL_CONNECTOR.md)
 with persisted session authority, scoped requester/owner-approved Agent signatures,
 attempt quotas, durable unresolved-read concurrency limits, append-only
-acknowledged-failure receipts and REST/MCP hooks.
+acknowledged-failure receipts, authorized active-query cancellation and REST/MCP hooks.
+Cancellation intent is not terminal proof; an unavailable executor leaves it pending.
 Host-process crash recovery is tested without automatic replay. It is not deployed in the production
 Worker and does not offer monetary cost settlement or open-ended Agent grants. The inspector continues to reject it
 as an unimplemented **Gateway adapter**. Other engines are not implemented. Internal D1

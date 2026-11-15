@@ -6,7 +6,8 @@ authenticated REST and post-initialization MCP command hooks. This is a **Node h
 integration**, not a deployed Cloudflare Worker query endpoint or full PostgreSQL
 SQL/type coverage. The offline inspector still refuses production Gateway dispatch.
 Migrations `0035_postgresql_control.sql`, `0036_postgresql_agent_delegations.sql`,
-`0037_postgresql_terminal_failures.sql` and `0038_postgresql_concurrency.sql`
+`0037_postgresql_terminal_failures.sql`, `0038_postgresql_concurrency.sql` and
+`0039_postgresql_cancellation.sql`
 are opt-in and have not been applied to the production D1 database. Existing
 production migration restrictions still apply.
 
@@ -80,7 +81,8 @@ Do not place passwords or connection strings in the registry or public evidence.
    state without resubmitting. A bounded acknowledged provider failure appends a
    separate failed receipt. Pending and observed receipts are never overwritten.
 5. `stop` blocks future claims; it does not prove cancellation of an already-claimed
-   query. `retire` blocks new claims for a release. Uncertain claims are never rearmed
+   query. `cancel` requests delivery to an already-claimed query without asserting
+   a terminal result. `retire` blocks new claims for a release. Uncertain claims are never rearmed
    or automatically refunded. There is no distributed exactly-once claim.
 
 Quotas are explicitly **read-attempt counts, not currency or scanned-row limits**.
@@ -122,6 +124,51 @@ remains authoritative. A compatible Node control binding must preserve these
 atomic-write semantics. Migration 0038 preserves existing claims and receipts,
 counts prior unresolved claims, and creates no concurrency configuration rows.
 Provision the explicit limits separately before enabling new execution.
+
+### Active cancellation
+
+The authenticated requester or source's named current owner can POST `cancel`
+with only `{requestId}` (MCP: `postgresql_cancel`). Other tenant members, unrelated
+owners and cross-tenant callers cannot cancel. This human authority also applies
+to delegated Agent reads; Agent signatures do not grant a new cancellation tool.
+The claim must exist. A new request is refused if a terminal outcome is already
+known. Repeats return the existing intent only after current identity checks;
+they do not change its actor, time, binding or receipt.
+
+The atomic write binds tenant/request/intent and appends `pg-cancel-{intentId}`
+with `outcome: pending`. The response is `status: cancellation-requested` and
+`cancellationConfirmed: false`, never a delivery or terminal assertion. Human
+inspection exposes `cancellation_requested_at`, Agent inspection exposes
+`cancellationRequestedAt`, and both include the pending cancellation receipt ID.
+Cancellation intent does not release concurrency, refund quota or rearm a contract.
+
+The live original executor checks its own claim once per second while the metric
+is in flight. Checks are serial with a one-second deadline; storage failure stops
+this delivery monitor without inventing an outcome. A matching request triggers
+at most one bounded (1.5-second) protocol CancelRequest on a separate connection
+to the same bound host. Only the original dedicated connection's in-memory backend
+key is used. No PID/key is accepted from a caller, persisted, returned or logged.
+The channel uses `pg`'s protocol encoding and the same certificate/hostname checks,
+waiting for verified TLS before sending; there is no plaintext fallback. The only
+unencrypted exception remains the explicit loopback fixture. No administrative
+database role or `pg_cancel_backend` privilege is needed.
+
+Completion, local abort or deadline stops polling and closes the cancellation
+channel. Late storage results cannot initiate delivery. A request can race a
+successful query, so a confirmed success remains success. A delivered cancel can
+also fail or arrive too late. Only the original metric ErrorResponse and same-
+connection rollback acknowledgement can establish a supported failed outcome.
+SQLSTATE 57014 does not identify the cancellation's cause; it is still `failed`,
+not a user-attributed `cancelled` result.
+[PostgreSQL cancellation protocol](https://www.postgresql.org/docs/17/protocol-flow.html#PROTOCOL-FLOW-CANCELING-REQUESTS).
+
+Previously authorized cleanup intent remains deliverable after approval expiry,
+retirement or membership revocation, but does not authorize another query. If the
+original executor dies or the cancellation channel fails, this is pending evidence,
+not proof that the provider stopped. There is no cross-process backend lookup,
+PID-only cancellation, durable delivery retry or forced slot release. A stale read
+replica can delay delivery; the host must provide a sufficiently fresh control
+binding. Production enablement and migration remain separately gated.
 
 ### Bounded Agent execution
 
@@ -199,7 +246,7 @@ fields are explicit. TLS verifies certificates; unencrypted connections are only
 accepted with explicit `insecureLoopback: true` and host `127.0.0.1` for fixtures.
 The CI configuration uses disposable, synthetic credentials, not business secrets.
 
-`executePostgresMetric(config, read, claim, signal)` prepares the read, verifies
+`executePostgresMetric(config, read, claim, signal, cancellationRequested?)` prepares the read, verifies
 actual database/role/server/table/column metadata and only then calls `claim`.
 The low-level callback receives frozen database, role, action, definition and statement
 bindings. It **must atomically recheck current authority and reserve/record the
@@ -208,6 +255,8 @@ Returning true is not itself an authorization mechanism. The connector has no
 durable deduplication or authorization ledger of its own. The governed wrapper
 supplies that ledger and a bounded claim deadline. A custom callback must also
 have its own bounded deadline; arbitrary host callback execution is not cancellable.
+The optional executor-only cancellation callback must read durable intent for this
+exact claim. The governed wrapper supplies it; public callers cannot select it.
 
 Each call uses a dedicated connection, a read-only repeatable-read transaction,
 fixed `pg_catalog` search path, active RLS and an access-share table lock. Superuser,
@@ -277,7 +326,9 @@ SQLite and native D1 tests cover the persisted review/approval/claim/receipt pat
 tenant/owner isolation, concurrent claims, quota exhaustion, withdrawal of authority,
 append-only storage and receipt-write rollback. Real PostgreSQL tests exercise the
 shared durable concurrency guard, retained capacity for unknown execution and
-released capacity after confirmed completion, as well as the
+released capacity after confirmed completion, active cancellation of session and
+Agent queries through human REST/MCP, cancellation TLS rejection without fallback,
+and isolation from an unrelated live query, as well as the
 governed host path, session and signed Agent REST/MCP, concurrency, requester
 consent, owner/key/audience binding, revocation races, resolver substitution and
 lost claim, observation or terminal acknowledgements. Eight isolated real-engine
@@ -295,8 +346,8 @@ author engineering tests, not independent
 signoff, formal scoring or a real pilot.
 
 Still required for full acceptance: approved production catalog/auth/host setup and
-schema rollout; open-ended policy/Agent grants where required; active cancellation
-delivery and cross-process reconciliation of unacknowledged provider outcomes;
+schema rollout; open-ended policy/Agent grants where required; cross-process
+reconciliation and cancellation delivery after executor death or delivery failure;
 a reviewed monetary pricing/settlement model; broader
 SQL/type/version coverage where required; independent review and an authorized
 pilot. Do not enable the general adapter inspector by merely listing this host hook.

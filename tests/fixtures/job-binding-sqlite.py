@@ -40,7 +40,8 @@ upgrades = {"apply-scan-limits": "0007_bigquery_scan_limits.sql",
             "apply-postgresql-control": "0035_postgresql_control.sql",
             "apply-postgresql-agents": "0036_postgresql_agent_delegations.sql",
             "apply-postgresql-terminals": "0037_postgresql_terminal_failures.sql",
-            "apply-postgresql-concurrency": "0038_postgresql_concurrency.sql"}
+            "apply-postgresql-concurrency": "0038_postgresql_concurrency.sql",
+            "apply-postgresql-cancellation": "0039_postgresql_cancellation.sql"}
 if mode == "migration-statements":
     result = []
     for migration in sorted(migrations.glob("*.sql")):
@@ -83,7 +84,7 @@ elif mode in ("upgrade-v24-snapshot-to-v32", "upgrade-v24-snapshot-to-v33"):
 elif mode in upgrades:
     db.executescript((migrations / upgrades[mode]).read_text(encoding="utf-8"))
     result = None
-elif mode in ("setup", "setup-v6", "setup-v8", "setup-v9", "setup-v10", "setup-v12", "setup-v14", "setup-v16", "setup-v17", "setup-v18", "setup-v19", "setup-v29", "setup-v30", "setup-v32", "setup-v34", "setup-v35", "setup-v36", "setup-v37"):
+elif mode in ("setup", "setup-v6", "setup-v8", "setup-v9", "setup-v10", "setup-v12", "setup-v14", "setup-v16", "setup-v17", "setup-v18", "setup-v19", "setup-v29", "setup-v30", "setup-v32", "setup-v34", "setup-v35", "setup-v36", "setup-v37", "setup-v38"):
     for migration in sorted(migrations.glob("*.sql")):
         if mode.startswith("setup-v") and int(migration.name.split("_", 1)[0]) > int(mode[len("setup-v"):]):
             continue
