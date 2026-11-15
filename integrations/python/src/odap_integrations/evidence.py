@@ -114,7 +114,7 @@ class EvidenceVerifier:
         self._timeout = timeout
         self._slots = asyncio.Semaphore(concurrency)
 
-    async def _run(self, source: EvidenceSource) -> dict:
+    def _command(self, source: EvidenceSource) -> list[str]:
         args = [
             self._node,
             str(self._script),
@@ -125,6 +125,12 @@ class EvidenceVerifier:
         ]
         if source.audience is not None:
             args.extend(["--audience", source.audience])
+        return args
+
+    def _parse_output(self, stdout: bytes, source: EvidenceSource) -> dict:
+        return self._validate_report(json.loads(stdout.decode("utf-8")), source)
+
+    async def _run(self, source: EvidenceSource) -> dict:
         # The detached verifier needs no credentials, NODE_OPTIONS, proxy, or model settings.
         env = {
             key: os.environ[key]
@@ -133,7 +139,7 @@ class EvidenceVerifier:
         }
         spawn = asyncio.create_task(
             asyncio.create_subprocess_exec(
-                *args,
+                *self._command(source),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -165,8 +171,7 @@ class EvidenceVerifier:
                 raise EvidenceError("evidence_rejected")
             if stderr:
                 raise EvidenceError("verifier_output_invalid")
-            report = json.loads(stdout.decode("utf-8"))
-            return self._validate_report(report, source)
+            return self._parse_output(stdout, source)
         finally:
             for task in readers:
                 if not task.done():
@@ -223,7 +228,7 @@ class EvidenceVerifier:
             raise EvidenceError("verifier_output_invalid")
         return report
 
-    async def verify(self, evidence_ref: str, correlation_id: str) -> dict:
+    async def _invoke(self, evidence_ref: str, correlation_id: str) -> dict:
         if not _identifier(evidence_ref) or not _identifier(correlation_id):
             raise EvidenceError("invalid_tool_input")
         source = self._sources.get(evidence_ref)
@@ -237,8 +242,12 @@ class EvidenceVerifier:
             raise EvidenceError("verification_timeout") from None
         except EvidenceError:
             raise
-        except (OSError, ValueError, UnicodeError):
+        except (OSError, ValueError, UnicodeError, RecursionError):
             raise EvidenceError("verification_unavailable") from None
+        return report
+
+    async def verify(self, evidence_ref: str, correlation_id: str) -> dict:
+        report = await self._invoke(evidence_ref, correlation_id)
         return {
             "status": "verified",
             "evidenceRef": evidence_ref,

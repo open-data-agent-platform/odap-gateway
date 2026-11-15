@@ -87,3 +87,52 @@ jobs:
           path: integration-results.json
           if-no-files-found: error
 
+  catalog-integrations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: integrations/python/requirements-catalog-test.lock
+
+      - name: Build detached exporter
+        run: |
+          npm ci
+          npm run evidence:build
+
+      - name: Install catalog SDK dependencies
+        run: |
+          python -m pip install -r integrations/python/requirements-catalog-test.lock
+          python -m pip install --no-deps ./integrations/python
+          python -m pip check
+
+      - name: Lint catalog integrations
+        run: python -m ruff check integrations/python/src integrations/python/catalog_tests
+
+      - name: Typecheck catalog integrations
+        run: |
+          python -m mypy --platform linux --ignore-missing-imports --follow-imports=silent --check-untyped-defs integrations/python/src
+          python -m mypy --platform win32 --ignore-missing-imports --follow-imports=silent --check-untyped-defs integrations/python/src
+
+      - name: Verify catalog SDK integrations
+        run: python integrations/python/catalog_tests/run_tests.py --report catalog-results.json
+
+      - name: Preserve catalog results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-integration-results
+          path: catalog-results.json
+          if-no-files-found: error
+
