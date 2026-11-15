@@ -2,7 +2,8 @@
 
 `integrations/postgresql/index.ts` implements the restricted Node.js read connector.
 `control.ts` connects it to persisted Gateway authority, and `gateway.ts` supplies
-authenticated REST and post-initialization MCP command hooks. This is a **Node host
+authenticated REST and post-initialization MCP command hooks. `server.ts` supplies
+an optional bounded loopback HTTP listener. This is a **Node host
 integration**, not a deployed Cloudflare Worker query endpoint or full PostgreSQL
 SQL/type coverage. The offline inspector still refuses production Gateway dispatch.
 Migrations `0035_postgresql_control.sql`, `0036_postgresql_agent_delegations.sql`,
@@ -89,8 +90,8 @@ const handler = createPostgresGateway({
 ```
 
 Mount this single long-lived handler in the host's existing Request/Response
-bridge; do not instantiate a new handler per request. No listener, OAuth provider
-or public deployment is provisioned by this module.
+bridge, or use the loopback listener below; do not instantiate a new handler per
+request. No OAuth provider or public deployment is provisioned by this module.
 Use an explicitly authorized deployment, trusted durable control binding and
 secret resolver; the example is not authorization to configure production.
 
@@ -126,6 +127,50 @@ SQL sandbox, high-availability service or network-filesystem deployment. Use a
 SQLite-aware backup of the database and committed WAL, not a copy of the main file
 while writers are active. Restart/recovery preserves unresolved claims and never
 rearms them. Tests cover process termination, not power loss or damaged storage.
+
+### Loopback HTTP service
+
+```js
+const { startPostgresHttpHost } = require('./dist/postgresql/integrations/postgresql/server.js');
+// env already contains the approved control DB and authentication configuration.
+// resolve is the trusted source registry's credential resolver, not request input.
+const host = await startPostgresHttpHost({
+  origin: 'https://your-approved-host.example', port: 8080,
+  env, resolve, maxConcurrentExecutions: 8, maxRequests: 64,
+  requestDeadlineMs: 30000,
+});
+// On operator-requested shutdown, stop acceptance and await in-flight work.
+const state = await host.close(5000);
+// Close the control store only when state.drained is true. If false, retain it
+// until work settles and call close again; do not infer a query's terminal state.
+```
+
+Use this example inside an async entry point. The service always binds
+`127.0.0.1`, never a public interface. A separately approved TLS reverse proxy must
+preserve the configured canonical Host and authenticate clients through the
+existing session/signed-Agent boundary. HTTPS origin is required even though this
+internal hop is HTTP. Do not expose the loopback port through an unauthenticated
+tunnel or reuse a main-site proxy without reviewing its routing and cookie scope.
+Forwarded headers do not establish identity, origin or authorization. No proxy,
+DNS, certificate, credentials or production route is created by this library.
+
+HTTP/1.1 POST requests retain the `/postgresql/{tenant}/{command}` paths. The
+listener rejects ambiguous duplicate headers, mismatched Host, compression,
+trailers, expectation handshakes, upgrades and CONNECT. Request headers are bounded
+to 16 KiB/128 fields, bodies to 64 KiB and responses to 1 MiB. Connections carry
+one request; header/body receipt timeouts and a total request deadline are bounded.
+Transport admission includes body receipt and handler work, separately from the
+execution admission limit. Client disconnect or deadline signals cancellation to
+the existing executor, without asserting provider cancellation or freeing durable
+capacity. A timed-out handler retains its transport slot until it actually settles.
+[Node HTTP lifecycle](https://nodejs.org/download/release/v24.22.1/docs/api/http.html).
+
+`close(graceMs)` is idempotent, stops accepting work, waits for admitted work and
+responses, then aborts overdue work and closes remaining sockets. `drained: false`
+means host work remains; it is not permission to close its ledger, refund a claim
+or retry a query. Even `drained: true` describes only host work, not a provider
+terminal outcome. The service still supplies post-initialization MCP command hooks,
+not MCP session initialization, OAuth issuance or a public production deployment.
 
 Before enabling traffic, verify the exact engine/driver version, TLS trust,
 read-only role/RLS, schema migration level and explicit source/budget/concurrency
@@ -460,7 +505,10 @@ Agent queries through human REST/MCP, cancellation TLS rejection without fallbac
 and isolation from an unrelated live query, as well as the
 governed host path, session and signed Agent REST/MCP, concurrency, requester
 consent, owner/key/audience binding, revocation races, resolver substitution and
-lost claim, observation or terminal acknowledgements. Eight isolated real-engine
+lost claim, observation or terminal acknowledgements. Socket tests cover HTTP
+boundaries, admission retention and bounded draining; real-engine tests also send
+session/Agent REST/MCP reads through the listener and disconnect an active client
+without replaying or refunding its uncertain read. Eight isolated real-engine
 cases use actual SIGKILL at claim acknowledgement, active query, success receipt
 acknowledgement and failed receipt acknowledgement, for both session and Agent
 execution. A fresh Node process then inspects the same durable ledger and proves
