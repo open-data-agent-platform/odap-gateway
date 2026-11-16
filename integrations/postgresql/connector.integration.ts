@@ -102,6 +102,7 @@ beforeAll(async () => {
     productionVerified: false, gatewayDispatchIntegrated: true, transportScope: "Node host, not deployed Worker",
     tlsFixtureRequired: true, signedAgentDelegation: true, terminalCodes: ["57014", "42501"],
     hostCrashFixture: "SIGKILL-execute/fresh-process-recovery", durableConcurrency: true, activeCancellation: true, configuredHost: true,
+    passwordRotation: "restart-and-reauthenticate",
     controlStore: "node:sqlite", controlSchemaDigest: POSTGRES_CONTROL_SCHEMA_DIGEST, nodeVersion: process.versions.node,
     nodeHttpHost: "loopback-only-trusted-TLS-proxy-required",
     mcpSdkVersion: "2.4.0", mcpProtocols: ["2025-11-25", "2026-07-28"], mcpTransport: "stateless-official-client",
@@ -165,7 +166,7 @@ it("enforces stored and virtual generated-column boundaries on the selected serv
   }
 });
 
-async function configuredFixture(file: string, changes: Record<string, unknown> = {}) {
+async function configuredFixture(file: string, changes: Record<string, unknown> = {}, password = "synthetic-fixture-only") {
   const listener = createServer();
   await new Promise<void>(resolve => listener.listen(0, "127.0.0.1", resolve));
   const address = listener.address(); if (!address || typeof address === "string") throw new Error("Fixture port unavailable");
@@ -178,7 +179,7 @@ async function configuredFixture(file: string, changes: Record<string, unknown> 
       tls: { caFile: resolve(".tmp/postgresql-tls/server.crt") }, statementTimeoutMs: config.statementTimeoutMs,
       lockTimeoutMs: config.lockTimeoutMs, deadlineMs: config.deadlineMs, ...changes }] }));
   return startConfiguredPostgresHost(path, { ODAP_SESSION_SECRET: "synthetic-configured-session-secret-over-32-bytes",
-    ODAP_DATABASE_PASSWORD: "synthetic-fixture-only" });
+    ODAP_DATABASE_PASSWORD: password });
 }
 
 it.each([false, true])("executes through the configured TLS host and official MCP client (Agent=%s)", async agent => {
@@ -204,6 +205,55 @@ it.each([false, true])("executes through the configured TLS host and official MC
       expect(await inspectPostgresRead(pgAccess(db), a ? "agent-request" : "request")).toMatchObject({ state: "succeeded", used_attempts: 1 });
       expect((await connection.client.callTool({ name, arguments: arguments_ })).isError).toBe(true);
     } finally { await connection?.close(); expect(await host.close()).toEqual({ drained: true }); }
+  }, c);
+});
+
+it.each([false, true])("rotates a real configured password without changing authority or replaying a claim (Agent=%s)", async agent => {
+  const c = { ...config, tls: { ca: readFileSync(".tmp/postgresql-tls/server.crt", "utf8") } };
+  await governedFixture(async (db, file) => {
+    const a = agent ? await approvePostgresAgentFixture(db) : undefined;
+    const requestId = a ? "agent-request" : "request";
+    const before = await inspectPostgresRead(pgAccess(db), requestId);
+    let host = await configuredFixture(file);
+    const bindings = host.bindings;
+    let connection: Awaited<ReturnType<typeof connectPostgresMcpFixture>> | undefined;
+    const headers: Record<string, string> = { Origin: pgAgentOrigin };
+    if (!a) headers.Cookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "reader",
+      email: "synthetic@example.test", name: "Synthetic", expiresAt: Date.now() + 600000 },
+    "synthetic-configured-session-secret-over-32-bytes");
+    const path = `/postgresql/tenant-a/${a ? "agent-mcp-stream" : "mcp-stream"}`;
+    const call = { name: a ? "postgresql_agent_execute" : "postgresql_execute",
+      arguments: a ? { delegationId: a.delegationId, signature: a.signature } : { requestId } };
+    try {
+      // This role exists only in the disposable synthetic fixture. Never use business credentials.
+      await admin.query("ALTER ROLE reader_a PASSWORD 'synthetic-rotated-fixture-only'");
+      connection = await connectPostgresMcpFixture(host.address, pgAgentOrigin, path, headers, true);
+      const stale = await connection.client.callTool(call);
+      expect(stale.isError).toBe(false);
+      expect(JSON.parse((stale.content as { text: string }[])[0].text))
+        .toMatchObject({ outcome: "not-submitted", claim: "not-attempted", monetaryCost: "unpriced" });
+      expect(JSON.stringify(stale)).not.toMatch(/synthetic-fixture-only|synthetic-rotated-fixture-only/);
+      expect(await inspectPostgresRead(pgAccess(db), requestId))
+        .toMatchObject({ contract_id: before.contract_id, state: "not-submitted", used_attempts: 0, intent_id: null, unresolved_claims: 0 });
+      expect(await db.prepare("SELECT count(*) AS n FROM postgresql_read_claims").first("n")).toBe(0);
+      await connection.close(); connection = undefined;
+      expect(await host.close()).toEqual({ drained: true });
+
+      host = await configuredFixture(file, {}, "synthetic-rotated-fixture-only");
+      expect(host.bindings).toEqual(bindings);
+      connection = await connectPostgresMcpFixture(host.address, pgAgentOrigin, path, headers, true);
+      const result = await connection.client.callTool(call);
+      expect(result.isError).toBe(false);
+      expect(JSON.parse((result.content as { text: string }[])[0].text)).toMatchObject({ outcome: "succeeded", value: "3" });
+      expect(await inspectPostgresRead(pgAccess(db), requestId))
+        .toMatchObject({ contract_id: before.contract_id, state: "succeeded", used_attempts: 1, unresolved_claims: 0 });
+      expect((await connection.client.callTool(call)).isError).toBe(true);
+      expect(await db.prepare("SELECT count(*) AS n FROM postgresql_read_claims").first("n")).toBe(1);
+      expect((await admin.query("SELECT pid FROM pg_stat_activity WHERE application_name='odap-postgresql-preview'")).rows).toEqual([]);
+    } finally {
+      try { await connection?.close(); expect(await host.close()).toEqual({ drained: true }); }
+      finally { await admin.query("ALTER ROLE reader_a PASSWORD 'synthetic-fixture-only'"); }
+    }
   }, c);
 });
 

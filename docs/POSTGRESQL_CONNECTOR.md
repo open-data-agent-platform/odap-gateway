@@ -321,6 +321,23 @@ through the operator's approved secret delivery mechanism, never commit values
 or pass them in command arguments. The process snapshots only those references;
 ambient `PG*` variables are not fallback credentials. Restart to rotate secrets.
 
+For an authorized database-password rotation, drain and stop the configured host,
+rotate the password through the deployment's approved secret-management process,
+then restart with the updated explicitly named secret. A running host keeps its
+startup credential snapshot; mutating an environment object is not a reload API.
+Do not substitute the role, endpoint, database, TLS trust or limits: those are
+authority changes requiring the existing source review, not password rotation.
+Existing PostgreSQL sessions are not assumed to be invalidated by changing a
+password. Drain first; shutdown or restart never clears uncertain claims.
+
+The isolated real-engine matrix exercises an intentionally stale host for both
+session and signed-Agent reads: the replaced password fails before claim, consumes
+no attempt, and leaks neither password. Restarting with the new password preserves
+the connection binding and existing eligible approval, executes exactly once, and
+still refuses replay. This tests password rotation on the pinned fixture builds,
+not automatic secret-manager reload, session-cookie-key rotation, live production
+rotation or a guarantee that every authentication failure occurs before claim.
+
 After the separate authorization and provisioning prerequisites below are met:
 
 ```sh
