@@ -6,11 +6,14 @@
 
 # ODAP Gateway
 
-**A reference implementation of the [ODAP Five Musts](https://github.com/open-data-agent-platform/awesome-odap/blob/main/RUBRIC.md): a governed gateway for AI agents querying enterprise data. Starting with BigQuery, done deeply.**
+**A reference implementation of the [ODAP Five Musts](https://github.com/open-data-agent-platform/awesome-odap/blob/main/RUBRIC.md): governed data access for AI agents, with BigQuery workflows and a bounded PostgreSQL Node host.**
 
-**Preview 0.2.0-preview.1.** This release contains local and authenticated
+**Preview 0.3.0-preview.1.** This release contains local and authenticated
 control workflows; it is not a completed Gateway acceptance or a configured
 production warehouse integration. APIs remain subject to change.
+
+[Release notes](docs/RELEASE_0_3_0_PREVIEW_1.md) summarize PostgreSQL scope,
+reproducible verification and the remaining production boundaries.
 
 > ODAP (Open Data Agent Platform) is an open, CC0 standard: when an AI agent
 > touches enterprise data, it must pass through a gateway that is **Open,
@@ -43,7 +46,7 @@ including what is **not** implemented yet. See
 ## Stack
 
 Next.js (App Router) | Cloudflare Workers and Functions | D1 (SQLite) |
-BigQuery API | TypeScript.
+BigQuery API | PostgreSQL via a separate Node.js host | TypeScript.
 
 ## Run locally
 

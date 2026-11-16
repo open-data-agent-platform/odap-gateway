@@ -1,3 +1,5 @@
+import { POSTGRESQL_PREVIEW_SUMMARY, POSTGRESQL_PREVIEW_BOUNDARY } from "./gateway-release";
+
 export type DocsGuide = {
   id: string;
   title: string;
@@ -27,6 +29,17 @@ export type PublicDocsFeedback = {
 };
 
 export const docsGuides: DocsGuide[] = [
+  {
+    id: "postgresql-preview",
+    title: "PostgreSQL Node host preview",
+    summary: POSTGRESQL_PREVIEW_SUMMARY,
+    steps: [
+      "Use the versioned PostgreSQL connector guide for the separate Node host; the hosted web editor is not its query client.",
+      "The verified slice uses one ordinary RLS table, COUNT_ROWS or SUM, and supported scalar equality filters. It is not arbitrary SQL or joins.",
+      "Unknown outcomes retain reservations and require observation. Attempt quotas are not monetary budgets; cost remains unpriced.",
+      POSTGRESQL_PREVIEW_BOUNDARY
+    ]
+  },
   {
     id: "first-query",
     title: "Inspect a demo SQL draft",
@@ -63,6 +76,10 @@ export const docsGuides: DocsGuide[] = [
 ];
 
 export const docsFaqs: DocsFaq[] = [
+  {
+    question: "Can I query PostgreSQL from this website?",
+    answer: `${POSTGRESQL_PREVIEW_BOUNDARY} The separate configured Node host has synthetic real-engine checks on exact builds 15.20, 16.16, 17.12 and 18.7, including TLS, tenant isolation, cancellation, recovery and restart-based password rotation. Passing these checks is not production authorization.`
+  },
   {
     question: "Is Open Data Agent Platform affiliated with Google?",
     answer:

@@ -17,6 +17,7 @@ import {
   docsGuides
 } from "@/lib/docs-content";
 import { SOURCE_REPOSITORY_URL } from "@/lib/open-source";
+import { GATEWAY_VERSION, GATEWAY_RELEASE_URL, POSTGRESQL_GUIDE_URL } from "@/lib/gateway-release";
 
 export const metadata: Metadata = {
   title: "Docs",
@@ -130,6 +131,11 @@ export default function DocsPage() {
               </h2>
             </div>
             <div className="mt-6 grid gap-4">
+              <p className="text-sm leading-7 text-[#9aa2b7]">
+                Preview {GATEWAY_VERSION}.{" "}
+                <a className="text-[#7fa6ff] underline" href={GATEWAY_RELEASE_URL}>Release notes</a>{" / "}
+                <a className="text-[#7fa6ff] underline" href={POSTGRESQL_GUIDE_URL}>Versioned PostgreSQL guide</a>
+              </p>
               {docsGuides.map((guide) => (
                 <article
                   key={guide.id}

@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ArrowRight, DatabaseZap, GitBranch, ShieldCheck, WalletCards } from "lucide-react";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { GATEWAY_VERSION, GATEWAY_RELEASE_URL, POSTGRESQL_GUIDE_URL,
+  POSTGRESQL_PREVIEW_SUMMARY, POSTGRESQL_PREVIEW_BOUNDARY } from "@/lib/gateway-release";
 
 const modules = [
   {
@@ -38,14 +40,14 @@ export default function HomePage() {
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-4 py-14 sm:px-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(360px,0.55fr)] lg:items-center lg:px-8 lg:py-20">
           <div>
             <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#60a5fa]">
-              ODAP Gateway
+              Preview {GATEWAY_VERSION}
             </p>
             <h1 className="mt-5 max-w-4xl text-4xl font-semibold tracking-normal text-slate-50 sm:text-6xl">
-              Governed BigQuery access for AI agents.
+              ODAP Gateway
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-8 text-slate-400">
-              A local reference implementation of the ODAP Five Musts: open,
-              semantic, governed, auditable, and cost-controlled.
+              Governed data access for AI agents. BigQuery workflows and a
+              bounded PostgreSQL Node host, developed as an ODAP reference implementation.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
@@ -73,6 +75,18 @@ FROM \`demo.orders\`
 WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 8 WEEK)
 GROUP BY week_start, acquisition_channel;`}</code>
             </pre>
+          </div>
+        </div>
+      </section>
+      <section aria-labelledby="postgresql-preview" className="border-b border-white/10">
+        <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+          <h2 id="postgresql-preview" className="text-xl font-semibold text-slate-50">PostgreSQL preview</h2>
+          <p className="mt-3 max-w-4xl text-sm leading-7 text-slate-300">{POSTGRESQL_PREVIEW_SUMMARY}</p>
+          <p className="mt-2 max-w-4xl text-sm leading-7 text-slate-400">{POSTGRESQL_PREVIEW_BOUNDARY}</p>
+          <p className="mt-2 text-sm leading-7 text-slate-400">Synthetic real-engine verification: PostgreSQL 15.20, 16.16, 17.12 and 18.7. Sign-in and administrator access still require setup.</p>
+          <div className="mt-4 flex flex-wrap gap-x-6 gap-y-3 text-sm font-semibold text-[#60a5fa]">
+            <a href={GATEWAY_RELEASE_URL} className="inline-flex items-center gap-2">Release notes <ArrowRight className="h-4 w-4" aria-hidden="true" /></a>
+            <a href={POSTGRESQL_GUIDE_URL} className="inline-flex items-center gap-2">PostgreSQL guide <ArrowRight className="h-4 w-4" aria-hidden="true" /></a>
           </div>
         </div>
       </section>

@@ -4,11 +4,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ?? "https://example.com"),
   title: {
-    default: "ODAP Gateway - Governed BigQuery Access for AI Agents",
+    default: "ODAP Gateway - Governed Data Access for AI Agents",
     template: "%s | ODAP Gateway"
   },
   description:
-    "A local reference implementation of the Open Data Agent Platform Five Musts for governed BigQuery dry-runs, approvals, audit trails, and schema policy.",
+    "ODAP Gateway preview: BigQuery workflows and a bounded PostgreSQL Node host with semantic releases, approval contracts and audit evidence. Not a production-readiness claim.",
   robots: {
     index: true,
     follow: true
