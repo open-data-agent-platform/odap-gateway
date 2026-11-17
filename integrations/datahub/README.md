@@ -54,5 +54,11 @@ Tests exercise all three outcomes, real SDK serialization roundtrips, stable
 replay, revision isolation and rejection of invalid evidence/reporting inputs.
 They do not authenticate an issuer or prove a live DataHub server accepted data.
 
+The separate [native OpenLineage converter probe](receiver-tests/README.md)
+now executes the actual converter in the pinned DataHub 1.7.0.20 Java release.
+It confirms that the native route drops the ODAP facet when generating MCPs;
+this direct SDK snapshot adapter does not use that route. Neither test path
+establishes HTTP ingestion, persistence, cross-request idempotency or UI support.
+
 References: official [DataProcessInstance model](https://archive.docs.datahub.com/docs/1.7.0/generated/metamodel/entities/dataprocessinstance)
 and [Python models](https://archive.docs.datahub.com/docs/1.7.0/python-sdk/models).

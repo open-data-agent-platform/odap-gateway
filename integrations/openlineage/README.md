@@ -83,9 +83,17 @@ identifies these prerequisites and limitations, **not a receiver integration tes
   `nativeResultType` retains their distinct original value. Keep cancellation
   separate when interpreting the result; neither means successful execution.
 
-No DataHub endpoint was contacted, and duplicate/out-of-order event behavior,
+No DataHub endpoint was contacted, and persisted duplicate/out-of-order behavior,
 evidence retention and UI rendering remain unverified. These notes do not
 request a core schema change or add an automatic emitter.
+
+The subsequent [local released-converter probe](../datahub/receiver-tests/README.md)
+executes DataHub 1.7.0.20's actual converter and MCP generator, separately from
+these source notes. Its 19 behavior checks pass, but the strict evidence-digest
+gate has three failures: the parser retains the custom facet and the converter
+does not map it. Omitted datasets become empty instance aspects, and repeated or
+reversed events still generate proposals. This is component-level evidence, not
+GMS HTTP acceptance, persisted ordering/deduplication, or a fix to evidence loss.
 
 ## Tests and schema provenance
 

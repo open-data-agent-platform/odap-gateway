@@ -1,0 +1,364 @@
+{
+  "checked_at": "2026-11-17T14:35:40.163Z",
+  "environment": {
+    "node": "v24.22.1",
+    "java": "21.0.13",
+    "artifact": "io.acryl:acryl-spark-lineage_2.12:1.7.0.20",
+    "sha256": "c7feeda495fe2a4553b2f7a5874bc39722eb642fbfda3c0799ad8a08ca5513ea",
+    "slf4jSha256": "7b751d952061954d5abfed7181c1f645d336091b679891591d63329c622eb832",
+    "strictFacetRetention": false,
+    "httpReceiverTested": false,
+    "persistenceTested": false
+  },
+  "gateway_source_baseline": "d2a3af4e7be258ac7f97244ad78c6cc326b0c09e (v0.3.0-preview.1); exporter, validator, canonicalization, fixture and build configuration matched",
+  "characterization": {
+    "run": "characterization-final",
+    "exit_code": 0,
+    "tests": 19,
+    "passed": 19,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed_tests": [],
+    "strict_facet_retention": false
+  },
+  "strict_association": {
+    "run": "strict-final",
+    "exit_code": 1,
+    "tests": 19,
+    "passed": 16,
+    "failures": 3,
+    "errors": 0,
+    "skipped": 0,
+    "failed_tests": [
+      "succeeded: evidence facet survives parsing; check proposal retention",
+      "failed: evidence facet survives parsing; check proposal retention",
+      "cancelled: evidence facet survives parsing; check proposal retention"
+    ],
+    "strict_facet_retention": true
+  },
+  "supporting_regressions": {
+    "exporter": {
+      "passed": 32,
+      "exit_code": 0
+    },
+    "catalog_sdk": {
+      "passed": 18,
+      "exit_code": 0,
+      "scope": "Separate SDK path, not native receiver tests"
+    }
+  },
+  "initial_setup_failure": {
+    "run": "characterization-r1",
+    "exit_code": 1,
+    "hook_failed_entries": 18,
+    "converter_assertions_executed": 0,
+    "reason": "Probe imported wrong shaded Jackson package; corrected to artifact-provided newObjectMapper"
+  },
+  "network_guard_verified": true,
+  "converter_network_attempts": 0,
+  "observed_cases": [
+    {
+      "name": "succeeded",
+      "events": [
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "STARTED",
+          "timestamp_ms": 1767225601000,
+          "proposals": 9,
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        },
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "COMPLETE",
+          "result": {
+            "type": "SUCCESS",
+            "nativeResultType": "COMPLETE"
+          },
+          "timestamp_ms": 1767225602000,
+          "proposals": 9,
+          "parser_retained_digest": "sha256:93bd4d13b9ff8ff15fab6c495d64deca8cbca30429fa3d683701dc3dc75883f7",
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "failed",
+      "events": [
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "STARTED",
+          "timestamp_ms": 1767225601000,
+          "proposals": 9,
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        },
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "COMPLETE",
+          "result": {
+            "type": "FAILURE",
+            "nativeResultType": "FAIL"
+          },
+          "timestamp_ms": 1767225602000,
+          "proposals": 9,
+          "parser_retained_digest": "sha256:5977fbd942bd0637a200aed1f062d19feeac688a69c93ee88944e9a20971d705",
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "cancelled",
+      "events": [
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "STARTED",
+          "timestamp_ms": 1767225601000,
+          "proposals": 9,
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        },
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "COMPLETE",
+          "result": {
+            "type": "FAILURE",
+            "nativeResultType": "ABORT"
+          },
+          "timestamp_ms": 1767225602000,
+          "proposals": 9,
+          "parser_retained_digest": "sha256:5fd521fda61c137d10a13bf33eb17d1f83c29c84af0104752b4e218481dd30a2",
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "no-orchestrator",
+      "events": [
+        {
+          "error": "Unable to determine orchestrator"
+        },
+        {
+          "error": "Unable to determine orchestrator",
+          "parser_retained_digest": "sha256:93bd4d13b9ff8ff15fab6c495d64deca8cbca30429fa3d683701dc3dc75883f7"
+        }
+      ]
+    },
+    {
+      "name": "duplicate",
+      "events": [
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "STARTED",
+          "timestamp_ms": 1767225601000,
+          "proposals": 9,
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        },
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "COMPLETE",
+          "result": {
+            "type": "SUCCESS",
+            "nativeResultType": "COMPLETE"
+          },
+          "timestamp_ms": 1767225602000,
+          "proposals": 9,
+          "parser_retained_digest": "sha256:93bd4d13b9ff8ff15fab6c495d64deca8cbca30429fa3d683701dc3dc75883f7",
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        },
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "STARTED",
+          "timestamp_ms": 1767225601000,
+          "proposals": 9,
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        },
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "COMPLETE",
+          "result": {
+            "type": "SUCCESS",
+            "nativeResultType": "COMPLETE"
+          },
+          "timestamp_ms": 1767225602000,
+          "proposals": 9,
+          "parser_retained_digest": "sha256:93bd4d13b9ff8ff15fab6c495d64deca8cbca30429fa3d683701dc3dc75883f7",
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "reversed",
+      "events": [
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "COMPLETE",
+          "result": {
+            "type": "SUCCESS",
+            "nativeResultType": "COMPLETE"
+          },
+          "timestamp_ms": 1767225602000,
+          "proposals": 9,
+          "parser_retained_digest": "sha256:93bd4d13b9ff8ff15fab6c495d64deca8cbca30429fa3d683701dc3dc75883f7",
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        },
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "STARTED",
+          "timestamp_ms": 1767225601000,
+          "proposals": 9,
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "terminal-only",
+      "events": [
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "COMPLETE",
+          "result": {
+            "type": "FAILURE",
+            "nativeResultType": "ABORT"
+          },
+          "timestamp_ms": 1767225602000,
+          "proposals": 9,
+          "parser_retained_digest": "sha256:5fd521fda61c137d10a13bf33eb17d1f83c29c84af0104752b4e218481dd30a2",
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "revision",
+      "events": [
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "STARTED",
+          "timestamp_ms": 1767225601000,
+          "proposals": 9,
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        },
+        {
+          "instance_urn": "urn:li:dataProcessInstance:5dded15c-4047-5160-8b77-73727e0d7944",
+          "status": "COMPLETE",
+          "result": {
+            "type": "FAILURE",
+            "nativeResultType": "ABORT"
+          },
+          "timestamp_ms": 1767225602000,
+          "proposals": 9,
+          "parser_retained_digest": "sha256:0c0d3084fa180edbec054338d10af6551b248241927bcf9d06574ab596979b40",
+          "proposals_retained_digest": false,
+          "input_aspect": {
+            "inputs": []
+          },
+          "output_aspect": {
+            "outputs": []
+          }
+        }
+      ]
+    }
+  ],
+  "boundaries": {
+    "http_receiver_tested": false,
+    "persisted_data_tested": false,
+    "authentication_tested": false,
+    "idempotent_writes_proven": false,
+    "ui_tested": false,
+    "production_changed": false,
+    "independent_acceptance": false,
+    "production_readiness_claimed": false
+  },
+  "hashes": {
+    "ReceiverProbe.java": "033370d91b7531b55dc63096946a9bc17b6fec2efe05ca0497fbc1ff84349ec6",
+    "verify-receiver.mjs": "35d315da8d5ff62f6826920ba66d23b60472dd74bfe0444c0d0ebffaec2f9d50",
+    "README.md": "2167888d9484d3ff26312a4d1dcc8c071f39ee675f4367758261da727968956a",
+    "characterization-final.xml": "44a953c880b9d4278072503b5159c7891940ecaff8733556db96f82719cc870a",
+    "strict-final.xml": "86857662e7a9fb9febc08bf8c1b018c4552e2c938e9e8c013342a3d0f83f3645",
+    "characterization-final/projections.json": "f64f6ce1024f3f370d028571000557f7ac2d1874f35d2f4c6b18d602b594e1c3",
+    "strict-final/projections.json": "3f978da37c8b152c8db8ad6d76f80ed8f57d976e6b3577b6cd908c5f48a39afe",
+    "characterization-final/inputs.json": "f137b9318c1963c6f32cf74c1891e052460f85fe957da44c00a5b8a405c49edd"
+  }
+}
