@@ -54,6 +54,16 @@ class FixtureCase(unittest.IsolatedAsyncioTestCase):
 
 
 class AttemptTests(FixtureCase):
+    async def test_external_registry_label_does_not_change_attempt_identity(self):
+        ref = "urn:external-receipt:9007199254740993/revision%2F1#saved"
+        original = await reader().read("ref", "c")
+        aliased = await reader({ref: SOURCE}).read(ref, "c")
+        self.assertEqual(original, aliased)
+        with patch.object(evidence.asyncio, "create_subprocess_exec") as spawn:
+            with self.assertRaisesRegex(EvidenceError, "^evidence_unavailable$"):
+                await reader({ref: SOURCE}).read(ref.replace("%2F", "/"), "c")
+            spawn.assert_not_called()
+
     async def test_real_export_and_stable_identity(self):
         first = await reader().read("ref", "9007199254740993")
         second = await reader().read("ref", "another")

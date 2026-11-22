@@ -1,0 +1,163 @@
+{
+  "verified_on": "2026-11-22",
+  "source_baseline": "d2a3af4e7be258ac7f97244ad78c6cc326b0c09e (v0.3.0-preview.1)",
+  "scope": "Host-registered opaque reference keys; not external receipt verification or network resolution",
+  "negative_control": {
+    "tests": 10,
+    "errors": 10,
+    "exit_code": 1,
+    "reason": "The old implementation rejects external-reference registry configuration before these cases can complete; not ten production defects"
+  },
+  "focused": {
+    "tests": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed_names": [],
+    "error_names": [],
+    "passed": true,
+    "packages": {
+      "fastmcp": "4.2.0",
+      "llama-index-core": "0.14.26",
+      "langchain-core": "1.8.0",
+      "langgraph": "1.2.22"
+    },
+    "exit_code": 0,
+    "included_in_framework_total": true
+  },
+  "framework": {
+    "passed": true,
+    "tests": 29,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "python": "3.12.14",
+    "packages": {
+      "fastmcp": "4.2.0",
+      "mcp": "2.3.0",
+      "langchain-core": "1.8.0",
+      "langgraph": "1.2.22",
+      "llama-index-core": "0.14.26"
+    },
+    "scope": "Synthetic local verifier and real framework calls; no real data, models, warehouse or production endpoint",
+    "exit_code": 0
+  },
+  "catalog": {
+    "passed": true,
+    "tests": 19,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "python": "3.12.14",
+    "packages": {
+      "acryl-datahub": "1.7.0.20",
+      "openmetadata-ingestion": "2.0.8.0",
+      "opentelemetry-sdk": "1.45.2"
+    },
+    "scope": "Synthetic pinned bundles, real SDK model roundtrips and in-memory logs; no receiver, cloud, database or query",
+    "exit_code": 0
+  },
+  "gates": [
+    {
+      "name": "evidence-build",
+      "exit_code": 0,
+      "signal": null,
+      "error": null,
+      "passed": true
+    },
+    {
+      "name": "typecheck",
+      "exit_code": 0,
+      "signal": null,
+      "error": null,
+      "passed": true
+    },
+    {
+      "name": "framework-dependencies",
+      "exit_code": 0,
+      "signal": null,
+      "error": null,
+      "passed": true
+    },
+    {
+      "name": "catalog-dependencies",
+      "exit_code": 0,
+      "signal": null,
+      "error": null,
+      "passed": true
+    },
+    {
+      "name": "lint",
+      "exit_code": 0,
+      "signal": null,
+      "error": null,
+      "passed": true
+    },
+    {
+      "name": "types-linux",
+      "exit_code": 0,
+      "signal": null,
+      "error": null,
+      "passed": true
+    },
+    {
+      "name": "types-win32",
+      "exit_code": 0,
+      "signal": null,
+      "error": null,
+      "passed": true
+    },
+    {
+      "name": "wheel",
+      "exit_code": 0,
+      "signal": null,
+      "error": null,
+      "passed": true
+    },
+    {
+      "name": "framework-tests",
+      "exit_code": 0,
+      "signal": null,
+      "error": null,
+      "passed": true
+    },
+    {
+      "name": "catalog-tests",
+      "exit_code": 0,
+      "signal": null,
+      "error": null,
+      "passed": true
+    },
+    {
+      "name": "diff-check",
+      "exit_code": 0,
+      "signal": null,
+      "error": null,
+      "passed": true
+    }
+  ],
+  "boundaries": {
+    "external_url_fetched": false,
+    "foreign_receipt_format_supported": false,
+    "aer1_conformance_tested": false,
+    "model_summary_checked": false,
+    "submission_or_polling_implemented": false,
+    "persistent_ledger_implemented": false,
+    "receiver_or_database_tested": false,
+    "production_changed": false,
+    "independent_signoff": false,
+    "full_repository_ci_run": false
+  },
+  "source_hashes_lf_normalized": {
+    "src/odap_integrations/evidence.py": "9f38d535e6ba478836da4983ab422f09894b2a26af2f44aa130438e2706f2fc2",
+    "src/odap_integrations/langchain.py": "3e39455931a854a9fb84e148816788bbe0b14e2840f03d762f095781d487ba5c",
+    "src/odap_integrations/llamaindex.py": "ba6e35b1dcc5ce40b2f5b058e8be3e4cc28fb37026d762ac8dcb5f8727f730e4",
+    "tests/test_references.py": "ec2c7a2b4bc7b9845cd206c063e24193fb13795f0aa3003d6e57a6b79ef2b7b1",
+    "catalog_tests/test_attempts.py": "2023e528e8f5c456ec1b298ec1af452112210e3b2900d9d187dd2012ae6c4bba"
+  },
+  "initial_sandbox_attempt": {
+    "completed": false,
+    "passed": false,
+    "reason": "Stalled during first framework test and explicitly terminated; full native run completed separately"
+  }
+}

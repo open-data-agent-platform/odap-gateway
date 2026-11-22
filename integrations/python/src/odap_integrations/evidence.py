@@ -20,6 +20,8 @@ DESCRIPTION = (
     "or confirm that a current query has stopped."
 )
 _ID = re.compile(r"[A-Za-z0-9_-]{1,128}", re.ASCII)
+EVIDENCE_REFERENCE_PATTERN = r"^[\x21-\x7e]{1,512}$"
+_REFERENCE = re.compile(EVIDENCE_REFERENCE_PATTERN, re.ASCII)
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}", re.ASCII)
 _OUTPUT_LIMIT = 16 * 1024
 if sys.platform == "win32":
@@ -38,6 +40,11 @@ class EvidenceError(Exception):
 
 def _identifier(value: object) -> bool:
     return isinstance(value, str) and _ID.fullmatch(value) is not None
+
+
+def _reference(value: object) -> bool:
+    # Opaque exact-match key only: never normalize, dereference or pass to a child.
+    return isinstance(value, str) and _REFERENCE.fullmatch(value) is not None
 
 
 @dataclass(frozen=True)
@@ -95,7 +102,7 @@ class EvidenceVerifier:
         if not executable or not script.is_file():
             raise ValueError("Built Gateway verifier and Node executable are required")
         if not sources or any(
-            not _identifier(key) or not isinstance(value, EvidenceSource)
+            not _reference(key) or not isinstance(value, EvidenceSource)
             for key, value in sources.items()
         ):
             raise ValueError("Invalid host evidence registry")
@@ -229,7 +236,7 @@ class EvidenceVerifier:
         return report
 
     async def _invoke(self, evidence_ref: str, correlation_id: str) -> dict:
-        if not _identifier(evidence_ref) or not _identifier(correlation_id):
+        if not _reference(evidence_ref) or not _identifier(correlation_id):
             raise EvidenceError("invalid_tool_input")
         source = self._sources.get(evidence_ref)
         if source is None:

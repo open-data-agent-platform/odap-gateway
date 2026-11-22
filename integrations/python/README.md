@@ -43,10 +43,52 @@ These paths refer only to the repository's synthetic fixture. In an application,
 the host must first authenticate the caller and authorize the artifacts it puts
 in that caller's registry. An evidence reference is a lookup key, not an access
 token. No global registry, file discovery, credentials, or login fallback is
-provided. Agents cannot supply a path, executable, pin, tenant or audience.
+provided. Agents cannot choose source files, executables, pins, tenants or audiences.
 Configure the optional `audience` on `EvidenceSource` for delegated evidence.
 The pin must be independently trusted; computing it from an untrusted bundle
 and immediately trusting it establishes nothing.
+
+### Opaque references
+
+Registry keys and `evidence_ref` accept 1-512 printable ASCII characters
+(`!` through `~`, without spaces or control characters). UUIDs, URN-shaped
+external receipt labels and URL-shaped labels are supported only as exact,
+case-sensitive keys. There is no trimming, URL fetching, percent decoding,
+path resolution or format detection. A path-shaped key cannot select a file;
+only the host's `EvidenceSource` selects the local files. Unknown references
+fail before a verifier process is started. Correlation, tenant, intent and
+audience identifiers retain their original 1-128 `[A-Za-z0-9_-]` constraint.
+
+```python
+external_ref = 'urn:external-receipt:9007199254740993/revision%2F1#saved'
+verifier = EvidenceVerifier(
+    root / 'dist/evidence/scripts/verify-settled-evidence.js',
+    {external_ref: EvidenceSource(
+        root / 'tests/fixtures/settled-job.json',
+        root / 'tests/pins/settled-job.sha256', 't', 'i',
+    )},
+)
+result = await verifier.verify(external_ref, 'request_1')
+```
+
+This synthetic label is not a claim about any external receipt specification.
+The result's `evidenceRef` echoes the lookup label, while `receiptId`, `digest`
+and `recordedOutcome` still describe the pinned ODAP artifact. Registering an
+AER-1 or other external ID does not verify its associated external record,
+prove the mapping, or make that record an accepted ODAP bundle. Foreign-format
+payloads remain rejected. No AER-1 conformance claim is made.
+
+The host owns authorization and any alias mapping. Labels appear in tool
+results and possibly framework traces, so use non-secret identifiers, not
+credentials or signed URLs; render them as untrusted data. This change adds
+neither an external resolver nor persistent verification history. A consuming
+agent must still distinguish `status: verified` from `recordedOutcome` and
+must not infer successful query delivery from a successful consistency check.
+
+Reproducible coverage is in [`tests/test_references.py`](tests/test_references.py)
+and the catalog reader regression. The bounded local run is recorded in
+[`REFERENCE_VALIDATION.json`](REFERENCE_VALIDATION.json); it is not a release,
+full repository CI result, external format conformance score or server acceptance.
 
 ```python
 result = await verifier.verify('9007199254740993', '9223372036854775807')

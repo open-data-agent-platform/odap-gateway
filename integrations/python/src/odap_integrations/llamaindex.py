@@ -6,12 +6,18 @@ from typing import Any
 from llama_index.core.tools import AsyncBaseTool, ToolMetadata, ToolOutput
 from pydantic import BaseModel, ConfigDict, Field
 
-from .evidence import DESCRIPTION, NAME, EvidenceError, EvidenceVerifier
+from .evidence import (
+    DESCRIPTION,
+    EVIDENCE_REFERENCE_PATTERN,
+    NAME,
+    EvidenceError,
+    EvidenceVerifier,
+)
 
 
 class EvidenceInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    evidence_ref: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
+    evidence_ref: str = Field(pattern=EVIDENCE_REFERENCE_PATTERN)
     correlation_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
 
 
