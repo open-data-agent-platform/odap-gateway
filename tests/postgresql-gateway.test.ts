@@ -33,6 +33,25 @@ describe("authenticated PostgreSQL REST/MCP host hook", { timeout: 30000 }, () =
   });
   afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
+  it.each([false, true])("exports missing-release denial only to a current tenant owner (MCP=%s)", async mcp => {
+    await call("request", { requestId: "missing-request", releaseId: "missing", action: pgAction });
+    const attemptId = (await db().prepare("SELECT attempt_id FROM missing_release_denials").first<{ attempt_id: string }>())!.attempt_id;
+    const response = await call("export-denial", { attemptId }, "owner", "tenant-a", mcp), body = await response.json();
+    expect(response.status).toBe(200); expect(response.headers.get("Cache-Control")).toBe("no-store");
+    const bundle = mcp ? JSON.parse(body.result.content[0].text) : body.result;
+    expect(JSON.parse(bundle.json).receipt).toMatchObject({ outcome: "denied", contractId: null, semanticReleaseId: null });
+    for (const [principal, tenant] of [["reader", "tenant-a"], ["reviewer", "tenant-a"], ["owner", "tenant-b"]]) {
+      const refused = await (await call("export-denial", { attemptId }, principal, tenant, mcp)).json();
+      expect(mcp ? refused.result.isError : refused.ok).toBe(mcp);
+      expect(JSON.stringify(refused)).not.toContain(attemptId);
+    }
+    const extra = await (await call("export-denial", { attemptId, principalId: "google:owner" }, "owner", "tenant-a", mcp)).json();
+    expect(mcp ? extra.result.isError : extra.ok).toBe(mcp);
+    await pgRun(db(), "UPDATE control_memberships SET role='reader' WHERE tenant_id='tenant-a' AND principal_id='google:owner'");
+    const revoked = await (await call("export-denial", { attemptId }, "owner", "tenant-a", mcp)).json();
+    expect(mcp ? revoked.result.isError : revoked.ok).toBe(mcp); expect(resolver).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])("exports owner-bound evidence through the shared command without provider access (MCP=%s)", async mcp => {
     const database = db(); await approvePostgresFixture(database);
     const { row } = await preparePostgresDispatch(pgAccess(database), "request");
@@ -133,7 +152,7 @@ describe("authenticated PostgreSQL REST/MCP host hook", { timeout: 30000 }, () =
       headers: { Origin: "https://gateway.test", "Content-Type": "application/json", Cookie: await cookie("reader") },
       body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/list" }) }));
     const body = await response.json();
-    expect(body.result.tools).toHaveLength(17);
+    expect(body.result.tools).toHaveLength(18);
     expect(body.result.tools.map((t: { name: string }) => t.name)).not.toContain("postgresql_observe");
     expect(body.result.tools.find((t: { name: string }) => t.name === "postgresql_execute").inputSchema)
       .toEqual({ type: "object", properties: { requestId: { type: "string" } }, required: ["requestId"], additionalProperties: false });

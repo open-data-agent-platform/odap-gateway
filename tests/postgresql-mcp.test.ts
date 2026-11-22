@@ -16,6 +16,7 @@ import { revokePostgresDelegation } from "../lib/postgresql-agent";
 import { pgAccess } from "./fixtures/postgresql-control";
 import { claimPostgresRead, preparePostgresDispatch } from "../lib/postgresql-control";
 import { verifyPostgresEvidence } from "../lib/postgresql-evidence";
+import { verifyPostgresDenialEvidence } from "../lib/postgresql-denial-evidence";
 
 const origin = "https://gateway.test", secret = "synthetic-mcp-host-only";
 let directory: string, store: ReturnType<typeof openPostgresSqliteControl>, cookie: string;
@@ -45,6 +46,25 @@ async function client(agent = false, modern = false, tenant = "tenant-a", header
 function text(result: { content?: unknown }) {
   return (result.content as { type: string; text: string }[])[0].text;
 }
+it.each([false, true])("verifies owner denial export through the official MCP client without query access (modern=%s)", async modern => {
+  const reader = (await client(false, modern)).client;
+  expect((await reader.callTool({ name: "postgresql_request", arguments: {
+    requestId: "denied-request", releaseId: "missing", action: pgAction } })).isError).toBe(true);
+  const attemptId = await store.db.prepare("SELECT attempt_id FROM missing_release_denials").first<string>("attempt_id");
+  expect((await reader.callTool({ name: "postgresql_export_denial", arguments: { attemptId } })).isError).toBe(true);
+  const ownerCookie = SESSION_COOKIE + "=" + await signAuthPayload({ provider: "google", providerId: "owner",
+    email: "synthetic@example.test", name: "Synthetic", expiresAt: Date.now() + 600000 }, secret);
+  const owner = (await client(false, modern, "tenant-a", { Origin: origin, Cookie: ownerCookie })).client;
+  const result = await owner.callTool({ name: "postgresql_export_denial", arguments: { attemptId } });
+  expect(result.isError).toBe(false); const bundle = JSON.parse(text(result));
+  expect(await verifyPostgresDenialEvidence(bundle.json, { tenantId: "tenant-a", attemptId: attemptId! }, bundle.digest))
+    .toMatchObject({ consistent: true, recordedDecision: "denied", issuerAuthenticated: false, executionVerified: false });
+  const agent = (await client(true, modern)).client;
+  expect((await agent.callTool({ name: "postgresql_export_denial", arguments: { attemptId } })).isError).toBe(true);
+  await pgRun(store.db, "UPDATE control_memberships SET role='reader' WHERE tenant_id='tenant-a' AND principal_id='google:owner'");
+  expect((await owner.callTool({ name: "postgresql_export_denial", arguments: { attemptId } })).isError).toBe(true);
+  expect(resolve).not.toHaveBeenCalled();
+});
 it.each([false, true])("records missing-release denial without disclosing existence through official MCP (modern=%s)", async modern => {
   await pgRun(store.db, "UPDATE postgresql_source_heads SET active=0 WHERE tenant_id='tenant-a'");
   const c = (await client(false, modern)).client;

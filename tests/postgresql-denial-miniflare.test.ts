@@ -4,6 +4,7 @@ import type { D1Database } from "../lib/d1";
 import { jobSqlite } from "./fixtures/job-sqlite";
 import { seedPostgresControl } from "./fixtures/postgresql-control";
 import { postgresDenialCases } from "./fixtures/postgresql-denial-cases";
+import { postgresDenialExportCases } from "./fixtures/postgresql-denial-export-cases";
 
 let mf: Miniflare, db: D1Database, statements: string[], sequence = 0;
 describe("PostgreSQL pre-approval denial on native D1", { timeout: 30000 }, () => {
@@ -18,4 +19,5 @@ describe("PostgreSQL pre-approval denial on native D1", { timeout: 30000 }, () =
   }, 30000);
   afterAll(async () => { await mf?.dispose(); });
   postgresDenialCases(() => db);
+  postgresDenialExportCases(() => db);
 });

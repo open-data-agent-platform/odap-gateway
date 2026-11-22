@@ -684,8 +684,38 @@ receipt IDs are not exposed as an existence probe. A concurrent publication or a
 failed/lost audit acknowledgement still refuses the request without automatic
 execution or retry. This is a bounded missing-release audit path, not a claim that
 all malformed, unauthenticated or other policy refusals have durable receipts.
-The claim export below does not include these pre-approval attempts; they remain
-in the existing tenant-scoped receipt/audit storage.
+The claim export below does not include these pre-approval attempts. A separate
+human REST command `export-denial` with `{ "attemptId": "pg-missing-..." }`, or
+the standard MCP tool `postgresql_export_denial`, exports one stored missing-release
+denial. Use the server-assigned attempt ID from the authorized tenant ledger,
+not the caller's request ID. This command does not list or discover attempts and
+does not change the indistinguishable request-error response described above.
+
+Any currently active owner of that tenant may export this denial: there is no
+source owner for a release that did not exist. Readers, reviewers, inactive or
+downgraded owners, other tenants and Agents are refused. Membership is checked
+within the same read-only snapshot. Later publication or deactivation of the
+original requester does not erase historical evidence or reauthorize execution.
+The response is `{ "json": "...", "digest": "sha256:..." }` and contains only
+the denial attribution/action digest, original receipt and its creation event.
+It excludes action parameter values, SQL, credentials and provider access. Treat
+the identity, requested release and digest as tenant-confidential metadata.
+
+```sh
+npm run evidence:build
+npm run evidence:verify-postgresql-denial -- denial.json TENANT ATTEMPT expected.sha256
+```
+
+The detached denial verifier requires an independently retained pin and exact
+tenant/attempt scope. It accepts at most 16 KiB of canonical UTF-8 JSON and checks
+the receipt's null contract/release links, recorded denial, actor and timestamps.
+Malformed, contradictory, noncanonical or pin-mismatched records are refused.
+Exit codes are 0 (consistent with the pin), 1 (invalid input), and 2 (usage).
+The local profile `odap.gateway.local.postgresql-denial-evidence.v1` does not
+change the underlying receipt schema or the ODAP specification. Verification
+does not authenticate an issuer, verify omitted action values, prove actual
+non-execution, grant authority or establish completeness of all denied requests.
+It is not a full audit export, custody policy or independent acceptance.
 
 The source's named, currently active owner can call the human REST command
 `export-evidence` with `{ "requestId": "..." }` or the standard MCP tool

@@ -8,6 +8,7 @@ import { openPostgresSqliteControl } from "../integrations/postgresql/sqlite-con
 import { initializePostgresLocalFixture } from "./fixtures/postgresql-local-store";
 import { pgAction, pgRun, publishPostgresFixture, seedPostgresControl } from "./fixtures/postgresql-control";
 import { postgresDenialCases } from "./fixtures/postgresql-denial-cases";
+import { postgresDenialExportCases } from "./fixtures/postgresql-denial-export-cases";
 
 let directory: string, store: ReturnType<typeof openPostgresSqliteControl>;
 describe("PostgreSQL pre-approval denial on native SQLite", () => {
@@ -18,6 +19,7 @@ describe("PostgreSQL pre-approval denial on native SQLite", () => {
   });
   afterEach(async () => { store?.close(); await rm(directory, { recursive: true, force: true }); });
   postgresDenialCases(() => store.db);
+  postgresDenialExportCases(() => store.db);
   it.each([false, true])("keeps missing and retired refusals indistinguishable at the transport (MCP=%s)", async mcp => {
     await publishPostgresFixture(store.db);
     await pgRun(store.db, "UPDATE postgresql_source_heads SET active=0 WHERE tenant_id='tenant-a'");

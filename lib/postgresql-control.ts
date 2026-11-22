@@ -5,6 +5,7 @@ import { exactFields, routeId } from "./control-command-request";
 import { promoteSemanticRevision, retireSemanticRelease } from "./semantic-candidate-storage";
 import { postgresAgentAudience, postgresAgentBinding, type PostgresAgentProof } from "./postgresql-agent";
 import { exportPostgresEvidence } from "./postgresql-evidence-export";
+import { exportPostgresDenialEvidence } from "./postgresql-denial-evidence-export";
 import { recordPostgresMissingRelease } from "./postgresql-preapproval-denial";
 
 export class PostgresControlDenied extends Error {
@@ -304,6 +305,7 @@ export async function postgresControlCommand(access: ControlAccess, command: str
     case "approve-read": { const d = fields(["requestId", "releaseId", "sourceId", "requesterId", "reviewedAction"]); return approvePostgresRead(access, d as Parameters<typeof approvePostgresRead>[1]); }
     case "inspect": return inspectPostgresRead(access, fields(["requestId"]).requestId as string);
     case "export-evidence": return exportPostgresEvidence(access, fields(["requestId"]).requestId as string);
+    case "export-denial": return exportPostgresDenialEvidence(access, fields(["attemptId"]).attemptId as string);
     case "stop": return stopPostgresRead(access, fields(["requestId"]).requestId as string);
     case "cancel": return cancelPostgresRead(access, fields(["requestId"]).requestId as string);
     default: throw new PostgresControlDenied();
